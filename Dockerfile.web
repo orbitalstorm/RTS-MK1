@@ -1,0 +1,33 @@
+FROM node:24-slim AS base
+WORKDIR /app
+ENV NEXT_TELEMETRY_DISABLED=1
+
+FROM base AS deps
+COPY package.json package-lock.json* ./
+RUN npm install --include=dev --no-audit --no-fund
+
+FROM base AS builder
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+RUN npm run build
+
+FROM base AS runner
+ENV NODE_ENV=production
+ENV PORT=4300
+ENV WEB_PORT=4300
+ENV HOSTNAME="0.0.0.0"
+ENV PROJECT_NAME="RTS-MK1"
+ENV PUBLIC_DNS_DOMAIN="rts-mk1.orbital8.cloud"
+ENV NEXT_PUBLIC_APP_URL="https://rts-mk1.orbital8.cloud"
+ENV NEXT_PUBLIC_WS_URL="wss://rts-mk1.orbital8.cloud/ws"
+ENV INTERNAL_WS_API_URL="http://rts-mk1-ws:4301"
+ENV RTS_DB_PATH="/app/data/rts-mk1.sqlite"
+
+RUN mkdir -p /app/data && chown -R node:node /app
+
+COPY --from=builder --chown=node:node /app/.next/standalone ./
+COPY --from=builder --chown=node:node /app/.next/static ./.next/static
+
+USER node
+EXPOSE 4300
+CMD ["node", "server.js"]

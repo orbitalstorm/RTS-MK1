@@ -1,0 +1,101 @@
+services:
+  rts-mk1-db-init:
+    image: node:24-slim
+    container_name: rts-mk1-db-init
+    user: "root"
+    command: ["sh", "-c", "mkdir -p /app/data && chown -R 1000:1000 /app/data"]
+    volumes:
+      - rts_mk1_data:/app/data
+    networks:
+      - ai-network
+
+  rts-mk1-db:
+    image: node:24-slim
+    container_name: rts-mk1-db
+    restart: unless-stopped
+    user: "node"
+    working_dir: /app/data
+    command: ["node", "-e", "setInterval(() => {}, 3600000)"]
+    volumes:
+      - rts_mk1_data:/app/data
+    depends_on:
+      rts-mk1-db-init:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 128M
+    networks:
+      - ai-network
+
+  rts-mk1-ws:
+    build:
+      context: .
+      dockerfile: Dockerfile.ws
+    image: rts-mk1-ws:v1.0.0
+    container_name: rts-mk1-ws
+    restart: unless-stopped
+    user: "node"
+    environment:
+      - NODE_ENV=production
+      - WS_PORT=4301
+      - PROJECT_NAME=RTS-MK1
+      - PUBLIC_DNS_DOMAIN=rts-mk1.orbital8.cloud
+      - NEXT_PUBLIC_APP_URL=https://rts-mk1.orbital8.cloud
+      - NEXT_PUBLIC_WS_URL=wss://rts-mk1.orbital8.cloud/ws
+      - INTERNAL_WS_API_URL=http://rts-mk1-ws:4301
+      - RTS_DB_PATH=/app/data/rts-mk1.sqlite
+    volumes:
+      - rts_mk1_data:/app/data
+    expose:
+      - "4301"
+    depends_on:
+      - rts-mk1-db
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 512M
+    networks:
+      - ai-network
+
+  rts-mk1-web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    image: rts-mk1-web:v1.0.0
+    container_name: rts-mk1-web
+    restart: unless-stopped
+    user: "node"
+    environment:
+      - NODE_ENV=production
+      - PORT=4300
+      - WEB_PORT=4300
+      - PROJECT_NAME=RTS-MK1
+      - PUBLIC_DNS_DOMAIN=rts-mk1.orbital8.cloud
+      - NEXT_PUBLIC_APP_URL=https://rts-mk1.orbital8.cloud
+      - NEXT_PUBLIC_WS_URL=wss://rts-mk1.orbital8.cloud/ws
+      - INTERNAL_WS_API_URL=http://rts-mk1-ws:4301
+      - RTS_DB_PATH=/app/data/rts-mk1.sqlite
+    volumes:
+      - rts_mk1_data:/app/data
+    expose:
+      - "4300"
+    depends_on:
+      - rts-mk1-db
+      - rts-mk1-ws
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 512M
+    networks:
+      - ai-network
+
+volumes:
+  rts_mk1_data:
+
+networks:
+  ai-network:
+    external: true

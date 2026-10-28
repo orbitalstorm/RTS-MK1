@@ -1,0 +1,11 @@
+rts-mk1.orbital8.cloud {
+    encode gzip zstd
+
+    handle /ws* {
+        reverse_proxy rts-mk1-ws:4301
+    }
+
+    handle {
+        reverse_proxy rts-mk1-web:4300
+    }
+}
