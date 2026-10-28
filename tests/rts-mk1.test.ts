@@ -11,7 +11,11 @@ import {
 import { RtsSimulation } from "../src/engine/simulation";
 import { LobbyManager } from "../src/server/lobby-manager";
 import { TacticalCamera } from "../src/renderer/camera";
-import { BattlefieldVfxManager } from "../src/renderer/vfx-manager";
+import {
+  BattlefieldVfxManager,
+  computeCraterFadeAlpha,
+  CRATER_LIFETIME_MS,
+} from "../src/renderer/vfx-manager";
 import {
   AI_ATTACK_GRACE_PERIOD_TICKS,
   APP_VERSION,
@@ -276,7 +280,7 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
   });
 
   it("v1.2.0 — supports Game Juice camera shake, shortest-arc 16-angle interpolation, and 2x Hi-DPI sprite scale", () => {
-    expect(APP_VERSION).toBe("1.5.0");
+    expect(APP_VERSION).toBe("1.5.1");
     expect(SPRITE_ATLAS_SCALE).toBe(2);
 
     // Zero trauma produces zero offset
@@ -762,5 +766,66 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
         selectedUnitCount: 2,
       })
     ).toBe("ATTACK_GROUND");
+  });
+
+  it("v1.5.1 — supports uninterrupted multi-click continuous placement of Walls, Sandbags, and Concrete Slabs + progressive crater fade-out without reverting terrain nature", () => {
+    const sim = new RtsSimulation("test_v151_continuous_and_craters", [
+      { playerId: "p1", commanderName: "Alpha", faction: "GDI", isAi: false },
+      { playerId: "p2", commanderName: "Beta", faction: "NOD", isAi: false },
+    ]);
+
+    // 1. Uninterrupted consecutive placement of CONCRETE_WALL, SANDBAG_WALL, and CONCRETE_SLAB across multiple ticks
+    const initialCredits = sim.getPlayerState("p1")!.credits;
+
+    // Place 4 CONCRETE_WALL segments in a row across ticks
+    for (let dx = 0; dx < 4; dx++) {
+      expect(sim.issuePlaceBuilding("p1", "DEFENSE", "CONCRETE_WALL", 8 + dx, 11)).toBe(true);
+      sim.stepTick();
+    }
+    // Place 4 SANDBAG_WALL segments in a row across ticks
+    for (let dx = 0; dx < 4; dx++) {
+      expect(sim.issuePlaceBuilding("p1", "DEFENSE", "SANDBAG_WALL", 8 + dx, 12)).toBe(true);
+      sim.stepTick();
+    }
+    // Place 4 CONCRETE_SLAB tiles in a row across ticks
+    for (let dx = 0; dx < 4; dx++) {
+      expect(sim.issuePlaceBuilding("p1", "BUILDING", "CONCRETE_SLAB", 8 + dx, 13)).toBe(true);
+      sim.stepTick();
+    }
+
+    const expectedSpent =
+      4 * BUILDINGS.CONCRETE_WALL.cost +
+      4 * BUILDINGS.SANDBAG_WALL.cost +
+      4 * BUILDINGS.CONCRETE_SLAB.cost;
+    expect(sim.getPlayerState("p1")!.credits).toBe(initialCredits - expectedSpent);
+
+    for (let dx = 0; dx < 4; dx++) {
+      expect(sim.terrainGrid[13 * 48 + (8 + dx)]).toBe(TERRAIN_KIND.CONCRETE_SLAB);
+    }
+
+    // 2. Progressive fade-out and disappearance of black ground impact stains (craters)
+    expect(CRATER_LIFETIME_MS).toBe(12_000);
+    const alphaStart = computeCraterFadeAlpha(0, CRATER_LIFETIME_MS);
+    const alphaMid = computeCraterFadeAlpha(CRATER_LIFETIME_MS * 0.5, CRATER_LIFETIME_MS);
+    const alphaLate = computeCraterFadeAlpha(CRATER_LIFETIME_MS * 0.85, CRATER_LIFETIME_MS);
+    const alphaExpired = computeCraterFadeAlpha(CRATER_LIFETIME_MS, CRATER_LIFETIME_MS);
+
+    expect(alphaStart).toBeGreaterThan(0.65);
+    expect(alphaMid).toBeLessThan(alphaStart);
+    expect(alphaLate).toBeLessThan(alphaMid);
+    expect(alphaLate).toBeGreaterThan(0);
+    expect(alphaExpired).toBe(0);
+
+    // 3. Degraded terrain stratum (Grass -> Dirt -> Stone) never reverts back to Grass over time
+    const impactTileIdx = 20 * 48 + 20;
+    sim.terrainGrid[impactTileIdx] = TERRAIN_KIND.GRASS;
+    expect(sim.degradeTerrainAtImpact(20, 20, "SHELL", false)).toBe(true);
+    expect(sim.terrainGrid[impactTileIdx]).toBe(TERRAIN_KIND.DIRT);
+
+    for (let t = 0; t < 300; t++) {
+      sim.stepTick();
+    }
+    // Dirt remains Dirt permanently (never reverts to Grass)
+    expect(sim.terrainGrid[impactTileIdx]).toBe(TERRAIN_KIND.DIRT);
   });
 });

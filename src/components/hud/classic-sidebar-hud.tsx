@@ -471,7 +471,7 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
                     !unlocked ||
                     (!isRepeatableBuildingKind(item.kind as BuildingKind) &&
                       activeSlot.activeItem !== null) ||
-                    !canAfford
+                    (!canAfford && placementBuilding?.kind !== item.kind)
                   }
                   onClick={() => {
                     globalAudioMixer.playUiClick();
@@ -479,16 +479,14 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
                       (activeTab === "BUILDING" || activeTab === "DEFENSE") &&
                       isRepeatableBuildingKind(item.kind as BuildingKind)
                     ) {
-                      if (activeSlot.activeItem === null) {
-                        triggerProduction(
-                          activeTab,
-                          item.kind as BuildingKind | UnitKind
-                        );
+                      if (placementBuilding?.kind === item.kind) {
+                        setPlacementBuilding(null);
+                      } else {
+                        setPlacementBuilding({
+                          category: activeTab,
+                          kind: item.kind as BuildingKind,
+                        });
                       }
-                      setPlacementBuilding({
-                        category: activeTab,
-                        kind: item.kind as BuildingKind,
-                      });
                       return;
                     }
                     triggerProduction(

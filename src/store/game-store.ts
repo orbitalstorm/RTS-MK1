@@ -3,6 +3,7 @@
 import { create } from "zustand";
 import {
   interpolateEntityPose,
+  isRepeatableBuildingKind,
   MAP_HEIGHT_TILES,
   MAP_WIDTH_TILES,
   type BuildingKind,
@@ -505,6 +506,7 @@ function applyDelta(
       }
       if (
         placementBuilding?.category === cat &&
+        !isRepeatableBuildingKind(placementBuilding.kind) &&
         (!slot?.readyToPlace || !slot.activeItem)
       ) {
         placementBuilding = null;

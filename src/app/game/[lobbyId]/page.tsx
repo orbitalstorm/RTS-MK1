@@ -57,11 +57,20 @@ import { BattlefieldVfxManager } from "../../../renderer/vfx-manager";
 import { renderTacticalWorld } from "../../../renderer/world-renderer";
 import { useRtsGameStore, type RtsGameStoreState } from "../../../store/game-store";
 
+interface PendingTilePlacement {
+  tileX: number;
+  tileY: number;
+  kind: BuildingKind;
+  expiresAtMs: number;
+}
+
 function canPlaceBuildingOnGrid(
   st: RtsGameStoreState,
   buildingKind: BuildingKind,
   tileX: number,
-  tileY: number
+  tileY: number,
+  pendingPlacements?: ReadonlyMap<string, PendingTilePlacement>,
+  nowMs = performance.now()
 ): boolean {
   const spec = BUILDINGS[buildingKind];
   if (
@@ -75,12 +84,25 @@ function canPlaceBuildingOnGrid(
 
   for (let dy = 0; dy < spec.footprintH; dy++) {
     for (let dx = 0; dx < spec.footprintW; dx++) {
-      const idx = (tileY + dy) * MAP_WIDTH_TILES + (tileX + dx);
+      const tx = tileX + dx;
+      const ty = tileY + dy;
+      const idx = ty * MAP_WIDTH_TILES + tx;
       if (st.terrainGrid[idx] === 2) {
         return false;
       }
       if (buildingKind === "CONCRETE_SLAB" && st.terrainGrid[idx] === 5) {
         return false;
+      }
+      if (pendingPlacements) {
+        const pending = pendingPlacements.get(`${tx},${ty}`);
+        if (pending && nowMs < pending.expiresAtMs) {
+          if (buildingKind === "CONCRETE_SLAB" && pending.kind === "CONCRETE_SLAB") {
+            return false;
+          }
+          if (buildingKind !== "CONCRETE_SLAB" && pending.kind !== "CONCRETE_SLAB") {
+            return false;
+          }
+        }
       }
     }
   }
@@ -114,6 +136,20 @@ function canPlaceBuildingOnGrid(
         uy < tileY + spec.footprintH
       ) {
         return false;
+      }
+    }
+  }
+
+  if (!withinBaseRadius && pendingPlacements) {
+    for (const pending of pendingPlacements.values()) {
+      if (nowMs < pending.expiresAtMs && pending.kind !== "CONCRETE_SLAB") {
+        const pSpec = BUILDINGS[pending.kind];
+        const bx = pending.tileX + pSpec.footprintW * 0.5;
+        const by = pending.tileY + pSpec.footprintH * 0.5;
+        if (Math.hypot(cx - bx, cy - by) <= BASE_BUILD_RADIUS_TILES) {
+          withinBaseRadius = true;
+          break;
+        }
       }
     }
   }
@@ -158,6 +194,11 @@ export default function GameMatchPage() {
   const dragStartRef = useRef<{ x: number; y: number } | null>(null);
   const dragCurrRef = useRef<{ x: number; y: number } | null>(null);
   const hoverTileRef = useRef<{ tileX: number; tileY: number }>({ tileX: 6, tileY: 6 });
+  const pendingPlacedTilesRef = useRef<Map<string, PendingTilePlacement>>(new Map());
+  const lastDragPlacedTileRef = useRef<{ tileX: number; tileY: number }>({
+    tileX: -1,
+    tileY: -1,
+  });
   const pointerCanvasRef = useRef<{ x: number; y: number; inside: boolean }>({
     x: -1,
     y: -1,
@@ -374,7 +415,14 @@ export default function GameMatchPage() {
             const tx = hoverTileRef.current.tileX;
             const ty = hoverTileRef.current.tileY;
             const myEcon = st.playersEconomy.get(st.playerId);
-            const valid = canPlaceBuildingOnGrid(st, bKind, tx, ty);
+            const valid = canPlaceBuildingOnGrid(
+              st,
+              bKind,
+              tx,
+              ty,
+              pendingPlacedTilesRef.current,
+              nowMs
+            );
             placementPreview = {
               faction: myEcon?.faction ?? st.faction,
               buildingKind: bKind,
@@ -516,16 +564,31 @@ export default function GameMatchPage() {
     // Left-click: Place building, Repair structure, Sell structure, Force-Attack Ground, or start selection box
     if (st.placementBuilding) {
       const bKind = st.placementBuilding.kind;
+      const spec = BUILDINGS[bKind];
+      const repeatable = isRepeatableBuildingKind(bKind);
+      const nowMs = performance.now();
       const valid = canPlaceBuildingOnGrid(
         st,
         bKind,
         tileX,
-        tileY
+        tileY,
+        pendingPlacedTilesRef.current,
+        nowMs
       );
       if (!valid) {
         useRtsGameStore.setState({
           evaBannerText:
             "EVA : ZONE DE DÉPLOIEMENT INVALIDE — CLIQUEZ SUR UN EMPLACEMENT VERT PRÈS DE LA BASE",
+        });
+        return;
+      }
+      const myEcon = st.playersEconomy.get(st.playerId);
+      const qSlot = myEcon?.queues.find((q) => q.category === st.placementBuilding?.category);
+      const paidInQueue = qSlot?.activeItem === bKind;
+      if (repeatable && !paidInQueue && (myEcon?.credits ?? 0) < spec.cost) {
+        useRtsGameStore.setState({
+          evaBannerText:
+            "EVA : CRÉDITS INSUFFISANTS POUR POSER CET ÉLÉMENT (CLIC DROIT POUR DÉSÉLECTIONNER L'OUTIL)",
         });
         return;
       }
@@ -539,11 +602,17 @@ export default function GameMatchPage() {
         tileX,
         tileY,
       });
-      const myEcon = st.playersEconomy.get(st.playerId);
-      const spec = BUILDINGS[bKind];
-      const keepToolActive =
-        isRepeatableBuildingKind(bKind) && (myEcon?.credits ?? 0) >= spec.cost;
-      if (!keepToolActive) {
+      if (bKind === "CONCRETE_SLAB") {
+        st.terrainGrid[tileY * MAP_WIDTH_TILES + tileX] = 5;
+      }
+      pendingPlacedTilesRef.current.set(`${tileX},${tileY}`, {
+        tileX,
+        tileY,
+        kind: bKind,
+        expiresAtMs: nowMs + 350,
+      });
+      lastDragPlacedTileRef.current = { tileX, tileY };
+      if (!repeatable) {
         setPlacementBuilding(null);
       }
       return;
@@ -622,17 +691,63 @@ export default function GameMatchPage() {
     const sx = e.clientX - rect.left;
     const sy = e.clientY - rect.top;
     pointerCanvasRef.current = { x: sx, y: sy, inside: true };
-    hoverTileRef.current = cameraRef.current.screenToTile(sx, sy);
+    const { tileX, tileY } = cameraRef.current.screenToTile(sx, sy);
+    hoverTileRef.current = { tileX, tileY };
     if (dragStartRef.current) {
       dragCurrRef.current = { x: sx, y: sy };
+    }
+    if ((e.buttons & 1) === 1) {
+      const st = useRtsGameStore.getState();
+      if (
+        st.placementBuilding &&
+        isRepeatableBuildingKind(st.placementBuilding.kind) &&
+        (tileX !== lastDragPlacedTileRef.current.tileX ||
+          tileY !== lastDragPlacedTileRef.current.tileY)
+      ) {
+        const bKind = st.placementBuilding.kind;
+        const spec = BUILDINGS[bKind];
+        const nowMs = performance.now();
+        const myEcon = st.playersEconomy.get(st.playerId);
+        const qSlot = myEcon?.queues.find((q) => q.category === st.placementBuilding?.category);
+        const paidInQueue = qSlot?.activeItem === bKind;
+        if (
+          (paidInQueue || (myEcon?.credits ?? 0) >= spec.cost) &&
+          canPlaceBuildingOnGrid(st, bKind, tileX, tileY, pendingPlacedTilesRef.current, nowMs)
+        ) {
+          globalAudioMixer.playUiClick();
+          sendMessage({
+            type: "COMMAND_PLACE_BUILDING",
+            lobbyId,
+            playerId,
+            category: st.placementBuilding.category,
+            buildingKind: bKind,
+            tileX,
+            tileY,
+          });
+          if (bKind === "CONCRETE_SLAB") {
+            st.terrainGrid[tileY * MAP_WIDTH_TILES + tileX] = 5;
+          }
+          pendingPlacedTilesRef.current.set(`${tileX},${tileY}`, {
+            tileX,
+            tileY,
+            kind: bKind,
+            expiresAtMs: nowMs + 350,
+          });
+          lastDragPlacedTileRef.current = { tileX, tileY };
+        }
+      }
     }
   }
 
   function handleCanvasMouseLeave(): void {
     pointerCanvasRef.current.inside = false;
+    lastDragPlacedTileRef.current = { tileX: -1, tileY: -1 };
   }
 
   function handleCanvasMouseUp(e: React.MouseEvent<HTMLCanvasElement>): void {
+    if (e.button === 0) {
+      lastDragPlacedTileRef.current = { tileX: -1, tileY: -1 };
+    }
     if (e.button !== 0 || !dragStartRef.current || !dragCurrRef.current) return;
     const start = dragStartRef.current;
     const end = dragCurrRef.current;
@@ -991,13 +1106,31 @@ export default function GameMatchPage() {
     if (action === "PLACE_BUILDING" && st.placementBuilding) {
       const bKind = st.placementBuilding.kind;
       const spec = BUILDINGS[bKind];
+      const repeatable = isRepeatableBuildingKind(bKind);
+      const nowMs = performance.now();
       let deployX = tileX;
       let deployY = tileY;
-      let valid = canPlaceBuildingOnGrid(st, bKind, deployX, deployY);
+      let valid = canPlaceBuildingOnGrid(
+        st,
+        bKind,
+        deployX,
+        deployY,
+        pendingPlacedTilesRef.current,
+        nowMs
+      );
       if (!valid) {
         const centeredX = tileX - Math.floor(spec.footprintW * 0.5);
         const centeredY = tileY - Math.floor(spec.footprintH * 0.5);
-        if (canPlaceBuildingOnGrid(st, bKind, centeredX, centeredY)) {
+        if (
+          canPlaceBuildingOnGrid(
+            st,
+            bKind,
+            centeredX,
+            centeredY,
+            pendingPlacedTilesRef.current,
+            nowMs
+          )
+        ) {
           deployX = centeredX;
           deployY = centeredY;
           valid = true;
@@ -1011,6 +1144,16 @@ export default function GameMatchPage() {
         });
         return;
       }
+      const myEcon = st.playersEconomy.get(st.playerId);
+      const qSlot = myEcon?.queues.find((q) => q.category === st.placementBuilding?.category);
+      const paidInQueue = qSlot?.activeItem === bKind;
+      if (repeatable && !paidInQueue && (myEcon?.credits ?? 0) < spec.cost) {
+        useRtsGameStore.setState({
+          evaBannerText:
+            "EVA : CRÉDITS INSUFFISANTS POUR POSER CET ÉLÉMENT",
+        });
+        return;
+      }
       globalAudioMixer.playUiClick();
       sendMessage({
         type: "COMMAND_PLACE_BUILDING",
@@ -1021,10 +1164,16 @@ export default function GameMatchPage() {
         tileX: deployX,
         tileY: deployY,
       });
-      const myEcon = st.playersEconomy.get(st.playerId);
-      const keepToolActive =
-        isRepeatableBuildingKind(bKind) && (myEcon?.credits ?? 0) >= spec.cost;
-      if (!keepToolActive) {
+      if (bKind === "CONCRETE_SLAB") {
+        st.terrainGrid[deployY * MAP_WIDTH_TILES + deployX] = 5;
+      }
+      pendingPlacedTilesRef.current.set(`${deployX},${deployY}`, {
+        tileX: deployX,
+        tileY: deployY,
+        kind: bKind,
+        expiresAtMs: nowMs + 350,
+      });
+      if (!repeatable) {
         setPlacementBuilding(null);
       }
       return;

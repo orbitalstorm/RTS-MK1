@@ -2,6 +2,16 @@
 
 All notable changes to **RTS-MK1** (`https://rts-mk1.orbital8.cloud`) follow strict non-reusable `v1.x.y` versioning.
 
+## [v1.5.1] — 2026-10-28
+
+### Fixed & Changed
+- **Root-Cause Fix for Continuous Placement of Concrete Walls (`CONCRETE_WALL`), Sandbags (`SANDBAG_WALL`), and Concrete Slabs (`CONCRETE_SLAB`) (`src/store/game-store.ts`, `src/components/hud/classic-sidebar-hud.tsx`, `src/app/game/[lobbyId]/page.tsx`, `src/engine/simulation.ts`)**:
+  - Fixed `applyDelta` in `src/store/game-store.ts` which previously reset `placementBuilding = null` on the very next 20 Hz tick whenever `!slot?.readyToPlace || !slot.activeItem`. Repeatable placement tools (`isRepeatableBuildingKind`: `CONCRETE_SLAB`, `SANDBAG_WALL`, `CONCRETE_WALL`) are now preserved across all simulation ticks and consecutive clicks until the player explicitly right-clicks on the tactical map (or presses `Escape` / clicks *"Annuler Pose"*).
+  - Updated `ClassicSidebarHud` so selecting *"Poser en Continu"* activates the placement tool immediately without locking the category queue in a background build timer, and added client-side optimistic tile tracking (`pendingPlacedTilesRef`) + support for both repeated individual left-clicks and continuous left-click drag-painting across tiles.
+- **Progressive Fading & Disappearance of Ground Impact Scorch Marks Without Reverting Terrain Stratum (`src/renderer/vfx-manager.ts`, `src/engine/simulation.ts`)**:
+  - Reduced `CRATER_LIFETIME_MS` from `180,000 ms` to `12,000 ms` (`12s`) and added `computeCraterFadeAlpha()` so black ground impact stains (`craters`) smoothly fade out from full opacity down to `0%` and disappear completely once expired.
+  - Preserved permanent stratigraphic terrain degradation in `RtsSimulation` (`Herbe -> Terre -> Pierre` via `degradeTerrainAtImpact`), ensuring terrain that has changed nature never reverts back to its previous layer.
+
 ## [v1.5.0] — 2026-10-28
 
 ### Added & Changed

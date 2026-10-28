@@ -63,8 +63,23 @@ const MAX_CRATERS = 160;
 const MAX_EXPLOSIONS = 64;
 const MAX_PARTICLES = 320;
 const MAX_PROJECTILES = 96;
-const CRATER_LIFETIME_MS = 180_000;
+export const CRATER_LIFETIME_MS = 12_000;
 const MAX_SEEN_IDS = 256;
+
+export function computeCraterFadeAlpha(
+  elapsedMs: number,
+  lifetimeMs = CRATER_LIFETIME_MS
+): number {
+  if (elapsedMs >= lifetimeMs || lifetimeMs <= 0) return 0;
+  if (elapsedMs <= 0) return 0.72;
+  const lifeRatio = Math.max(0, Math.min(1, elapsedMs / lifetimeMs));
+  // Full impact visibility during the initial 15%, then smooth progressive fade-out to 0%
+  const fadeFactor =
+    lifeRatio <= 0.15
+      ? 1.0
+      : Math.pow(Math.max(0, 1 - (lifeRatio - 0.15) / 0.85), 1.25);
+  return fadeFactor * 0.72;
+}
 
 function worldTileToIndex(tileX: number, tileY: number): number {
   const cx = Math.max(0, Math.min(MAP_WIDTH_TILES - 1, Math.round(tileX)));
@@ -437,11 +452,10 @@ export class BattlefieldVfxManager {
         continue;
       }
 
-      const lifeRatio = Math.max(0, Math.min(1, elapsed / CRATER_LIFETIME_MS));
       const visibilityFactor =
         exploredCells.size === 0 || visibleCells.has(crater.tileIdx) ? 1.0 : 0.45;
-      const alpha = (1 - lifeRatio * 0.85) * 0.68 * visibilityFactor;
-      if (alpha <= 0.02) continue;
+      const alpha = computeCraterFadeAlpha(elapsed, CRATER_LIFETIME_MS) * visibilityFactor;
+      if (alpha <= 0.01) continue;
 
       ctx.globalAlpha = alpha;
 

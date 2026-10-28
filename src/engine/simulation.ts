@@ -546,7 +546,9 @@ export class RtsSimulation {
     if (!spec || spec.category !== category) return false;
 
     const slot = player.queues[category];
-    const paidViaQueue = slot.readyToPlace && slot.activeItem === buildingKind;
+    const paidViaQueue =
+      slot.activeItem === buildingKind &&
+      (slot.readyToPlace || isRepeatableBuildingKind(buildingKind));
     const canChainRepeat =
       !paidViaQueue &&
       isRepeatableBuildingKind(buildingKind) &&
