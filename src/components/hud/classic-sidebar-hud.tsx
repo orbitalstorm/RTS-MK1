@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import {
   Building2,
   ChevronDown,
@@ -42,7 +42,7 @@ interface ClassicSidebarHudProps {
   onCloseMobile?: () => void;
 }
 
-export function ClassicSidebarHud({
+export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
   minimapCanvasRef,
   onMinimapClickTile,
   onLeaveMatch,
@@ -53,8 +53,8 @@ export function ClassicSidebarHud({
 }: ClassicSidebarHudProps) {
   const playerId = useRtsGameStore((s) => s.playerId);
   const faction = useRtsGameStore((s) => s.faction);
-  const currEntities = useRtsGameStore((s) => s.currEntities);
-  const playersEconomy = useRtsGameStore((s) => s.playersEconomy);
+  const hudRevision = useRtsGameStore((s) => s.hudRevision);
+  const ownedBuildingsKey = useRtsGameStore((s) => s.ownedBuildingsKey);
   const placementBuilding = useRtsGameStore((s) => s.placementBuilding);
   const sellMode = useRtsGameStore((s) => s.sellMode);
   const audioMuted = useRtsGameStore((s) => s.audioMuted);
@@ -67,19 +67,26 @@ export function ClassicSidebarHud({
   const [radarCollapsed, setRadarCollapsed] = useState(false);
   const minimapDraggingRef = useRef(false);
 
-  const myEcon = playersEconomy.get(playerId);
+  // Read player economy snapshot gated by hudRevision (never re-renders on unit movement ticks)
+  const myEcon = useMemo(() => {
+    void hudRevision;
+    return useRtsGameStore.getState().playersEconomy.get(playerId);
+  }, [playerId, hudRevision]);
+
   const credits = myEcon?.credits ?? 2500;
   const maxStorage = myEcon?.maxStorage ?? 2000;
   const powerProduced = myEcon?.powerProduced ?? 100;
   const powerConsumed = myEcon?.powerConsumed ?? 40;
   const lowPower = myEcon?.lowPower ?? false;
 
-  const ownedBuildingKinds = new Set<BuildingKind>();
-  for (const ent of currEntities.values()) {
-    if (ent.ownerId === playerId && ent.entityType === "BUILDING") {
-      ownedBuildingKinds.add(ent.kind as BuildingKind);
+  const ownedBuildingKinds = useMemo(() => {
+    const set = new Set<BuildingKind>();
+    if (!ownedBuildingsKey) return set;
+    for (const part of ownedBuildingsKey.split(",")) {
+      if (part) set.add(part as BuildingKind);
     }
-  }
+    return set;
+  }, [ownedBuildingsKey]);
 
   const activeSlot = myEcon?.queues.find((q) => q.category === activeTab) ?? {
     category: activeTab,
@@ -425,4 +432,4 @@ export function ClassicSidebarHud({
       </div>
     </aside>
   );
-}
+});

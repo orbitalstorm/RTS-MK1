@@ -52,15 +52,17 @@ type CacheSurface = OffscreenCanvas | HTMLCanvasElement;
 type CacheContext = OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D;
 
 let cachedTerrainSurface: CacheSurface | null = null;
+let cachedTerrainCtx: CacheContext | null = null;
 let cachedTerrainAtlas: ProceduralSpriteAtlas | null = null;
-let cachedTerrainGridRef: readonly number[] | null = null;
 let cachedTerrainSignature = 0;
 
-function computeGridSignature(grid: readonly number[]): number {
+function computeBaseTerrainSignature(grid: readonly number[]): number {
   let hash = grid.length | 0;
   const step = Math.max(1, Math.floor(grid.length / 64));
   for (let i = 0; i < grid.length; i += step) {
-    hash = ((hash << 5) - hash + (grid[i] ?? 0)) | 0;
+    const raw = grid[i] ?? 0;
+    const baseKind = raw === 3 ? 0 : raw;
+    hash = ((hash << 5) - hash + baseKind) | 0;
   }
   return hash;
 }
@@ -73,57 +75,56 @@ function getOrBuildStaticTerrainCache(
     return null;
   }
 
-  const sig = computeGridSignature(terrainGrid);
+  const sig = computeBaseTerrainSignature(terrainGrid);
   if (
     cachedTerrainSurface !== null &&
     cachedTerrainAtlas === atlas &&
-    (cachedTerrainGridRef === terrainGrid || cachedTerrainSignature === sig)
+    cachedTerrainSignature === sig
   ) {
     return cachedTerrainSurface;
   }
 
-  let surface: CacheSurface | null = null;
-  let ctx: CacheContext | null = null;
-
-  try {
-    if (typeof OffscreenCanvas !== "undefined") {
-      surface = new OffscreenCanvas(WORLD_TOTAL_PIXELS_W, WORLD_TOTAL_PIXELS_H);
-      ctx = surface.getContext("2d");
-    } else if (typeof document !== "undefined") {
-      const canvas = document.createElement("canvas");
-      canvas.width = WORLD_TOTAL_PIXELS_W;
-      canvas.height = WORLD_TOTAL_PIXELS_H;
-      surface = canvas;
-      ctx = canvas.getContext("2d");
+  if (!cachedTerrainSurface || !cachedTerrainCtx) {
+    try {
+      if (typeof OffscreenCanvas !== "undefined") {
+        cachedTerrainSurface = new OffscreenCanvas(WORLD_TOTAL_PIXELS_W, WORLD_TOTAL_PIXELS_H);
+        cachedTerrainCtx = cachedTerrainSurface.getContext("2d");
+      } else if (typeof document !== "undefined") {
+        const canvas = document.createElement("canvas");
+        canvas.width = WORLD_TOTAL_PIXELS_W;
+        canvas.height = WORLD_TOTAL_PIXELS_H;
+        cachedTerrainSurface = canvas;
+        cachedTerrainCtx = canvas.getContext("2d");
+      }
+    } catch {
+      return null;
     }
-  } catch {
+  }
+
+  if (!cachedTerrainSurface || !cachedTerrainCtx) {
     return null;
   }
 
-  if (!surface || !ctx) {
-    return null;
-  }
-
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = "high";
+  cachedTerrainCtx.imageSmoothingEnabled = true;
+  cachedTerrainCtx.imageSmoothingQuality = "high";
 
   const s = TILE_PIXEL_SIZE;
   for (let ty = 0; ty < MAP_HEIGHT_TILES; ty++) {
     for (let tx = 0; tx < MAP_WIDTH_TILES; tx++) {
       const idx = ty * MAP_WIDTH_TILES + tx;
-      const tKind = terrainGrid[idx] ?? 0;
-      const bmp = atlas.terrainTiles.get(tKind);
+      const rawKind = terrainGrid[idx] ?? 0;
+      // Render underlying static sand (0) beneath dynamic ore (3) so ore depletion never rebuilds this 1536x1536 surface
+      const baseKind = rawKind === 3 ? 0 : rawKind;
+      const bmp = atlas.terrainTiles.get(baseKind);
       if (bmp) {
-        ctx.drawImage(bmp, tx * s, ty * s, s, s);
+        cachedTerrainCtx.drawImage(bmp, tx * s, ty * s, s, s);
       }
     }
   }
 
-  cachedTerrainSurface = surface;
   cachedTerrainAtlas = atlas;
-  cachedTerrainGridRef = terrainGrid;
   cachedTerrainSignature = sig;
-  return surface;
+  return cachedTerrainSurface;
 }
 
 export function renderTacticalWorld(input: WorldRenderInput): void {
@@ -181,42 +182,56 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
     ctx.drawImage(staticTerrainCache, srcX, srcY, srcW, srcH, srcX, srcY, srcW, srcH);
   }
 
+  const oreBmp = atlas.terrainTiles.get(3);
+  const hasFog = exploredCells.size > 0;
   for (let ty = bounds.minY; ty <= bounds.maxY; ty++) {
+    const rowOffset = ty * MAP_WIDTH_TILES;
     for (let tx = bounds.minX; tx <= bounds.maxX; tx++) {
-      const idx = ty * MAP_WIDTH_TILES + tx;
-      if (!exploredCells.has(idx) && exploredCells.size > 0) {
+      const idx = rowOffset + tx;
+      if (hasFog && !exploredCells.has(idx)) {
         continue;
       }
-      const tKind = terrainGrid[idx] ?? 0;
       if (!staticTerrainCache) {
-        const bmp = atlas.terrainTiles.get(tKind);
+        const tKind = terrainGrid[idx] ?? 0;
+        const bmp = atlas.terrainTiles.get(tKind === 3 ? 0 : tKind);
         if (bmp) {
           ctx.drawImage(bmp, tx * s, ty * s, s, s);
         }
       }
-      const oreAmount = oreGrid[idx] ?? 0;
-      if (oreAmount > 0 && tKind !== 3) {
-        const oreBmp = atlas.terrainTiles.get(3);
-        if (oreBmp) {
-          ctx.drawImage(oreBmp, tx * s, ty * s, s, s);
-        }
+      if (oreBmp && (oreGrid[idx] ?? 0) > 0) {
+        ctx.drawImage(oreBmp, tx * s, ty * s, s, s);
       }
     }
   }
 
   // 1b. Persistent ground scorch craters beneath buildings & units
-  vfxManager?.renderCraters(ctx, frameNowMs, visibleCells, exploredCells);
+  vfxManager?.renderCraters(ctx, frameNowMs, visibleCells, exploredCells, bounds);
 
-  // 2. Draw buildings & units with linear position + shortest-arc angular interpolation
-  const alpha = Math.max(0, Math.min(1, interpolationAlpha));
+  // 2. Draw buildings & units with linear position + shortest-arc angular interpolation & frustum culling
+  const alpha = Math.max(0, Math.min(1.12, interpolationAlpha));
   for (const ent of currEntities.values()) {
     const prev = prevEntities.get(ent.id);
     const interpX = prev ? prev.x + (ent.x - prev.x) * alpha : ent.x;
     const interpY = prev ? prev.y + (ent.y - prev.y) * alpha : ent.y;
 
+    const footW =
+      ent.entityType === "BUILDING" ? BUILDINGS[ent.kind as BuildingKind].footprintW : 1;
+    const footH =
+      ent.entityType === "BUILDING" ? BUILDINGS[ent.kind as BuildingKind].footprintH : 1;
+
+    // Camera viewport frustum culling: skip off-screen entities
+    if (
+      interpX + footW < bounds.minX - 1 ||
+      interpX > bounds.maxX + 1.5 ||
+      interpY + footH < bounds.minY - 1 ||
+      interpY > bounds.maxY + 1.5
+    ) {
+      continue;
+    }
+
     const tileIdx = Math.round(interpY) * MAP_WIDTH_TILES + Math.round(interpX);
     const isAllied = ent.ownerId === localPlayerId;
-    if (!isAllied && exploredCells.size > 0 && !visibleCells.has(tileIdx)) {
+    if (!isAllied && hasFog && !visibleCells.has(tileIdx)) {
       // Enemy units & structures hidden beneath Fog of War / Shroud when outside allied sight
       continue;
     }
@@ -286,7 +301,8 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
       frameNowMs,
       frameDtSec,
       visibleCells,
-      exploredCells
+      exploredCells,
+      bounds
     );
   } else {
     // Fallback static projectile lines if no BattlefieldVfxManager is provided
@@ -351,20 +367,34 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
     }
   }
 
-  // 5. Two-layer Fog of War & Shroud overlay
-  if (exploredCells.size > 0) {
+  // 5. Two-layer Fog of War & Shroud overlay using Horizontal Span Batching (Run-Length Encoding)
+  // Batches contiguous horizontal runs of Shroud or Fog into single fillRect calls (~96% fewer draw calls).
+  if (hasFog) {
     for (let ty = bounds.minY; ty <= bounds.maxY; ty++) {
+      const rowOffset = ty * MAP_WIDTH_TILES;
+      let runState = 0; // 0 = clear, 1 = shroud, 2 = fog
+      let runStartX = bounds.minX;
+      let runLen = 0;
+
       for (let tx = bounds.minX; tx <= bounds.maxX; tx++) {
-        const idx = ty * MAP_WIDTH_TILES + tx;
-        if (!exploredCells.has(idx)) {
-          // Layer 1: Unexplored Black Shroud
-          ctx.fillStyle = "#040609";
-          ctx.fillRect(tx * s, ty * s, s, s);
-        } else if (!visibleCells.has(idx)) {
-          // Layer 2: Explored Grey Fog of War
-          ctx.fillStyle = "rgba(7, 10, 18, 0.56)";
-          ctx.fillRect(tx * s, ty * s, s, s);
+        const idx = rowOffset + tx;
+        const cellState = !exploredCells.has(idx) ? 1 : !visibleCells.has(idx) ? 2 : 0;
+        if (cellState === runState) {
+          runLen++;
+        } else {
+          if (runState !== 0 && runLen > 0) {
+            ctx.fillStyle = runState === 1 ? "#040609" : "rgba(7, 10, 18, 0.56)";
+            ctx.fillRect(runStartX * s, ty * s, runLen * s, s);
+          }
+          runState = cellState;
+          runStartX = tx;
+          runLen = 1;
         }
+      }
+
+      if (runState !== 0 && runLen > 0) {
+        ctx.fillStyle = runState === 1 ? "#040609" : "rgba(7, 10, 18, 0.56)";
+        ctx.fillRect(runStartX * s, ty * s, runLen * s, s);
       }
     }
   }

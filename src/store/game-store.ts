@@ -1,7 +1,15 @@
 "use client";
 
 import { create } from "zustand";
-import { MAP_HEIGHT_TILES, MAP_WIDTH_TILES, type BuildingKind, type FactionId, type ProductionCategory, type UnitKind } from "../shared/constants";
+import {
+  interpolateEntityPose,
+  MAP_HEIGHT_TILES,
+  MAP_WIDTH_TILES,
+  type BuildingKind,
+  type FactionId,
+  type ProductionCategory,
+  type UnitKind,
+} from "../shared/constants";
 import type { ClientMessage } from "../shared/schemas/commands";
 import type {
   AcousticEvent,
@@ -42,6 +50,11 @@ export interface RtsGameStoreState {
   pendingVisualEffects: VisualEffectEvent[];
   winnerPlayerId: string | null;
 
+  // Memoized HUD Reactive Selectors (updated only when HUD-visible values change)
+  hudRevision: number;
+  ownedBuildingsKey: string;
+  lastHudEconomySig: string;
+
   // Tactical UI Selection & Modes
   selectedEntityIds: Set<string>;
   placementBuilding: { category: "BUILDING" | "DEFENSE"; kind: BuildingKind } | null;
@@ -64,6 +77,46 @@ export interface RtsGameStoreState {
 
 let activeSocket: WebSocket | null = null;
 let pingTimer: ReturnType<typeof setInterval> | null = null;
+let lastSnapshotRequestAt = 0;
+
+function computeOwnedBuildingsKey(
+  entities: ReadonlyMap<string, EntityState>,
+  playerId: string
+): string {
+  const kinds = new Set<string>();
+  for (const ent of entities.values()) {
+    if (ent.ownerId === playerId && ent.entityType === "BUILDING") {
+      kinds.add(ent.kind);
+    }
+  }
+  return Array.from(kinds).sort().join(",");
+}
+
+function computeHudEconomySignature(econ: PlayerEconomyDelta | undefined): string {
+  if (!econ) return "none";
+  let qSig = "";
+  for (const q of econ.queues) {
+    const pctInt = Math.round(q.progressRatio * 100);
+    qSig += `${q.category}:${q.activeItem ?? "-"}:${pctInt}:${q.readyToPlace ? 1 : 0}|`;
+  }
+  return `${econ.faction}:${econ.credits}:${econ.maxStorage}:${econ.powerProduced}:${econ.powerConsumed}:${econ.lowPower ? 1 : 0}:${econ.radarActive ? 1 : 0}:${econ.defeated ? 1 : 0}:${qSig}`;
+}
+
+function isFastTickDeltaPayload(raw: unknown): raw is TickDelta {
+  if (typeof raw !== "object" || raw === null) return false;
+  const candidate = raw as Partial<TickDelta>;
+  return (
+    candidate.type === "SIM_DELTA" &&
+    typeof candidate.lobbyId === "string" &&
+    typeof candidate.tickId === "number" &&
+    typeof candidate.prevTickId === "number" &&
+    Array.isArray(candidate.created) &&
+    Array.isArray(candidate.updated) &&
+    Array.isArray(candidate.destroyedIds) &&
+    Array.isArray(candidate.players) &&
+    Array.isArray(candidate.fogByPlayer)
+  );
+}
 
 function resolveWsUrl(): string {
   if (typeof window === "undefined") return "ws://127.0.0.1:4301/ws";
@@ -105,6 +158,10 @@ export const useRtsGameStore = create<RtsGameStoreState>((set, get) => ({
   pendingAcousticEvents: [],
   pendingVisualEffects: [],
   winnerPlayerId: null,
+
+  hudRevision: 0,
+  ownedBuildingsKey: "",
+  lastHudEconomySig: "none",
 
   selectedEntityIds: new Set(),
   placementBuilding: null,
@@ -152,6 +209,13 @@ export const useRtsGameStore = create<RtsGameStoreState>((set, get) => ({
       } catch {
         return;
       }
+
+      // Fast path for 20 Hz SIM_DELTA messages to avoid thousands of per-tick Zod array item allocations
+      if (isFastTickDeltaPayload(raw)) {
+        applyDelta(set, get, raw);
+        return;
+      }
+
       const parsed = ServerMessageSchema.safeParse(raw);
       if (!parsed.success) return;
       const msg = parsed.data;
@@ -172,7 +236,7 @@ export const useRtsGameStore = create<RtsGameStoreState>((set, get) => ({
       }
 
       if (msg.type === "SIM_SNAPSHOT") {
-        applySnapshot(set, msg);
+        applySnapshot(set, get, msg);
         return;
       }
 
@@ -229,8 +293,10 @@ export const useRtsGameStore = create<RtsGameStoreState>((set, get) => ({
 
 function applySnapshot(
   set: (partial: Partial<RtsGameStoreState>) => void,
+  get: () => RtsGameStoreState,
   snap: FullSnapshot
 ): void {
+  const st = get();
   const entitiesMap = new Map<string, EntityState>();
   for (const e of snap.entities) {
     entitiesMap.set(e.id, e);
@@ -248,13 +314,16 @@ function applySnapshot(
     visibleMap.set(pid, new Set(arr));
   }
 
+  const ownedBuildingsKey = computeOwnedBuildingsKey(entitiesMap, st.playerId);
+  const lastHudEconomySig = computeHudEconomySignature(playersMap.get(st.playerId));
+
   set({
     currentLobbyId: snap.lobbyId,
     tickId: snap.tickId,
     lastTickReceivedAt: performance.now(),
     tickDurationMs: 50,
-    terrainGrid: snap.terrainGrid,
-    oreGrid: snap.oreGrid,
+    terrainGrid: [...snap.terrainGrid],
+    oreGrid: [...snap.oreGrid],
     prevEntities: new Map(entitiesMap),
     currEntities: entitiesMap,
     playersEconomy: playersMap,
@@ -263,6 +332,9 @@ function applySnapshot(
     pendingAcousticEvents: [],
     pendingVisualEffects: [],
     winnerPlayerId: snap.winnerPlayerId,
+    hudRevision: st.hudRevision + 1,
+    ownedBuildingsKey,
+    lastHudEconomySig,
     evaBannerText: "SYNCHRONISATION SNAPSHOT COMPLÈTE",
   });
 }
@@ -273,20 +345,54 @@ function applyDelta(
   delta: TickDelta
 ): void {
   const st = get();
+  const now = performance.now();
 
-  // State Drift detection: if tickId jumped, automatically request a Full Snapshot from server
+  // State Drift detection: if tickId jumped, request a Full Snapshot with a 1s cooldown guard
   if (st.tickId > 0 && delta.prevTickId !== st.tickId) {
-    st.sendMessage({
-      type: "REQUEST_SNAPSHOT",
-      lobbyId: delta.lobbyId,
-      playerId: st.playerId,
-      lastTickId: st.tickId,
-    });
+    if (now - lastSnapshotRequestAt >= 1000) {
+      lastSnapshotRequestAt = now;
+      st.sendMessage({
+        type: "REQUEST_SNAPSHOT",
+        lobbyId: delta.lobbyId,
+        playerId: st.playerId,
+        lastTickId: st.tickId,
+      });
+    }
     return;
   }
 
-  const prevEntities = new Map(st.currEntities);
-  const currEntities = new Map(st.currEntities);
+  // Capture exact C0-continuous interpolated visual pose at `now` into `prevEntities`
+  // before applying `delta.updated` to `currEntities`, eliminating packet-jitter spatial jumps.
+  const prevAlpha =
+    st.lastTickReceivedAt > 0
+      ? Math.max(0, Math.min(1, (now - st.lastTickReceivedAt) / Math.max(40, st.tickDurationMs)))
+      : 1;
+
+  const prevEntities = st.prevEntities;
+  const currEntities = st.currEntities;
+
+  for (const [id, currEnt] of currEntities.entries()) {
+    const prevEnt = prevEntities.get(id);
+    if (
+      prevEnt &&
+      prevAlpha < 0.999 &&
+      (prevEnt.x !== currEnt.x ||
+        prevEnt.y !== currEnt.y ||
+        prevEnt.angleIndex !== currEnt.angleIndex ||
+        prevEnt.turretAngleIndex !== currEnt.turretAngleIndex)
+    ) {
+      const pose = interpolateEntityPose(prevEnt, currEnt, prevAlpha);
+      prevEntities.set(id, {
+        ...currEnt,
+        x: pose.x,
+        y: pose.y,
+        angleIndex: pose.angleIndex,
+        turretAngleIndex: pose.turretAngleIndex,
+      });
+    } else {
+      prevEntities.set(id, currEnt);
+    }
+  }
 
   for (const created of delta.created) {
     currEntities.set(created.id, created);
@@ -300,40 +406,48 @@ function applyDelta(
     prevEntities.delete(deadId);
   }
 
-  let oreGrid = st.oreGrid;
-  let terrainGrid = st.terrainGrid;
   if (delta.oreUpdates.length > 0) {
-    oreGrid = [...st.oreGrid];
-    terrainGrid = [...st.terrainGrid];
     for (const u of delta.oreUpdates) {
       const idx = u.tileY * MAP_WIDTH_TILES + u.tileX;
-      oreGrid[idx] = u.oreAmount;
-      if (u.oreAmount === 0 && terrainGrid[idx] === 3) {
-        terrainGrid[idx] = 0;
+      st.oreGrid[idx] = u.oreAmount;
+      if (u.oreAmount === 0 && st.terrainGrid[idx] === 3) {
+        st.terrainGrid[idx] = 0;
       }
     }
   }
 
-  const playersEconomy = new Map<string, PlayerEconomyDelta>();
+  const prevMyEcon = st.playersEconomy.get(st.playerId);
   for (const p of delta.players) {
-    playersEconomy.set(p.playerId, p);
+    st.playersEconomy.set(p.playerId, p);
   }
 
-  const exploredByPlayer = new Map(st.exploredByPlayer);
-  const visibleByPlayer = new Map<string, Set<number>>();
+  // Update local player's Fog of War Sets in-place (zero Set cloning allocations per tick)
   for (const f of delta.fogByPlayer) {
-    const existingExplored = new Set(exploredByPlayer.get(f.playerId) ?? []);
-    for (const idx of f.newlyExploredIndices) {
-      existingExplored.add(idx);
+    if (f.playerId !== st.playerId) continue;
+    let exploredSet = st.exploredByPlayer.get(f.playerId);
+    if (!exploredSet) {
+      exploredSet = new Set<number>();
+      st.exploredByPlayer.set(f.playerId, exploredSet);
     }
-    exploredByPlayer.set(f.playerId, existingExplored);
-    visibleByPlayer.set(f.playerId, new Set(f.visibleIndices));
+    for (const idx of f.newlyExploredIndices) {
+      exploredSet.add(idx);
+    }
+
+    let visibleSet = st.visibleByPlayer.get(f.playerId);
+    if (!visibleSet) {
+      visibleSet = new Set<number>();
+      st.visibleByPlayer.set(f.playerId, visibleSet);
+    } else {
+      visibleSet.clear();
+    }
+    for (const idx of f.visibleIndices) {
+      visibleSet.add(idx);
+    }
   }
 
   let evaBannerText = st.evaBannerText;
   let placementBuilding = st.placementBuilding;
-  const myEcon = playersEconomy.get(st.playerId);
-  const prevMyEcon = st.playersEconomy.get(st.playerId);
+  const myEcon = st.playersEconomy.get(st.playerId);
 
   if (myEcon) {
     for (const cat of ["BUILDING", "DEFENSE"] as const) {
@@ -391,25 +505,37 @@ function applyDelta(
     }
   }
 
-  const now = performance.now();
   const measuredDt = st.lastTickReceivedAt > 0 ? now - st.lastTickReceivedAt : 50;
   const clampedDt = Math.max(40, Math.min(75, measuredDt));
-  const tickDurationMs = st.tickDurationMs * 0.75 + clampedDt * 0.25;
+  const tickDurationMs = st.tickDurationMs * 0.8 + clampedDt * 0.2;
 
-  set({
-    tickId: delta.tickId,
-    lastTickReceivedAt: now,
-    tickDurationMs,
-    prevEntities,
-    currEntities,
-    oreGrid,
-    terrainGrid,
-    playersEconomy,
-    exploredByPlayer,
-    visibleByPlayer,
-    recentProjectiles: delta.projectiles,
-    winnerPlayerId: delta.winnerPlayerId,
-    placementBuilding,
-    evaBannerText,
-  });
+  // Mutate high-frequency simulation fields in-place so the 60 FPS Canvas RAF loop reads them with zero React overhead
+  st.tickId = delta.tickId;
+  st.lastTickReceivedAt = now;
+  st.tickDurationMs = tickDurationMs;
+  st.recentProjectiles = delta.projectiles;
+
+  const ownedBuildingsKey =
+    delta.created.length > 0 || delta.destroyedIds.length > 0
+      ? computeOwnedBuildingsKey(currEntities, st.playerId)
+      : st.ownedBuildingsKey;
+  const nextHudEconSig = computeHudEconomySignature(myEcon);
+
+  const hudChanged =
+    ownedBuildingsKey !== st.ownedBuildingsKey ||
+    nextHudEconSig !== st.lastHudEconomySig ||
+    evaBannerText !== st.evaBannerText ||
+    placementBuilding !== st.placementBuilding ||
+    delta.winnerPlayerId !== st.winnerPlayerId;
+
+  if (hudChanged) {
+    set({
+      hudRevision: st.hudRevision + 1,
+      ownedBuildingsKey,
+      lastHudEconomySig: nextHudEconSig,
+      winnerPlayerId: delta.winnerPlayerId,
+      placementBuilding,
+      evaBannerText,
+    });
+  }
 }

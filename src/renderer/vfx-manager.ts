@@ -397,18 +397,36 @@ export class BattlefieldVfxManager {
 
   /**
    * Renders persistent scorch craters on the terrain layer (beneath buildings & units).
+   * Uses zero-allocation concentric fills and camera viewport frustum culling.
    */
   public renderCraters(
     ctx: CanvasRenderingContext2D,
     nowMs: number,
     visibleCells: ReadonlySet<number>,
-    exploredCells: ReadonlySet<number>
+    exploredCells: ReadonlySet<number>,
+    bounds?: { minX: number; maxX: number; minY: number; maxY: number }
   ): void {
+    if (this.craters.length === 0) return;
+
+    const minPxX = bounds ? bounds.minX * TILE_PIXEL_SIZE - 48 : -Infinity;
+    const maxPxX = bounds ? (bounds.maxX + 1) * TILE_PIXEL_SIZE + 48 : Infinity;
+    const minPxY = bounds ? bounds.minY * TILE_PIXEL_SIZE - 48 : -Infinity;
+    const maxPxY = bounds ? (bounds.maxY + 1) * TILE_PIXEL_SIZE + 48 : Infinity;
+
+    ctx.save();
     for (let i = this.craters.length - 1; i >= 0; i--) {
       const crater = this.craters[i]!;
       const elapsed = nowMs - crater.createdAtMs;
       if (elapsed >= CRATER_LIFETIME_MS) {
         this.craters.splice(i, 1);
+        continue;
+      }
+      if (
+        crater.worldPxX < minPxX ||
+        crater.worldPxX > maxPxX ||
+        crater.worldPxY < minPxY ||
+        crater.worldPxY > maxPxY
+      ) {
         continue;
       }
       if (exploredCells.size > 0 && !exploredCells.has(crater.tileIdx)) {
@@ -421,24 +439,18 @@ export class BattlefieldVfxManager {
       const alpha = (1 - lifeRatio * 0.85) * 0.68 * visibilityFactor;
       if (alpha <= 0.02) continue;
 
-      ctx.save();
       ctx.globalAlpha = alpha;
 
-      const grad = ctx.createRadialGradient(
-        crater.worldPxX,
-        crater.worldPxY,
-        crater.radiusPx * 0.1,
-        crater.worldPxX,
-        crater.worldPxY,
-        crater.radiusPx
-      );
-      grad.addColorStop(0, "rgba(8, 10, 14, 0.92)");
-      grad.addColorStop(0.55, "rgba(24, 24, 27, 0.65)");
-      grad.addColorStop(1, "rgba(24, 24, 27, 0)");
-
+      // Outer scorched soot ring (zero CanvasGradient allocation)
       ctx.beginPath();
       ctx.arc(crater.worldPxX, crater.worldPxY, crater.radiusPx, 0, Math.PI * 2);
-      ctx.fillStyle = grad;
+      ctx.fillStyle = "rgba(24, 24, 27, 0.55)";
+      ctx.fill();
+
+      // Inner deep blast pit
+      ctx.beginPath();
+      ctx.arc(crater.worldPxX, crater.worldPxY, crater.radiusPx * 0.58, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(8, 10, 14, 0.88)";
       ctx.fill();
 
       // Cracked rim highlight
@@ -453,9 +465,8 @@ export class BattlefieldVfxManager {
       ctx.strokeStyle = "rgba(71, 85, 105, 0.45)";
       ctx.lineWidth = 1.2;
       ctx.stroke();
-
-      ctx.restore();
     }
+    ctx.restore();
   }
 
   /**
@@ -516,9 +527,14 @@ export class BattlefieldVfxManager {
     nowMs: number,
     dtSec: number,
     visibleCells: ReadonlySet<number>,
-    exploredCells: ReadonlySet<number>
+    exploredCells: ReadonlySet<number>,
+    bounds?: { minX: number; maxX: number; minY: number; maxY: number }
   ): void {
     const safeDt = Number.isFinite(dtSec) ? Math.max(0, Math.min(0.1, dtSec)) : 0.016;
+    const minPxX = bounds ? bounds.minX * TILE_PIXEL_SIZE - 64 : -Infinity;
+    const maxPxX = bounds ? (bounds.maxX + 1) * TILE_PIXEL_SIZE + 64 : Infinity;
+    const minPxY = bounds ? bounds.minY * TILE_PIXEL_SIZE - 64 : -Infinity;
+    const maxPxY = bounds ? (bounds.maxY + 1) * TILE_PIXEL_SIZE + 64 : Infinity;
 
     // 1. Step & Render Animated Projectiles
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
@@ -535,6 +551,12 @@ export class BattlefieldVfxManager {
       const tileIdx = worldPxToTileIndex(curX, curY);
 
       if (exploredCells.size > 0 && !visibleCells.has(tileIdx)) {
+        continue;
+      }
+      if (
+        proj.weaponStyle !== "LASER" &&
+        (curX < minPxX || curX > maxPxX || curY < minPxY || curY > maxPxY)
+      ) {
         continue;
       }
 
@@ -669,6 +691,14 @@ export class BattlefieldVfxManager {
       if (exploredCells.size > 0 && !visibleCells.has(exp.tileIdx)) {
         continue;
       }
+      if (
+        exp.worldPxX < minPxX ||
+        exp.worldPxX > maxPxX ||
+        exp.worldPxY < minPxY ||
+        exp.worldPxY > maxPxY
+      ) {
+        continue;
+      }
 
       const progress = Math.max(0, Math.min(1, elapsed / exp.durationMs));
 
@@ -730,58 +760,63 @@ export class BattlefieldVfxManager {
     }
 
     // 3. Step & Render Dynamic Particles (Sparks, Debris, Smoke, Crystals)
-    const dtMs = safeDt * 1000;
-    for (let i = this.particles.length - 1; i >= 0; i--) {
-      const p = this.particles[i]!;
-      p.ageMs += dtMs;
-      if (p.ageMs >= p.maxAgeMs) {
-        this.particles.splice(i, 1);
-        continue;
-      }
-
-      p.x += p.vx * safeDt;
-      p.y += p.vy * safeDt;
-      p.vx *= 0.95;
-      p.vy *= 0.95;
-
-      if (p.kind === "SMOKE") {
-        p.vy -= 14 * safeDt;
-        p.size += 7 * safeDt;
-      }
-
-      if (exploredCells.size > 0 && !visibleCells.has(p.tileIdx)) {
-        continue;
-      }
-
-      const lifeRatio = Math.max(0, Math.min(1, p.ageMs / p.maxAgeMs));
-      const alpha = 1 - lifeRatio;
-
+    if (this.particles.length > 0) {
+      const dtMs = safeDt * 1000;
       ctx.save();
-      ctx.globalAlpha = alpha;
-      ctx.fillStyle = p.color;
+      for (let i = this.particles.length - 1; i >= 0; i--) {
+        const p = this.particles[i]!;
+        p.ageMs += dtMs;
+        if (p.ageMs >= p.maxAgeMs) {
+          this.particles.splice(i, 1);
+          continue;
+        }
 
-      if (p.kind === "SPARK") {
-        ctx.strokeStyle = p.color;
-        ctx.lineWidth = p.size * 0.85;
-        ctx.beginPath();
-        ctx.moveTo(p.x, p.y);
-        ctx.lineTo(p.x - p.vx * 0.035, p.y - p.vy * 0.035);
-        ctx.stroke();
-      } else if (p.kind === "CRYSTAL") {
-        ctx.beginPath();
-        ctx.moveTo(p.x, p.y - p.size);
-        ctx.lineTo(p.x + p.size * 0.75, p.y);
-        ctx.lineTo(p.x, p.y + p.size);
-        ctx.lineTo(p.x - p.size * 0.75, p.y);
-        ctx.closePath();
-        ctx.fill();
-      } else if (p.kind === "DEBRIS") {
-        ctx.fillRect(p.x - p.size * 0.5, p.y - p.size * 0.5, p.size, p.size * 0.75);
-      } else {
-        // SMOKE
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-        ctx.fill();
+        p.x += p.vx * safeDt;
+        p.y += p.vy * safeDt;
+        p.vx *= 0.95;
+        p.vy *= 0.95;
+
+        if (p.kind === "SMOKE") {
+          p.vy -= 14 * safeDt;
+          p.size += 7 * safeDt;
+        }
+
+        if (p.x < minPxX || p.x > maxPxX || p.y < minPxY || p.y > maxPxY) {
+          continue;
+        }
+        if (exploredCells.size > 0 && !visibleCells.has(p.tileIdx)) {
+          continue;
+        }
+
+        const lifeRatio = Math.max(0, Math.min(1, p.ageMs / p.maxAgeMs));
+        const alpha = 1 - lifeRatio;
+
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = p.color;
+
+        if (p.kind === "SPARK") {
+          ctx.strokeStyle = p.color;
+          ctx.lineWidth = p.size * 0.85;
+          ctx.beginPath();
+          ctx.moveTo(p.x, p.y);
+          ctx.lineTo(p.x - p.vx * 0.035, p.y - p.vy * 0.035);
+          ctx.stroke();
+        } else if (p.kind === "CRYSTAL") {
+          ctx.beginPath();
+          ctx.moveTo(p.x, p.y - p.size);
+          ctx.lineTo(p.x + p.size * 0.75, p.y);
+          ctx.lineTo(p.x, p.y + p.size);
+          ctx.lineTo(p.x - p.size * 0.75, p.y);
+          ctx.closePath();
+          ctx.fill();
+        } else if (p.kind === "DEBRIS") {
+          ctx.fillRect(p.x - p.size * 0.5, p.y - p.size * 0.5, p.size, p.size * 0.75);
+        } else {
+          // SMOKE
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+          ctx.fill();
+        }
       }
       ctx.restore();
     }

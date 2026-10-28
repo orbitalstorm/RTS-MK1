@@ -115,7 +115,15 @@ export class RtsAudioMixer {
     panner.connect(this.combatBus);
 
     const detune = Math.round((Math.random() * 2 - 1) * 45);
-    synthesizeSoundOnNode(this.ctx, spatialGain, event.soundKind, detune);
+    const durationMs = synthesizeSoundOnNode(this.ctx, spatialGain, event.soundKind, detune);
+    setTimeout(() => {
+      try {
+        spatialGain.disconnect();
+        panner.disconnect();
+      } catch {
+        // Ignore if already disconnected
+      }
+    }, durationMs + 80);
   }
 }
 

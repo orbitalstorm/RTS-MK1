@@ -275,6 +275,11 @@ export default function GameMatchPage() {
     if (!atlas) return;
     let animId = 0;
     lastFrameTimeRef.current = performance.now();
+    const emptyCellSet: ReadonlySet<number> = new Set<number>();
+    let cachedWorldCanvas: HTMLCanvasElement | null = null;
+    let cachedWorldCtx: CanvasRenderingContext2D | null = null;
+    let cachedMiniCanvas: HTMLCanvasElement | null = null;
+    let cachedMiniCtx: CanvasRenderingContext2D | null = null;
 
     const renderFrame = () => {
       const nowMs = performance.now();
@@ -326,22 +331,31 @@ export default function GameMatchPage() {
       if (isNewProjectileTick) {
         lastProcessedProjectileTickRef.current = st.tickId;
       }
-      const tickProjectiles = isNewProjectileTick ? st.recentProjectiles : [];
-      if (vfxEvents.length > 0 || tickProjectiles.length > 0) {
-        vfxManagerRef.current.ingestTickEvents(vfxEvents, tickProjectiles, cam, nowMs);
+      if (vfxEvents.length > 0 || isNewProjectileTick) {
+        vfxManagerRef.current.ingestTickEvents(
+          vfxEvents,
+          isNewProjectileTick ? st.recentProjectiles : [],
+          cam,
+          nowMs
+        );
       }
+
+      const explored = st.exploredByPlayer.get(st.playerId) ?? emptyCellSet;
+      const visible = st.visibleByPlayer.get(st.playerId) ?? emptyCellSet;
 
       const canvas = worldCanvasRef.current;
       if (canvas) {
-        const ctx = canvas.getContext("2d");
+        if (cachedWorldCanvas !== canvas) {
+          cachedWorldCanvas = canvas;
+          cachedWorldCtx = canvas.getContext("2d");
+        }
+        const ctx = cachedWorldCtx;
         if (ctx) {
           const elapsedSinceTick = nowMs - st.lastTickReceivedAt;
           const alpha = Math.max(
             0,
             Math.min(1.05, elapsedSinceTick / Math.max(40, st.tickDurationMs))
           );
-          const explored = st.exploredByPlayer.get(st.playerId) ?? new Set<number>();
-          const visible = st.visibleByPlayer.get(st.playerId) ?? new Set<number>();
 
           let placementPreview: {
             faction: FactionId;
@@ -399,7 +413,11 @@ export default function GameMatchPage() {
 
       const miniCanvas = minimapCanvasRef.current;
       if (miniCanvas) {
-        const mCtx = miniCanvas.getContext("2d");
+        if (cachedMiniCanvas !== miniCanvas) {
+          cachedMiniCanvas = miniCanvas;
+          cachedMiniCtx = miniCanvas.getContext("2d");
+        }
+        const mCtx = cachedMiniCtx;
         if (mCtx) {
           const myEcon = st.playersEconomy.get(st.playerId);
           renderMinimapRadar({
@@ -412,9 +430,10 @@ export default function GameMatchPage() {
             terrainGrid: st.terrainGrid,
             oreGrid: st.oreGrid,
             entities: st.currEntities,
-            exploredCells: st.exploredByPlayer.get(st.playerId) ?? new Set<number>(),
-            visibleCells: st.visibleByPlayer.get(st.playerId) ?? new Set<number>(),
+            exploredCells: explored,
+            visibleCells: visible,
             camera: cam,
+            nowMs,
           });
         }
       }

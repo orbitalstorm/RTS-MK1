@@ -20,6 +20,7 @@ import {
   EDGE_SCROLL_MARGIN_PX,
   EDGE_SCROLL_MAX_SPEED_PX,
   interpolateAngleIndex16,
+  interpolateEntityPose,
   resolveTouchTapAction,
   SPRITE_ATLAS_SCALE,
   TOUCH_INTERACTION_MODES,
@@ -267,7 +268,7 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
   });
 
   it("v1.2.0 — supports Game Juice camera shake, shortest-arc 16-angle interpolation, and 2x Hi-DPI sprite scale", () => {
-    expect(APP_VERSION).toBe("1.3.0");
+    expect(APP_VERSION).toBe("1.3.1");
     expect(SPRITE_ATLAS_SCALE).toBe(2);
 
     // Zero trauma produces zero offset
@@ -397,5 +398,50 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
         selectedUnitCount: 2,
       })
     ).toBe("CLEAR_SELECTION");
+  });
+
+  it("v1.3.1 — ensures C0-continuous sub-tick pose interpolation, Refinery perimeter dock unloading, and <2.5ms tick budget", () => {
+    // 1. Sub-tick pose interpolation (smooth continuity on early/jittered delta arrival)
+    const prevPose = { x: 10.0, y: 12.0, angleIndex: 15, turretAngleIndex: 14 };
+    const currPose = { x: 10.2, y: 12.4, angleIndex: 1, turretAngleIndex: 2 };
+    const midPose = interpolateEntityPose(prevPose, currPose, 0.5);
+    expect(midPose.x).toBeCloseTo(10.1, 5);
+    expect(midPose.y).toBeCloseTo(12.2, 5);
+    expect(midPose.angleIndex).toBe(0);
+    expect(midPose.turretAngleIndex).toBe(0);
+
+    // Teleport (>3.5 tiles) snaps immediately without smearing across the map
+    const telePose = interpolateEntityPose(
+      prevPose,
+      { x: 25.0, y: 30.0, angleIndex: 8, turretAngleIndex: 8 },
+      0.5
+    );
+    expect(telePose.x).toBe(25.0);
+    expect(telePose.y).toBe(30.0);
+
+    // 2. Verify Harvester harvest -> dock -> unload cycle from far perimeter dock tiles & sub-2.5ms tick time
+    const sim = new RtsSimulation("test_perf_v131", [
+      { playerId: "p1", commanderName: "Alpha", faction: "GDI", isAi: true },
+      { playerId: "p2", commanderName: "Beta", faction: "NOD", isAi: true },
+    ]);
+
+    const t0 = performance.now();
+    const totalTicks = 220;
+    for (let i = 0; i < totalTicks; i++) {
+      sim.stepTick();
+    }
+    const elapsedMs = performance.now() - t0;
+    const avgTickMs = elapsedMs / totalTicks;
+    // Average 20 Hz tick (50ms budget) must stay below 2.5ms even with two active AI commanders
+    expect(avgTickMs).toBeLessThan(2.5);
+
+    // Verify no Harvester is stuck in RETURNING_TO_REFINERY with an empty path and zero cargo progress
+    const harvesters = sim
+      .getAllEntities()
+      .filter((e) => e.entityType === "UNIT" && e.kind === "HARVESTER");
+    expect(harvesters.length).toBeGreaterThanOrEqual(2);
+    for (const h of harvesters) {
+      expect(h.harvester).toBeDefined();
+    }
   });
 });

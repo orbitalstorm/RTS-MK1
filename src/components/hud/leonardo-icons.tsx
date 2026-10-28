@@ -8,7 +8,7 @@ import {
   type UnitKind,
 } from "../../shared/constants";
 
-export function FactionVectorEmblem({
+export const FactionVectorEmblem = React.memo(function FactionVectorEmblem({
   faction,
   className = "w-8 h-8",
 }: {
@@ -149,9 +149,9 @@ export function FactionVectorEmblem({
       </g>
     </svg>
   );
-}
+});
 
-export function ProductionItemVectorIcon({
+export const ProductionItemVectorIcon = React.memo(function ProductionItemVectorIcon({
   itemKind,
   faction,
   className = "w-12 h-12",
@@ -533,4 +533,4 @@ export function ProductionItemVectorIcon({
       </g>
     </svg>
   );
-}
+});

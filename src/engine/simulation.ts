@@ -682,7 +682,10 @@ export class RtsSimulation {
       ent.dirty = false;
     }
 
-    return TickDeltaSchema.parse(delta);
+    if (this.tickCounter === 1) {
+      return TickDeltaSchema.parse(delta);
+    }
+    return delta;
   }
 
   public getFullSnapshot(): FullSnapshot {
@@ -826,13 +829,27 @@ export class RtsSimulation {
       const player = this.players.get(ent.ownerId);
       if (!player || player.defeated) continue;
 
+      const curTileX = Math.round(ent.transform.x);
+      const curTileY = Math.round(ent.transform.y);
+      const curTileIdx = curTileY * this.width + curTileX;
+
       if (harv.state === "IDLE") {
         if (harv.cargoOre >= harv.maxCapacity) {
           harv.state = "RETURNING_TO_REFINERY";
           ent.stateLabel = "RETURNING";
           ent.dirty = true;
+        } else if ((this.oreGrid[curTileIdx] ?? 0) > 0) {
+          harv.targetOreTile = { x: curTileX, y: curTileY };
+          harv.state = "HARVESTING";
+          ent.stateLabel = "HARVESTING";
+          nav.path = [];
+          nav.pathIndex = 0;
+          nav.waitTicks = 0;
+          ent.dirty = true;
+        } else if (nav.waitTicks > 0) {
+          nav.waitTicks--;
         } else {
-          const oreTile = this.findNearestOreTile(ent.transform.x, ent.transform.y);
+          const oreTile = this.findNearestOreTile(ent.transform.x, ent.transform.y, ent.id);
           if (oreTile) {
             harv.targetOreTile = oreTile;
             harv.state = "MOVING_TO_ORE";
@@ -847,7 +864,10 @@ export class RtsSimulation {
               true
             );
             nav.pathIndex = 0;
+            nav.waitTicks = nav.path.length === 0 ? 10 : 0;
             ent.dirty = true;
+          } else {
+            nav.waitTicks = 20;
           }
         }
       } else if (harv.state === "MOVING_TO_ORE") {
@@ -857,14 +877,29 @@ export class RtsSimulation {
           continue;
         }
         const dist = Math.hypot(ent.transform.x - target.x, ent.transform.y - target.y);
-        if (dist <= 1.25) {
+        const targetIdx = target.y * this.width + target.x;
+        const standingOnOre = (this.oreGrid[curTileIdx] ?? 0) > 0;
+        const canHarvestAdjacentTarget =
+          dist <= 1.55 &&
+          (this.oreGrid[targetIdx] ?? 0) > 0 &&
+          (dist <= 0.45 || nav.pathIndex >= nav.path.length);
+
+        if ((standingOnOre && (dist <= 1.55 || nav.pathIndex >= nav.path.length)) || canHarvestAdjacentTarget) {
+          if (standingOnOre) {
+            harv.targetOreTile = { x: curTileX, y: curTileY };
+          }
           nav.path = [];
           nav.pathIndex = 0;
+          nav.waitTicks = 0;
           harv.state = "HARVESTING";
           ent.stateLabel = "HARVESTING";
           ent.dirty = true;
         } else if (nav.pathIndex >= nav.path.length) {
-          const nextOre = this.findNearestOreTile(ent.transform.x, ent.transform.y);
+          if (nav.waitTicks > 0) {
+            nav.waitTicks--;
+            continue;
+          }
+          const nextOre = this.findNearestOreTile(ent.transform.x, ent.transform.y, ent.id);
           if (nextOre) {
             harv.targetOreTile = nextOre;
             nav.path = this.pathfinder.findPath(
@@ -877,15 +912,31 @@ export class RtsSimulation {
               true
             );
             nav.pathIndex = 0;
+            nav.waitTicks = nav.path.length === 0 ? 10 : 0;
           } else {
             harv.state = harv.cargoOre > 0 ? "RETURNING_TO_REFINERY" : "IDLE";
+            nav.waitTicks = 10;
           }
         }
       } else if (harv.state === "HARVESTING") {
-        const tx = Math.round(ent.transform.x);
-        const ty = Math.round(ent.transform.y);
-        const idx = ty * this.width + tx;
-        const available = this.oreGrid[idx] ?? 0;
+        let tx = curTileX;
+        let ty = curTileY;
+        let idx = curTileIdx;
+        let available = this.oreGrid[idx] ?? 0;
+
+        if (available <= 0 && harv.targetOreTile) {
+          const distToTarget = Math.hypot(
+            ent.transform.x - harv.targetOreTile.x,
+            ent.transform.y - harv.targetOreTile.y
+          );
+          const tIdx = harv.targetOreTile.y * this.width + harv.targetOreTile.x;
+          if (distToTarget <= 1.55 && (this.oreGrid[tIdx] ?? 0) > 0) {
+            tx = harv.targetOreTile.x;
+            ty = harv.targetOreTile.y;
+            idx = tIdx;
+            available = this.oreGrid[idx] ?? 0;
+          }
+        }
 
         if (available <= 0) {
           harv.state = harv.cargoOre >= harv.maxCapacity * 0.6 ? "RETURNING_TO_REFINERY" : "IDLE";
@@ -919,6 +970,7 @@ export class RtsSimulation {
           ent.stateLabel = "RETURNING";
           nav.path = [];
           nav.pathIndex = 0;
+          nav.waitTicks = 0;
         }
       } else if (harv.state === "RETURNING_TO_REFINERY") {
         const ref = this.findNearestRefinery(ent.ownerId, ent.transform.x, ent.transform.y);
@@ -927,24 +979,22 @@ export class RtsSimulation {
           ent.stateLabel = "IDLE";
           continue;
         }
-        const dock = this.reservationGrid.findNearestFreeDockTile(
+
+        // Check distance to Refinery footprint edges so all 14 perimeter dock tiles unload cleanly
+        const nearestFootX = Math.max(
           ref.transform.x,
+          Math.min(ent.transform.x, ref.transform.x + ref.building.footprintW - 1)
+        );
+        const nearestFootY = Math.max(
           ref.transform.y,
-          ref.building.footprintW,
-          ref.building.footprintH,
-          ent.transform.x,
-          ent.transform.y,
-          ent.id
+          Math.min(ent.transform.y, ref.transform.y + ref.building.footprintH - 1)
         );
-        if (!dock) {
-          // Wait patiently if all refinery perimeter dock tiles are temporarily busy
-          continue;
-        }
-        const distToRef = Math.hypot(
-          ent.transform.x - (ref.transform.x + ref.building.footprintW * 0.5),
-          ent.transform.y - (ref.transform.y + ref.building.footprintH * 0.5)
+        const distToFootprint = Math.hypot(
+          ent.transform.x - nearestFootX,
+          ent.transform.y - nearestFootY
         );
-        if (distToRef <= 2.4) {
+
+        if (distToFootprint <= 1.55) {
           const spaceLeft = Math.max(0, player.maxStorage - player.credits);
           const deposited = Math.min(spaceLeft, harv.cargoOre);
           player.credits += deposited;
@@ -960,9 +1010,27 @@ export class RtsSimulation {
           ent.stateLabel = "IDLE";
           nav.path = [];
           nav.pathIndex = 0;
+          nav.waitTicks = 0;
           ent.dirty = true;
           this.pushAcoustic("CREDITS_TICK", ref.transform.x, ref.transform.y, player.playerId);
         } else if (nav.pathIndex >= nav.path.length) {
+          if (nav.waitTicks > 0) {
+            nav.waitTicks--;
+            continue;
+          }
+          const dock = this.reservationGrid.findNearestFreeDockTile(
+            ref.transform.x,
+            ref.transform.y,
+            ref.building.footprintW,
+            ref.building.footprintH,
+            ent.transform.x,
+            ent.transform.y,
+            ent.id
+          );
+          if (!dock) {
+            nav.waitTicks = 6;
+            continue;
+          }
           nav.path = this.pathfinder.findPath(
             ent.transform.x,
             ent.transform.y,
@@ -973,12 +1041,16 @@ export class RtsSimulation {
             true
           );
           nav.pathIndex = 0;
+          nav.waitTicks = nav.path.length === 0 ? 8 : 0;
         }
       }
     }
   }
 
   private stepUnitMovement(): void {
+    let dynamicRepathsThisTick = 0;
+    const maxDynamicRepathsPerTick = 4;
+
     for (const ent of this.entities.values()) {
       if (ent.entityType !== "UNIT" || !ent.navigation) continue;
       const nav = ent.navigation;
@@ -1009,7 +1081,8 @@ export class RtsSimulation {
         ) {
           if (!movedThisTick) {
             nav.waitTicks++;
-            if (nav.waitTicks >= 4) {
+            if (nav.waitTicks >= 4 && dynamicRepathsThisTick < maxDynamicRepathsPerTick) {
+              dynamicRepathsThisTick++;
               const finalGoal = nav.path[nav.path.length - 1]!;
               nav.path = this.pathfinder.findPath(
                 ent.transform.x,
@@ -1079,6 +1152,9 @@ export class RtsSimulation {
       if (p.underAttackCooldown > 0) p.underAttackCooldown--;
     }
 
+    let chaseRepathsThisTick = 0;
+    const maxChaseRepathsPerTick = 4;
+
     for (const ent of this.entities.values()) {
       if (!ent.combat) continue;
       const combat = ent.combat;
@@ -1102,29 +1178,53 @@ export class RtsSimulation {
       }
       if (!target) continue;
 
-      const tx =
+      let tx =
         target.entityType === "BUILDING" && target.building
           ? target.transform.x + (target.building.footprintW - 1) * 0.5
           : target.transform.x;
-      const ty =
+      let ty =
         target.entityType === "BUILDING" && target.building
           ? target.transform.y + (target.building.footprintH - 1) * 0.5
           : target.transform.y;
 
-      const dist = Math.hypot(tx - ent.transform.x, ty - ent.transform.y);
+      let dist = Math.hypot(tx - ent.transform.x, ty - ent.transform.y);
+
+      // If assigned target is out of weapon range, check if an immediate threat is already in weapon range
+      if (dist > combat.attackRange) {
+        const immediateThreat = this.findNearestEnemyInRange(ent, combat.attackRange);
+        if (immediateThreat) {
+          target = immediateThreat;
+          combat.targetEntityId = immediateThreat.id;
+          tx =
+            target.entityType === "BUILDING" && target.building
+              ? target.transform.x + (target.building.footprintW - 1) * 0.5
+              : target.transform.x;
+          ty =
+            target.entityType === "BUILDING" && target.building
+              ? target.transform.y + (target.building.footprintH - 1) * 0.5
+              : target.transform.y;
+          dist = Math.hypot(tx - ent.transform.x, ty - ent.transform.y);
+        }
+      }
 
       if (dist > combat.attackRange) {
         if (ent.entityType === "UNIT" && ent.navigation && ent.navigation.pathIndex >= ent.navigation.path.length) {
-          ent.navigation.path = this.pathfinder.findPath(
-            ent.transform.x,
-            ent.transform.y,
-            Math.round(tx),
-            Math.round(ty),
-            this.reservationGrid,
-            ent.id,
-            true
-          );
-          ent.navigation.pathIndex = 0;
+          if (ent.navigation.waitTicks > 0) {
+            ent.navigation.waitTicks--;
+          } else if (chaseRepathsThisTick < maxChaseRepathsPerTick) {
+            chaseRepathsThisTick++;
+            ent.navigation.path = this.pathfinder.findPath(
+              ent.transform.x,
+              ent.transform.y,
+              Math.round(tx),
+              Math.round(ty),
+              this.reservationGrid,
+              ent.id,
+              true
+            );
+            ent.navigation.pathIndex = 0;
+            ent.navigation.waitTicks = 10;
+          }
         }
         continue;
       }
@@ -1248,12 +1348,18 @@ export class RtsSimulation {
 
       // Build order logic
       const ownedKinds = new Set<string>();
-      const combatUnits: string[] = [];
+      const idleCombatUnits: string[] = [];
       for (const ent of this.entities.values()) {
         if (ent.ownerId === p.playerId) {
           ownedKinds.add(ent.kind);
-          if (ent.entityType === "UNIT" && ent.kind !== "HARVESTER" && ent.kind !== "MCV") {
-            combatUnits.push(ent.id);
+          if (
+            ent.entityType === "UNIT" &&
+            ent.kind !== "HARVESTER" &&
+            ent.kind !== "MCV" &&
+            ent.stateLabel === "IDLE" &&
+            (!ent.combat || ent.combat.targetEntityId === null)
+          ) {
+            idleCombatUnits.push(ent.id);
           }
         }
       }
@@ -1276,10 +1382,10 @@ export class RtsSimulation {
       }
 
       // Launch periodic attack wave when 5+ combat units are idle
-      if (combatUnits.length >= 5) {
+      if (idleCombatUnits.length >= 5) {
         const enemyTarget = this.findAnyEnemyEntity(p.playerId);
         if (enemyTarget) {
-          this.issueAttackCommand(p.playerId, combatUnits, enemyTarget.id);
+          this.issueAttackCommand(p.playerId, idleCombatUnits, enemyTarget.id);
         }
       }
     }
@@ -1382,21 +1488,35 @@ export class RtsSimulation {
     return null;
   }
 
-  private findNearestOreTile(fromX: number, fromY: number): { x: number; y: number } | null {
-    let best: { x: number; y: number } | null = null;
-    let bestDist = Infinity;
+  private findNearestOreTile(
+    fromX: number,
+    fromY: number,
+    entityId?: string
+  ): { x: number; y: number } | null {
+    let bestPassable: { x: number; y: number } | null = null;
+    let bestPassableDist = Infinity;
+    let bestFallback: { x: number; y: number } | null = null;
+    let bestFallbackDist = Infinity;
+
     for (let y = 0; y < this.height; y++) {
       for (let x = 0; x < this.width; x++) {
         if ((this.oreGrid[y * this.width + x] ?? 0) > 0) {
           const d = Math.hypot(x - fromX, y - fromY);
-          if (d < bestDist) {
-            bestDist = d;
-            best = { x, y };
+          if (d < bestFallbackDist) {
+            bestFallbackDist = d;
+            bestFallback = { x, y };
+          }
+          if (
+            d < bestPassableDist &&
+            this.reservationGrid.isTilePassable(x, y, entityId, false)
+          ) {
+            bestPassableDist = d;
+            bestPassable = { x, y };
           }
         }
       }
     }
-    return best;
+    return bestPassable ?? bestFallback;
   }
 
   private findNearestRefinery(

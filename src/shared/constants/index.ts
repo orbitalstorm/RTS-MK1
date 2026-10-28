@@ -74,7 +74,7 @@ export interface UnitSpec {
   description: string;
 }
 
-export const APP_VERSION = "1.3.0";
+export const APP_VERSION = "1.3.1";
 export const SIM_TICK_RATE_HZ = 20;
 export const SIM_TICK_MS = 50;
 export const MAP_WIDTH_TILES = 48;
@@ -214,6 +214,40 @@ export function interpolateAngleIndex16(
   if (diff === -8) diff = 8;
   const interp = (prevAngleIndex + diff * t + 16) % 16;
   return Math.round(interp) % 16;
+}
+
+export interface EntityPose {
+  x: number;
+  y: number;
+  angleIndex: number;
+  turretAngleIndex: number;
+}
+
+/**
+ * Computes C0-continuous interpolated entity pose at sub-tick factor `alpha` (0..1).
+ * Used both for 60+ FPS rendering and to capture the exact visual pose when a new
+ * 20 Hz network tick arrives so units never jump or rubberband on packet jitter.
+ */
+export function interpolateEntityPose(
+  prev: EntityPose,
+  curr: EntityPose,
+  alpha: number
+): EntityPose {
+  if (Math.hypot(curr.x - prev.x, curr.y - prev.y) >= 3.5) {
+    return {
+      x: curr.x,
+      y: curr.y,
+      angleIndex: curr.angleIndex,
+      turretAngleIndex: curr.turretAngleIndex,
+    };
+  }
+  const t = Math.max(0, Math.min(1, alpha));
+  return {
+    x: Number((prev.x + (curr.x - prev.x) * t).toFixed(4)),
+    y: Number((prev.y + (curr.y - prev.y) * t).toFixed(4)),
+    angleIndex: interpolateAngleIndex16(prev.angleIndex, curr.angleIndex, t),
+    turretAngleIndex: interpolateAngleIndex16(prev.turretAngleIndex, curr.turretAngleIndex, t),
+  };
 }
 
 /**

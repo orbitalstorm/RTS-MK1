@@ -27,18 +27,61 @@ type MinimapSurface = OffscreenCanvas | HTMLCanvasElement;
 type MinimapContext = OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D;
 
 let cachedMinimapSurface: MinimapSurface | null = null;
+let cachedMinimapCtx: MinimapContext | null = null;
 let cachedWidth = 0;
 let cachedHeight = 0;
-let cachedTerrainRef: readonly number[] | null = null;
 let cachedTerrainSig = 0;
+
+let cachedCompositeSurface: MinimapSurface | null = null;
+let cachedCompositeCtx: MinimapContext | null = null;
+let cachedCompositeWidth = 0;
+let cachedCompositeHeight = 0;
+let cachedCompositeTerrainSig = 0;
+let cachedCompositeOreSig = 0;
+let cachedCompositeExploredSize = -1;
 
 function computeTerrainSignature(grid: readonly number[]): number {
   let hash = grid.length | 0;
   const step = Math.max(1, Math.floor(grid.length / 64));
   for (let i = 0; i < grid.length; i += step) {
-    hash = ((hash << 5) - hash + (grid[i] ?? 0)) | 0;
+    const raw = grid[i] ?? 0;
+    const normalized = raw === 3 ? 0 : raw;
+    hash = ((hash << 5) - hash + normalized) | 0;
   }
   return hash;
+}
+
+function computeOrePresenceSignature(oreGrid: readonly number[]): number {
+  let hash = 2166136261;
+  for (let i = 0; i < oreGrid.length; i++) {
+    if ((oreGrid[i] ?? 0) > 0) {
+      hash ^= i;
+      hash = Math.imul(hash, 16777619);
+    }
+  }
+  return hash | 0;
+}
+
+function createMinimapSurface(
+  width: number,
+  height: number
+): { surface: MinimapSurface; ctx: MinimapContext } | null {
+  try {
+    if (typeof OffscreenCanvas !== "undefined") {
+      const surface = new OffscreenCanvas(width, height);
+      const ctx = surface.getContext("2d");
+      if (ctx) return { surface, ctx };
+    } else if (typeof document !== "undefined") {
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      if (ctx) return { surface: canvas, ctx };
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 function getOrBuildMinimapTerrainCache(
@@ -55,63 +98,157 @@ function getOrBuildMinimapTerrainCache(
     cachedMinimapSurface !== null &&
     cachedWidth === width &&
     cachedHeight === height &&
-    (cachedTerrainRef === terrainGrid || cachedTerrainSig === sig)
+    cachedTerrainSig === sig
   ) {
     return cachedMinimapSurface;
   }
 
-  let surface: MinimapSurface | null = null;
-  let offCtx: MinimapContext | null = null;
-
-  try {
-    if (typeof OffscreenCanvas !== "undefined") {
-      surface = new OffscreenCanvas(width, height);
-      offCtx = surface.getContext("2d");
-    } else if (typeof document !== "undefined") {
-      const canvas = document.createElement("canvas");
-      canvas.width = width;
-      canvas.height = height;
-      surface = canvas;
-      offCtx = canvas.getContext("2d");
-    }
-  } catch {
-    return null;
+  if (!cachedMinimapSurface || !cachedMinimapCtx || cachedWidth !== width || cachedHeight !== height) {
+    const created = createMinimapSurface(width, height);
+    if (!created) return null;
+    cachedMinimapSurface = created.surface;
+    cachedMinimapCtx = created.ctx;
   }
 
-  if (!surface || !offCtx) {
-    return null;
-  }
+  const surface = cachedMinimapSurface;
+  const offCtx = cachedMinimapCtx;
 
   const scaleX = width / MAP_WIDTH_TILES;
   const scaleY = height / MAP_HEIGHT_TILES;
-  const cellW = Math.ceil(scaleX);
   const cellH = Math.ceil(scaleY);
 
   offCtx.fillStyle = "#1e1b16";
   offCtx.fillRect(0, 0, width, height);
 
   for (let y = 0; y < MAP_HEIGHT_TILES; y++) {
+    const rowOffset = y * MAP_WIDTH_TILES;
     for (let x = 0; x < MAP_WIDTH_TILES; x++) {
-      const idx = y * MAP_WIDTH_TILES + x;
+      const idx = rowOffset + x;
       const t = terrainGrid[idx] ?? 0;
-      if (t === 0) continue; // Already filled with #1e1b16 base sand color
-      if (t === 2) {
-        offCtx.fillStyle = "#475569";
-      } else if (t === 1) {
-        offCtx.fillStyle = "#334155";
-      } else {
-        offCtx.fillStyle = "#16a34a";
-      }
-      offCtx.fillRect(x * scaleX, y * scaleY, cellW, cellH);
+      if (t === 0 || t === 3) continue; // Base sand color already filled (#1e1b16); dynamic ore drawn in composite layer
+      offCtx.fillStyle = t === 2 ? "#475569" : "#334155";
+      offCtx.fillRect(x * scaleX, y * scaleY, Math.ceil(scaleX), cellH);
     }
   }
 
-  cachedMinimapSurface = surface;
   cachedWidth = width;
   cachedHeight = height;
-  cachedTerrainRef = terrainGrid;
   cachedTerrainSig = sig;
   return surface;
+}
+
+function getOrBuildMinimapCompositeCache(
+  width: number,
+  height: number,
+  terrainGrid: readonly number[],
+  oreGrid: readonly number[],
+  exploredCells: ReadonlySet<number>
+): MinimapSurface | null {
+  const terrainCache = getOrBuildMinimapTerrainCache(width, height, terrainGrid);
+  if (!terrainCache) return null;
+
+  const terrainSig = cachedTerrainSig;
+  const oreSig = computeOrePresenceSignature(oreGrid);
+  const exploredSize = exploredCells.size;
+
+  if (
+    cachedCompositeSurface !== null &&
+    cachedCompositeWidth === width &&
+    cachedCompositeHeight === height &&
+    cachedCompositeTerrainSig === terrainSig &&
+    cachedCompositeOreSig === oreSig &&
+    cachedCompositeExploredSize === exploredSize
+  ) {
+    return cachedCompositeSurface;
+  }
+
+  if (
+    !cachedCompositeSurface ||
+    !cachedCompositeCtx ||
+    cachedCompositeWidth !== width ||
+    cachedCompositeHeight !== height
+  ) {
+    const created = createMinimapSurface(width, height);
+    if (!created) return null;
+    cachedCompositeSurface = created.surface;
+    cachedCompositeCtx = created.ctx;
+  }
+
+  const compCtx = cachedCompositeCtx;
+  compCtx.drawImage(terrainCache, 0, 0, width, height);
+
+  const scaleX = width / MAP_WIDTH_TILES;
+  const scaleY = height / MAP_HEIGHT_TILES;
+  const cellH = Math.ceil(scaleY);
+  const hasFog = exploredSize > 0;
+
+  // Horizontal span batching for live ore tiles
+  compCtx.fillStyle = "#16a34a";
+  for (let y = 0; y < MAP_HEIGHT_TILES; y++) {
+    const rowOffset = y * MAP_WIDTH_TILES;
+    let spanStart = -1;
+    for (let x = 0; x < MAP_WIDTH_TILES; x++) {
+      const idx = rowOffset + x;
+      const isVisibleOre = (oreGrid[idx] ?? 0) > 0 && (!hasFog || exploredCells.has(idx));
+      if (isVisibleOre) {
+        if (spanStart === -1) spanStart = x;
+      } else if (spanStart !== -1) {
+        compCtx.fillRect(
+          spanStart * scaleX,
+          y * scaleY,
+          Math.ceil((x - spanStart) * scaleX),
+          cellH
+        );
+        spanStart = -1;
+      }
+    }
+    if (spanStart !== -1) {
+      compCtx.fillRect(
+        spanStart * scaleX,
+        y * scaleY,
+        Math.ceil((MAP_WIDTH_TILES - spanStart) * scaleX),
+        cellH
+      );
+    }
+  }
+
+  // Horizontal span batching for unexplored shroud tiles
+  if (hasFog) {
+    compCtx.fillStyle = "#070a0f";
+    for (let y = 0; y < MAP_HEIGHT_TILES; y++) {
+      const rowOffset = y * MAP_WIDTH_TILES;
+      let spanStart = -1;
+      for (let x = 0; x < MAP_WIDTH_TILES; x++) {
+        const idx = rowOffset + x;
+        if (!exploredCells.has(idx)) {
+          if (spanStart === -1) spanStart = x;
+        } else if (spanStart !== -1) {
+          compCtx.fillRect(
+            spanStart * scaleX,
+            y * scaleY,
+            Math.ceil((x - spanStart) * scaleX),
+            cellH
+          );
+          spanStart = -1;
+        }
+      }
+      if (spanStart !== -1) {
+        compCtx.fillRect(
+          spanStart * scaleX,
+          y * scaleY,
+          Math.ceil((MAP_WIDTH_TILES - spanStart) * scaleX),
+          cellH
+        );
+      }
+    }
+  }
+
+  cachedCompositeWidth = width;
+  cachedCompositeHeight = height;
+  cachedCompositeTerrainSig = terrainSig;
+  cachedCompositeOreSig = oreSig;
+  cachedCompositeExploredSize = exploredSize;
+  return cachedCompositeSurface;
 }
 
 export function renderMinimapRadar(input: MinimapRenderInput): void {
@@ -169,30 +306,13 @@ export function renderMinimapRadar(input: MinimapRenderInput): void {
   const cellW = Math.ceil(scaleX);
   const cellH = Math.ceil(scaleY);
 
-  const terrainCache =
+  const compositeCache =
     typeof ctx.drawImage === "function"
-      ? getOrBuildMinimapTerrainCache(width, height, terrainGrid)
+      ? getOrBuildMinimapCompositeCache(width, height, terrainGrid, oreGrid, exploredCells)
       : null;
 
-  if (terrainCache) {
-    ctx.drawImage(terrainCache, 0, 0, width, height);
-
-    // Overlay dynamic ore & shroud masking
-    for (let y = 0; y < MAP_HEIGHT_TILES; y++) {
-      for (let x = 0; x < MAP_WIDTH_TILES; x++) {
-        const idx = y * MAP_WIDTH_TILES + x;
-        if (exploredCells.size > 0 && !exploredCells.has(idx)) {
-          ctx.fillStyle = "#070a0f";
-          ctx.fillRect(x * scaleX, y * scaleY, cellW, cellH);
-          continue;
-        }
-        const ore = oreGrid[idx] ?? 0;
-        if (ore > 0) {
-          ctx.fillStyle = "#16a34a";
-          ctx.fillRect(x * scaleX, y * scaleY, cellW, cellH);
-        }
-      }
-    }
+  if (compositeCache) {
+    ctx.drawImage(compositeCache, 0, 0, width, height);
   } else {
     // Fallback direct tile fill when OffscreenCanvas is unavailable
     for (let y = 0; y < MAP_HEIGHT_TILES; y++) {
