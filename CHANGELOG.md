@@ -2,6 +2,27 @@
 
 All notable changes to **RTS-MK1** (`https://rts-mk1.orbital8.cloud`) follow strict non-reusable `v1.x.y` versioning.
 
+## [v1.2.0] — 2026-10-28
+
+### Added
+- **Leonardo High-Precision Multi-Layered Vector Art & SVG Assets (`src/renderer/generator/leonardo-vector-art.ts`, `src/components/hud/leonardo-icons.tsx`, `src/renderer/generator/atlas-generator.ts`)**:
+  - Upgraded the procedural `OffscreenCanvas` -> `ImageBitmap` pipeline to **2x internal resolution (`SPRITE_ATLAS_SCALE = 2`, `64x64` per tile)** for razor-sharp visuals up to `2.0x` tactical zoom.
+  - Added 4-layer technical vector illustrations for all 11 structures, 9 units (across 16 orientations + independent rotating turrets), 4 terrain types, and a 12-frame procedural explosion sprite strip.
+  - Added multi-layered `<svg>` faction emblems (`FactionVectorEmblem`) and unit/building technical schematic cards (`ProductionItemVectorIcon`) across the Portal and Classic C&C Sidebar HUD (`0` inline `style` attributes).
+- **Battlefield Game Juice Engine — Explosions, Shockwaves, Craters, Damage Smoke & Camera Shake (`src/renderer/vfx-manager.ts`, `src/renderer/camera.ts`, `src/shared/schemas/deltas.ts`, `src/audio/synthesizer.ts`)**:
+  - Added `VisualEffectEventSchema` (`MUZZLE_FLASH`, `SHELL_IMPACT`, `ROCKET_EXPLOSION`, `LASER_BURN`, `UNIT_EXPLOSION`, `BUILDING_DEMOLITION`, `HARVEST_SPARKS`) in `TickDelta`.
+  - Added quadratic trauma-based damped harmonic **Camera Shake** (`computeCameraShakeOffset`, `computeDistanceAttenuatedShakeTrauma`) on `TacticalCamera` with distance attenuation.
+  - Added `BattlefieldVfxManager` rendering 60+ FPS traveling projectiles (smoke-trailing rockets, glowing thermal lasers, artillery shells), multi-stage explosions, shockwave rings, persistent scorched craters, harvesting crystal sparks, and rising damage smoke/embers on structures and vehicles below 55% HP.
+  - Enhanced `EXPLOSION_LARGE`, `EXPLOSION_SMALL`, and `CANNON_FIRE` in `src/audio/synthesizer.ts` with deep sub-bass impact oscillators.
+
+### Fixed
+- **Root-Cause Elimination of Engine & Frame-Pacing Stutter (`src/engine/simulation.ts`, `src/store/game-store.ts`, `src/app/game/[lobbyId]/page.tsx`, `src/renderer/world-renderer.ts`, `src/renderer/minimap-renderer.ts`, `src/audio/synthesizer.ts`)**:
+  - **Sub-Tile Waypoint Residual Traversal (`src/engine/simulation.ts`)**: Fixed the root-cause movement slowdown in `stepUnitMovement()` where units reaching a waypoint with `dist <= step` discarded the remainder of their movement step (`step - dist`), causing an ~85% speed drop every time a unit crossed a tile boundary (~3 times/sec). Units now consume their full `speedTilesPerTick` budget seamlessly across consecutive path segments within the same tick.
+  - **Zero-React-Re-render 60 FPS Loop (`src/app/game/[lobbyId]/page.tsx`, `src/store/game-store.ts`)**: Replaced un-selected `useRtsGameStore()` hooks with atomic Zustand selectors and mutated `pendingAcousticEvents` / `pendingVisualEffects` in-place via `.splice()` instead of calling `set()` inside `requestAnimationFrame`, eliminating 20 Hz–60 Hz full-page React DOM reconciliations during combat.
+  - **Zero Layout Thrashing (`src/app/game/[lobbyId]/page.tsx`)**: Replaced per-frame `canvas.getBoundingClientRect()` inside `requestAnimationFrame` with a container `ResizeObserver`.
+  - **OffscreenCanvas Terrain & Minimap Caching + Shortest-Arc Angle Interpolation (`src/renderer/world-renderer.ts`, `src/renderer/minimap-renderer.ts`)**: Cached the static 48x48 battlefield terrain and minimap base layers on offscreen surfaces (eliminating >3,500 redundant draw/fill calls per frame) and added `interpolateAngleIndex16` + adaptive tick duration smoothing.
+  - **AudioBuffer `WeakMap` Cache (`src/audio/synthesizer.ts`)**: Cached Hann-windowed white/pink noise `AudioBuffer`s per `AudioContext` to eliminate synchronous main-thread `Float32Array` allocations and `Math.sin()` loops during heavy firefights.
+
 ## [v1.1.0] — 2026-10-28
 
 ### Added

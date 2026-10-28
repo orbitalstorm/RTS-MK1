@@ -10,6 +10,7 @@ import type {
   PlayerEconomyDelta,
   ProjectileVisual,
   TickDelta,
+  VisualEffectEvent,
 } from "../shared/schemas/deltas";
 import { ServerMessageSchema, type ServerMutexOverview } from "../shared/schemas/lobby";
 
@@ -28,6 +29,7 @@ export interface RtsGameStoreState {
   // Simulation state (synchronized via FullSnapshot + 20Hz TickDeltas)
   tickId: number;
   lastTickReceivedAt: number;
+  tickDurationMs: number;
   terrainGrid: number[];
   oreGrid: number[];
   prevEntities: Map<string, EntityState>;
@@ -37,6 +39,7 @@ export interface RtsGameStoreState {
   visibleByPlayer: Map<string, Set<number>>;
   recentProjectiles: ProjectileVisual[];
   pendingAcousticEvents: AcousticEvent[];
+  pendingVisualEffects: VisualEffectEvent[];
   winnerPlayerId: string | null;
 
   // Tactical UI Selection & Modes
@@ -55,6 +58,7 @@ export interface RtsGameStoreState {
   setSellMode: (enabled: boolean) => void;
   setAudioMuted: (muted: boolean) => void;
   consumeAcousticEvents: () => AcousticEvent[];
+  consumeVisualEffects: () => VisualEffectEvent[];
   triggerProduction: (category: ProductionCategory, itemKind: BuildingKind | UnitKind) => void;
 }
 
@@ -89,6 +93,7 @@ export const useRtsGameStore = create<RtsGameStoreState>((set, get) => ({
 
   tickId: 0,
   lastTickReceivedAt: 0,
+  tickDurationMs: 50,
   terrainGrid: new Array<number>(MAP_WIDTH_TILES * MAP_HEIGHT_TILES).fill(0),
   oreGrid: new Array<number>(MAP_WIDTH_TILES * MAP_HEIGHT_TILES).fill(0),
   prevEntities: new Map(),
@@ -98,6 +103,7 @@ export const useRtsGameStore = create<RtsGameStoreState>((set, get) => ({
   visibleByPlayer: new Map(),
   recentProjectiles: [],
   pendingAcousticEvents: [],
+  pendingVisualEffects: [],
   winnerPlayerId: null,
 
   selectedEntityIds: new Set(),
@@ -197,11 +203,15 @@ export const useRtsGameStore = create<RtsGameStoreState>((set, get) => ({
   setAudioMuted: (muted) => set({ audioMuted: muted }),
 
   consumeAcousticEvents: () => {
-    const events = get().pendingAcousticEvents;
-    if (events.length > 0) {
-      set({ pendingAcousticEvents: [] });
-    }
-    return events;
+    const queue = get().pendingAcousticEvents;
+    if (queue.length === 0) return [];
+    return queue.splice(0, queue.length);
+  },
+
+  consumeVisualEffects: () => {
+    const queue = get().pendingVisualEffects;
+    if (queue.length === 0) return [];
+    return queue.splice(0, queue.length);
   },
 
   triggerProduction: (category, itemKind) => {
@@ -242,6 +252,7 @@ function applySnapshot(
     currentLobbyId: snap.lobbyId,
     tickId: snap.tickId,
     lastTickReceivedAt: performance.now(),
+    tickDurationMs: 50,
     terrainGrid: snap.terrainGrid,
     oreGrid: snap.oreGrid,
     prevEntities: new Map(entitiesMap),
@@ -249,6 +260,8 @@ function applySnapshot(
     playersEconomy: playersMap,
     exploredByPlayer: exploredMap,
     visibleByPlayer: visibleMap,
+    pendingAcousticEvents: [],
+    pendingVisualEffects: [],
     winnerPlayerId: snap.winnerPlayerId,
     evaBannerText: "SYNCHRONISATION SNAPSHOT COMPLÈTE",
   });
@@ -365,9 +378,28 @@ function applyDelta(
     }
   }
 
+  if (delta.acousticEvents.length > 0) {
+    st.pendingAcousticEvents.push(...delta.acousticEvents);
+    if (st.pendingAcousticEvents.length > 128) {
+      st.pendingAcousticEvents.splice(0, st.pendingAcousticEvents.length - 128);
+    }
+  }
+  if (delta.visualEffects.length > 0) {
+    st.pendingVisualEffects.push(...delta.visualEffects);
+    if (st.pendingVisualEffects.length > 128) {
+      st.pendingVisualEffects.splice(0, st.pendingVisualEffects.length - 128);
+    }
+  }
+
+  const now = performance.now();
+  const measuredDt = st.lastTickReceivedAt > 0 ? now - st.lastTickReceivedAt : 50;
+  const clampedDt = Math.max(40, Math.min(75, measuredDt));
+  const tickDurationMs = st.tickDurationMs * 0.75 + clampedDt * 0.25;
+
   set({
     tickId: delta.tickId,
-    lastTickReceivedAt: performance.now(),
+    lastTickReceivedAt: now,
+    tickDurationMs,
     prevEntities,
     currEntities,
     oreGrid,
@@ -376,7 +408,6 @@ function applyDelta(
     exploredByPlayer,
     visibleByPlayer,
     recentProjectiles: delta.projectiles,
-    pendingAcousticEvents: [...st.pendingAcousticEvents, ...delta.acousticEvents],
     winnerPlayerId: delta.winnerPlayerId,
     placementBuilding,
     evaBannerText,

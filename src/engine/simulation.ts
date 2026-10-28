@@ -24,6 +24,8 @@ import {
   type PlayerEconomyDelta,
   type ProjectileVisual,
   type TickDelta,
+  type VisualEffectEvent,
+  type VisualEffectKind,
 } from "../shared/schemas/deltas";
 import type { EcsEntity, PlayerSimState, ProductionSlotState } from "./ecs/types";
 import { FogOfWarManager } from "./fog/fog-of-war";
@@ -99,6 +101,7 @@ export class RtsSimulation {
   private destroyedThisTick: string[] = [];
   private oreUpdatesThisTick: Map<number, OreTileDelta> = new Map();
   private projectilesThisTick: ProjectileVisual[] = [];
+  private visualEffectsThisTick: VisualEffectEvent[] = [];
   private acousticEventsThisTick: AcousticEvent[] = [];
   private winnerPlayerId: string | null = null;
 
@@ -603,6 +606,14 @@ export class RtsSimulation {
     const spec = BUILDINGS[ent.kind as BuildingKind];
     const refund = Math.round(spec.cost * 0.5 * (ent.health.hp / ent.health.maxHp));
     player.credits = Math.min(player.maxStorage, player.credits + refund);
+    this.pushVisualEffect(
+      "UNIT_EXPLOSION",
+      ent.transform.x + (spec.footprintW - 1) * 0.5,
+      ent.transform.y + (spec.footprintH - 1) * 0.5,
+      1.2,
+      0.18,
+      ent.faction
+    );
     this.destroyEntity(ent.id);
     this.recomputeAllPlayerEconomies();
     this.pushAcoustic("CREDITS_TICK", ent.transform.x, ent.transform.y, playerId);
@@ -654,6 +665,7 @@ export class RtsSimulation {
       oreUpdates: Array.from(this.oreUpdatesThisTick.values()),
       players: Array.from(this.players.values()).map((p) => this.serializePlayerEconomy(p)),
       projectiles: [...this.projectilesThisTick],
+      visualEffects: [...this.visualEffectsThisTick],
       acousticEvents: [...this.acousticEventsThisTick],
       fogByPlayer,
       winnerPlayerId: this.winnerPlayerId,
@@ -663,6 +675,7 @@ export class RtsSimulation {
     this.destroyedThisTick = [];
     this.oreUpdatesThisTick.clear();
     this.projectilesThisTick = [];
+    this.visualEffectsThisTick = [];
     this.acousticEventsThisTick = [];
 
     for (const ent of this.entities.values()) {
@@ -897,6 +910,9 @@ export class RtsSimulation {
           tileY: ty,
           oreAmount: this.oreGrid[idx]!,
         });
+        if (this.tickCounter % 4 === 0) {
+          this.pushVisualEffect("HARVEST_SPARKS", tx, ty, 0.55, 0, ent.faction);
+        }
 
         if (harv.cargoOre >= harv.maxCapacity) {
           harv.state = "RETURNING_TO_REFINERY";
@@ -974,54 +990,79 @@ export class RtsSimulation {
         continue;
       }
 
-      const waypoint = nav.path[nav.pathIndex]!;
-      const curTileX = Math.round(ent.transform.x);
-      const curTileY = Math.round(ent.transform.y);
+      const startTileX = Math.round(ent.transform.x);
+      const startTileY = Math.round(ent.transform.y);
+      let remainingStep = nav.speedTilesPerTick;
+      let movedThisTick = false;
+      let lastDx = 0;
+      let lastDy = 0;
 
-      // Reserve the waypoint tile before entering it
-      if (
-        (waypoint.x !== curTileX || waypoint.y !== curTileY) &&
-        !this.reservationGrid.isTilePassable(waypoint.x, waypoint.y, ent.id, false)
-      ) {
-        nav.waitTicks++;
-        if (nav.waitTicks >= 4) {
-          const finalGoal = nav.path[nav.path.length - 1]!;
-          nav.path = this.pathfinder.findPath(
-            ent.transform.x,
-            ent.transform.y,
-            finalGoal.x,
-            finalGoal.y,
-            this.reservationGrid,
-            ent.id,
-            true
-          );
-          nav.pathIndex = 0;
-          nav.waitTicks = 0;
+      while (remainingStep > 0.0001 && nav.pathIndex < nav.path.length) {
+        const waypoint = nav.path[nav.pathIndex]!;
+        const curTileX = Math.round(ent.transform.x);
+        const curTileY = Math.round(ent.transform.y);
+
+        // Reserve the waypoint tile before entering it
+        if (
+          (waypoint.x !== curTileX || waypoint.y !== curTileY) &&
+          !this.reservationGrid.isTilePassable(waypoint.x, waypoint.y, ent.id, false)
+        ) {
+          if (!movedThisTick) {
+            nav.waitTicks++;
+            if (nav.waitTicks >= 4) {
+              const finalGoal = nav.path[nav.path.length - 1]!;
+              nav.path = this.pathfinder.findPath(
+                ent.transform.x,
+                ent.transform.y,
+                finalGoal.x,
+                finalGoal.y,
+                this.reservationGrid,
+                ent.id,
+                true
+              );
+              nav.pathIndex = 0;
+              nav.waitTicks = 0;
+            }
+          }
+          break;
         }
+
+        nav.waitTicks = 0;
+        const dx = waypoint.x - ent.transform.x;
+        const dy = waypoint.y - ent.transform.y;
+        const dist = Math.hypot(dx, dy);
+
+        if (dist > 0.0001) {
+          lastDx = dx;
+          lastDy = dy;
+        }
+
+        if (dist <= remainingStep) {
+          ent.transform.x = waypoint.x;
+          ent.transform.y = waypoint.y;
+          remainingStep -= dist;
+          nav.pathIndex++;
+          movedThisTick = true;
+        } else {
+          ent.transform.x = Number((ent.transform.x + (dx / dist) * remainingStep).toFixed(4));
+          ent.transform.y = Number((ent.transform.y + (dy / dist) * remainingStep).toFixed(4));
+          remainingStep = 0;
+          movedThisTick = true;
+        }
+      }
+
+      if (!movedThisTick) {
         continue;
       }
 
-      nav.waitTicks = 0;
-      const dx = waypoint.x - ent.transform.x;
-      const dy = waypoint.y - ent.transform.y;
-      const dist = Math.hypot(dx, dy);
-      const step = nav.speedTilesPerTick;
+      this.reservationGrid.releaseUnitTile(startTileX, startTileY, ent.id);
 
-      this.reservationGrid.releaseUnitTile(curTileX, curTileY, ent.id);
-
-      if (dist <= step) {
-        ent.transform.x = waypoint.x;
-        ent.transform.y = waypoint.y;
-        nav.pathIndex++;
-      } else {
-        ent.transform.x = Number((ent.transform.x + (dx / dist) * step).toFixed(3));
-        ent.transform.y = Number((ent.transform.y + (dy / dist) * step).toFixed(3));
-      }
-
-      const newAngle = vectorToAngleIndex16(dx, dy);
-      ent.transform.angleIndex = newAngle;
-      if (!ent.combat || !ent.combat.targetEntityId) {
-        ent.transform.turretAngleIndex = newAngle;
+      if (lastDx !== 0 || lastDy !== 0) {
+        const newAngle = vectorToAngleIndex16(lastDx, lastDy);
+        ent.transform.angleIndex = newAngle;
+        if (!ent.combat || !ent.combat.targetEntityId) {
+          ent.transform.turretAngleIndex = newAngle;
+        }
       }
 
       this.reservationGrid.reserveUnitTile(
@@ -1122,7 +1163,26 @@ export class RtsSimulation {
           toX: tx,
           toY: ty,
           weaponStyle,
+          faction: ent.faction,
         });
+
+        this.pushVisualEffect("MUZZLE_FLASH", ent.transform.x, ent.transform.y, 0.55, 0, ent.faction);
+        if (weaponStyle === "LASER") {
+          this.pushVisualEffect("LASER_BURN", tx, ty, 1.1, 0.32, ent.faction);
+        } else if (weaponStyle === "ROCKET") {
+          this.pushVisualEffect("ROCKET_EXPLOSION", tx, ty, 1.0, 0.24, ent.faction);
+        } else if (weaponStyle === "SHELL") {
+          this.pushVisualEffect(
+            "SHELL_IMPACT",
+            tx,
+            ty,
+            ent.kind === "MAMMOTH_TANK" ? 1.05 : 0.8,
+            ent.kind === "MAMMOTH_TANK" ? 0.28 : 0.16,
+            ent.faction
+          );
+        } else {
+          this.pushVisualEffect("SHELL_IMPACT", tx, ty, 0.45, 0, ent.faction);
+        }
 
         const soundKind =
           weaponStyle === "LASER"
@@ -1141,6 +1201,14 @@ export class RtsSimulation {
         }
 
         if (target.health.hp <= 0) {
+          this.pushVisualEffect(
+            target.entityType === "BUILDING" ? "BUILDING_DEMOLITION" : "UNIT_EXPLOSION",
+            tx,
+            ty,
+            target.entityType === "BUILDING" ? 2.5 : 1.45,
+            target.entityType === "BUILDING" ? 0.95 : 0.55,
+            target.faction
+          );
           this.pushAcoustic(
             target.entityType === "BUILDING" ? "EXPLOSION_LARGE" : "EXPLOSION_SMALL",
             tx,
@@ -1410,6 +1478,25 @@ export class RtsSimulation {
       worldX,
       worldY,
       targetPlayerId,
+    });
+  }
+
+  private pushVisualEffect(
+    effectKind: VisualEffectKind,
+    worldX: number,
+    worldY: number,
+    radiusTiles: number,
+    shakeIntensity: number,
+    faction: FactionId | null
+  ): void {
+    this.visualEffectsThisTick.push({
+      id: `vfx_${this.tickCounter}_${this.visualEffectsThisTick.length}`,
+      effectKind,
+      worldX,
+      worldY,
+      radiusTiles,
+      shakeIntensity,
+      faction,
     });
   }
 

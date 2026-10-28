@@ -1,13 +1,28 @@
 import type { AcousticEvent } from "../shared/schemas/deltas";
 
+const noiseBufferCache = new WeakMap<AudioContext, Map<string, AudioBuffer>>();
+
 /**
  * Generates a Hann-windowed noise AudioBuffer in memory to prevent boundary clicks/pops.
+ * Buffers are cached per AudioContext so combat bursts trigger zero allocations on the main thread.
  */
 export function createWindowedNoiseBuffer(
   ctx: AudioContext,
   durationSec: number,
   pinkFilter = false
 ): AudioBuffer {
+  let ctxCache = noiseBufferCache.get(ctx);
+  if (!ctxCache) {
+    ctxCache = new Map<string, AudioBuffer>();
+    noiseBufferCache.set(ctx, ctxCache);
+  }
+
+  const cacheKey = `${durationSec.toFixed(3)}:${pinkFilter ? "pink" : "white"}`;
+  const cached = ctxCache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
   const sampleRate = ctx.sampleRate;
   const length = Math.max(1, Math.floor(sampleRate * durationSec));
   const buffer = ctx.createBuffer(1, length, sampleRate);
@@ -30,6 +45,8 @@ export function createWindowedNoiseBuffer(
       data[i] = white * windowHann;
     }
   }
+
+  ctxCache.set(cacheKey, buffer);
   return buffer;
 }
 
@@ -77,6 +94,27 @@ export function synthesizeSoundOnNode(
     gain.connect(destination);
     noise.start(now);
     noise.stop(now + duration + 0.01);
+
+    // Sub-bass shockwave (explosions) or breech/muzzle thump (cannon fire)
+    const subOsc = ctx.createOscillator();
+    const subGain = ctx.createGain();
+    const startFreq = soundKind === "EXPLOSION_LARGE" ? 115 : soundKind === "EXPLOSION_SMALL" ? 145 : 180;
+    const endFreq = soundKind === "EXPLOSION_LARGE" ? 26 : soundKind === "EXPLOSION_SMALL" ? 36 : 52;
+    const impactDuration = soundKind === "EXPLOSION_LARGE" ? 0.48 : soundKind === "EXPLOSION_SMALL" ? 0.28 : 0.12;
+    const impactPeakGain = soundKind === "EXPLOSION_LARGE" ? 0.48 : soundKind === "EXPLOSION_SMALL" ? 0.34 : 0.26;
+
+    subOsc.type = soundKind === "CANNON_FIRE" ? "triangle" : "sine";
+    subOsc.frequency.setValueAtTime(startFreq, now);
+    subOsc.frequency.exponentialRampToValueAtTime(endFreq, now + impactDuration);
+
+    subGain.gain.setValueAtTime(impactPeakGain, now);
+    subGain.gain.exponentialRampToValueAtTime(0.0001, now + impactDuration);
+
+    subOsc.connect(subGain);
+    subGain.connect(destination);
+    subOsc.start(now);
+    subOsc.stop(now + impactDuration + 0.01);
+
     return Math.round(duration * 1000);
   }
 

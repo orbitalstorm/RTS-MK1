@@ -7,6 +7,8 @@ export type {
   PlayerEconomyDelta,
   AcousticEvent,
   ProjectileVisual,
+  VisualEffectKind,
+  VisualEffectEvent,
   FogPlayerCells,
   TickDelta,
   FullSnapshot,

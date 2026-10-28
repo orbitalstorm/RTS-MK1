@@ -26,6 +26,7 @@ import {
 import { globalAudioMixer } from "../../audio/mixer";
 import { useRtsGameStore } from "../../store/game-store";
 import { Badge, Button, DiscretizedProgressBar } from "../ui/primitives";
+import { FactionVectorEmblem, ProductionItemVectorIcon } from "./leonardo-icons";
 
 interface ClassicSidebarHudProps {
   minimapCanvasRef: React.RefObject<HTMLCanvasElement | null>;
@@ -44,19 +45,17 @@ export function ClassicSidebarHud({
   onCycleZoom,
   onSelectZoom,
 }: ClassicSidebarHudProps) {
-  const {
-    playerId,
-    faction,
-    currEntities,
-    playersEconomy,
-    placementBuilding,
-    sellMode,
-    audioMuted,
-    setPlacementBuilding,
-    setSellMode,
-    setAudioMuted,
-    triggerProduction,
-  } = useRtsGameStore();
+  const playerId = useRtsGameStore((s) => s.playerId);
+  const faction = useRtsGameStore((s) => s.faction);
+  const currEntities = useRtsGameStore((s) => s.currEntities);
+  const playersEconomy = useRtsGameStore((s) => s.playersEconomy);
+  const placementBuilding = useRtsGameStore((s) => s.placementBuilding);
+  const sellMode = useRtsGameStore((s) => s.sellMode);
+  const audioMuted = useRtsGameStore((s) => s.audioMuted);
+  const setPlacementBuilding = useRtsGameStore((s) => s.setPlacementBuilding);
+  const setSellMode = useRtsGameStore((s) => s.setSellMode);
+  const setAudioMuted = useRtsGameStore((s) => s.setAudioMuted);
+  const triggerProduction = useRtsGameStore((s) => s.triggerProduction);
 
   const [activeTab, setActiveTab] = useState<ProductionCategory>("BUILDING");
 
@@ -102,9 +101,15 @@ export function ClassicSidebarHud({
       {/* Top Faction & Credits Display */}
       <div className="border-b border-slate-800 bg-slate-950/90 p-3 space-y-2">
         <div className="flex items-center justify-between">
-          <Badge className={FACTIONS[myEcon?.faction ?? faction].badgeClass}>
-            {myEcon?.faction ?? faction} COMMAND
-          </Badge>
+          <div className="flex items-center gap-2">
+            <FactionVectorEmblem
+              faction={myEcon?.faction ?? faction}
+              className="h-7 w-7 shrink-0"
+            />
+            <Badge className={FACTIONS[myEcon?.faction ?? faction].badgeClass}>
+              {myEcon?.faction ?? faction} COMMAND
+            </Badge>
+          </div>
           <div className="flex items-center gap-1.5">
             <Button variant="ghost" size="sm" onClick={handleToggleMute}>
               {audioMuted ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
@@ -298,17 +303,26 @@ export function ClassicSidebarHud({
               key={item.kind}
               className={
                 unlocked
-                  ? "rounded border border-slate-800 bg-slate-900/80 p-2.5 space-y-1.5"
-                  : "rounded border border-slate-900 bg-slate-950/60 p-2.5 opacity-50 space-y-1.5"
+                  ? "rounded border border-slate-800 bg-slate-900/80 p-2.5 space-y-2"
+                  : "rounded border border-slate-900 bg-slate-950/60 p-2.5 opacity-50 space-y-2"
               }
             >
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-100">{item.name}</span>
-                <Badge className="border-amber-500/40 bg-amber-500/10 text-amber-300">
-                  {item.cost} cr
-                </Badge>
+              <div className="flex items-start gap-2.5">
+                <ProductionItemVectorIcon
+                  itemKind={item.kind}
+                  faction={myEcon?.faction ?? faction}
+                  className="h-12 w-12 shrink-0 rounded border border-slate-700/80 bg-slate-950 p-1"
+                />
+                <div className="min-w-0 flex-1 space-y-1">
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="truncate text-xs font-bold text-slate-100">{item.name}</span>
+                    <Badge className="shrink-0 border-amber-500/40 bg-amber-500/10 text-amber-300">
+                      {item.cost} cr
+                    </Badge>
+                  </div>
+                  <p className="text-[11px] leading-snug text-slate-400">{item.description}</p>
+                </div>
               </div>
-              <p className="text-[11px] leading-snug text-slate-400">{item.description}</p>
 
               <div className="flex items-center justify-between pt-1">
                 <span className="text-[10px] text-slate-500">

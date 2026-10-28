@@ -20,7 +20,6 @@ import {
   FACTIONS,
   MAP_HEIGHT_TILES,
   MAP_WIDTH_TILES,
-  SIM_TICK_MS,
   TILE_PIXEL_SIZE,
   ZOOM_LEVELS,
   type BuildingKind,
@@ -28,6 +27,7 @@ import {
 } from "../../../shared/constants";
 import { globalAudioMixer } from "../../../audio/mixer";
 import { ClassicSidebarHud } from "../../../components/hud/classic-sidebar-hud";
+import { FactionVectorEmblem } from "../../../components/hud/leonardo-icons";
 import { Badge, Button, Card, DiscretizedProgressBar } from "../../../components/ui/primitives";
 import { TacticalCamera } from "../../../renderer/camera";
 import {
@@ -35,6 +35,7 @@ import {
   type ProceduralSpriteAtlas,
 } from "../../../renderer/generator/atlas-generator";
 import { renderMinimapRadar } from "../../../renderer/minimap-renderer";
+import { BattlefieldVfxManager } from "../../../renderer/vfx-manager";
 import { renderTacticalWorld } from "../../../renderer/world-renderer";
 import { useRtsGameStore, type RtsGameStoreState } from "../../../store/game-store";
 
@@ -104,18 +105,18 @@ export default function GameMatchPage() {
   const router = useRouter();
   const lobbyId = decodeURIComponent(params.lobbyId);
 
-  const {
-    playerId,
-    commanderName,
-    faction,
-    overview,
-    evaBannerText,
-    winnerPlayerId,
-    connectWebSocket,
-    sendMessage,
-    setSelectedEntities,
-    setPlacementBuilding,
-  } = useRtsGameStore();
+  const playerId = useRtsGameStore((s) => s.playerId);
+  const commanderName = useRtsGameStore((s) => s.commanderName);
+  const faction = useRtsGameStore((s) => s.faction);
+  const overview = useRtsGameStore((s) => s.overview);
+  const evaBannerText = useRtsGameStore((s) => s.evaBannerText);
+  const winnerPlayerId = useRtsGameStore((s) => s.winnerPlayerId);
+  const connectWebSocket = useRtsGameStore((s) => s.connectWebSocket);
+  const sendMessage = useRtsGameStore((s) => s.sendMessage);
+  const setSelectedEntities = useRtsGameStore((s) => s.setSelectedEntities);
+  const setPlacementBuilding = useRtsGameStore((s) => s.setPlacementBuilding);
+
+  const lobby = overview.lobbies.find((l) => l.lobbyId === lobbyId);
 
   const [atlas, setAtlas] = useState<ProceduralSpriteAtlas | null>(null);
   const [atlasProgress, setAtlasProgress] = useState(0);
@@ -126,6 +127,9 @@ export default function GameMatchPage() {
   const worldCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const minimapCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const cameraRef = useRef<TacticalCamera>(new TacticalCamera());
+  const vfxManagerRef = useRef<BattlefieldVfxManager>(new BattlefieldVfxManager());
+  const lastFrameTimeRef = useRef<number>(performance.now());
+  const lastProcessedProjectileTickRef = useRef<number>(-1);
   const dragStartRef = useRef<{ x: number; y: number } | null>(null);
   const dragCurrRef = useRef<{ x: number; y: number } | null>(null);
   const hoverTileRef = useRef<{ tileX: number; tileY: number }>({ tileX: 6, tileY: 6 });
@@ -197,12 +201,44 @@ export default function GameMatchPage() {
     };
   }, [setPlacementBuilding]);
 
-  // 4. 60+ FPS Tactical World & Radar Minimap Render Loop with Tick Interpolation
+  // 4. ResizeObserver for World Canvas (Zero getBoundingClientRect inside 60 FPS RAF loop)
+  useEffect(() => {
+    const canvas = worldCanvasRef.current;
+    if (!canvas) return;
+
+    const applySize = (w: number, h: number) => {
+      const nextW = Math.max(320, Math.floor(w));
+      const nextH = Math.max(240, Math.floor(h));
+      if (canvas.width !== nextW || canvas.height !== nextH) {
+        canvas.width = nextW;
+        canvas.height = nextH;
+        cameraRef.current.setViewport(nextW, nextH);
+      }
+    };
+
+    const initRect = canvas.getBoundingClientRect();
+    applySize(initRect.width, initRect.height);
+
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        applySize(entry.contentRect.width, entry.contentRect.height);
+      }
+    });
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, [atlas, lobby?.status]);
+
+  // 5. 60+ FPS Tactical World & Radar Minimap Render Loop with Tick Interpolation
   useEffect(() => {
     if (!atlas) return;
     let animId = 0;
+    lastFrameTimeRef.current = performance.now();
 
     const renderFrame = () => {
+      const nowMs = performance.now();
+      const dtSec = Math.min(0.05, Math.max(0.001, (nowMs - lastFrameTimeRef.current) * 0.001));
+      lastFrameTimeRef.current = nowMs;
+
       const st = useRtsGameStore.getState();
       const cam = cameraRef.current;
 
@@ -241,19 +277,27 @@ export default function GameMatchPage() {
         }
       }
 
+      // Ingest tick visual effects and new projectiles into the 60 FPS VFX Manager
+      const vfxEvents = st.consumeVisualEffects();
+      const isNewProjectileTick =
+        st.tickId !== lastProcessedProjectileTickRef.current && st.recentProjectiles.length > 0;
+      if (isNewProjectileTick) {
+        lastProcessedProjectileTickRef.current = st.tickId;
+      }
+      const tickProjectiles = isNewProjectileTick ? st.recentProjectiles : [];
+      if (vfxEvents.length > 0 || tickProjectiles.length > 0) {
+        vfxManagerRef.current.ingestTickEvents(vfxEvents, tickProjectiles, cam, nowMs);
+      }
+
       const canvas = worldCanvasRef.current;
       if (canvas) {
-        const rect = canvas.getBoundingClientRect();
-        if (canvas.width !== Math.floor(rect.width) || canvas.height !== Math.floor(rect.height)) {
-          canvas.width = Math.max(320, Math.floor(rect.width));
-          canvas.height = Math.max(240, Math.floor(rect.height));
-          cam.setViewport(canvas.width, canvas.height);
-        }
-
         const ctx = canvas.getContext("2d");
         if (ctx) {
-          const elapsedSinceTick = performance.now() - st.lastTickReceivedAt;
-          const alpha = Math.max(0, Math.min(1, elapsedSinceTick / SIM_TICK_MS));
+          const elapsedSinceTick = nowMs - st.lastTickReceivedAt;
+          const alpha = Math.max(
+            0,
+            Math.min(1.05, elapsedSinceTick / Math.max(40, st.tickDurationMs))
+          );
           const explored = st.exploredByPlayer.get(st.playerId) ?? new Set<number>();
           const visible = st.visibleByPlayer.get(st.playerId) ?? new Set<number>();
 
@@ -294,6 +338,9 @@ export default function GameMatchPage() {
             exploredCells: explored,
             visibleCells: visible,
             projectiles: st.recentProjectiles,
+            vfxManager: vfxManagerRef.current,
+            nowMs,
+            dtSec,
             dragBox:
               dragStartRef.current && dragCurrRef.current
                 ? {
@@ -336,8 +383,6 @@ export default function GameMatchPage() {
     animId = requestAnimationFrame(renderFrame);
     return () => cancelAnimationFrame(animId);
   }, [atlas]);
-
-  const lobby = overview.lobbies.find((l) => l.lobbyId === lobbyId);
 
   function handleCanvasMouseDown(e: React.MouseEvent<HTMLCanvasElement>): void {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -634,6 +679,7 @@ export default function GameMatchPage() {
                     className="flex items-center justify-between rounded border border-slate-800 bg-slate-900/70 p-3 text-xs"
                   >
                     <div className="flex items-center gap-2">
+                      <FactionVectorEmblem faction={p.faction} className="h-5 w-5 shrink-0" />
                       <ShieldCheck className="h-4 w-4 text-emerald-400" />
                       <span className="font-bold">{p.commanderName}</span>
                       {p.isAi && (

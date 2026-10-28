@@ -4,12 +4,14 @@ import {
   MAP_HEIGHT_TILES,
   MAP_WIDTH_TILES,
   TILE_PIXEL_SIZE,
+  interpolateAngleIndex16,
   type BuildingKind,
   type FactionId,
 } from "../shared/constants";
 import type { EntityState, ProjectileVisual } from "../shared/schemas/deltas";
 import type { TacticalCamera } from "./camera";
 import type { ProceduralSpriteAtlas } from "./generator/atlas-generator";
+import type { BattlefieldVfxManager } from "./vfx-manager";
 
 export interface WorldRenderInput {
   ctx: CanvasRenderingContext2D;
@@ -38,6 +40,90 @@ export interface WorldRenderInput {
     tileY: number;
     valid: boolean;
   } | null;
+  vfxManager?: BattlefieldVfxManager;
+  nowMs?: number;
+  dtSec?: number;
+}
+
+export const WORLD_TOTAL_PIXELS_W = MAP_WIDTH_TILES * TILE_PIXEL_SIZE;
+export const WORLD_TOTAL_PIXELS_H = MAP_HEIGHT_TILES * TILE_PIXEL_SIZE;
+
+type CacheSurface = OffscreenCanvas | HTMLCanvasElement;
+type CacheContext = OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D;
+
+let cachedTerrainSurface: CacheSurface | null = null;
+let cachedTerrainAtlas: ProceduralSpriteAtlas | null = null;
+let cachedTerrainGridRef: readonly number[] | null = null;
+let cachedTerrainSignature = 0;
+
+function computeGridSignature(grid: readonly number[]): number {
+  let hash = grid.length | 0;
+  const step = Math.max(1, Math.floor(grid.length / 64));
+  for (let i = 0; i < grid.length; i += step) {
+    hash = ((hash << 5) - hash + (grid[i] ?? 0)) | 0;
+  }
+  return hash;
+}
+
+function getOrBuildStaticTerrainCache(
+  atlas: ProceduralSpriteAtlas,
+  terrainGrid: readonly number[]
+): CacheSurface | null {
+  if (atlas.disposed || atlas.terrainTiles.size === 0) {
+    return null;
+  }
+
+  const sig = computeGridSignature(terrainGrid);
+  if (
+    cachedTerrainSurface !== null &&
+    cachedTerrainAtlas === atlas &&
+    (cachedTerrainGridRef === terrainGrid || cachedTerrainSignature === sig)
+  ) {
+    return cachedTerrainSurface;
+  }
+
+  let surface: CacheSurface | null = null;
+  let ctx: CacheContext | null = null;
+
+  try {
+    if (typeof OffscreenCanvas !== "undefined") {
+      surface = new OffscreenCanvas(WORLD_TOTAL_PIXELS_W, WORLD_TOTAL_PIXELS_H);
+      ctx = surface.getContext("2d");
+    } else if (typeof document !== "undefined") {
+      const canvas = document.createElement("canvas");
+      canvas.width = WORLD_TOTAL_PIXELS_W;
+      canvas.height = WORLD_TOTAL_PIXELS_H;
+      surface = canvas;
+      ctx = canvas.getContext("2d");
+    }
+  } catch {
+    return null;
+  }
+
+  if (!surface || !ctx) {
+    return null;
+  }
+
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+
+  const s = TILE_PIXEL_SIZE;
+  for (let ty = 0; ty < MAP_HEIGHT_TILES; ty++) {
+    for (let tx = 0; tx < MAP_WIDTH_TILES; tx++) {
+      const idx = ty * MAP_WIDTH_TILES + tx;
+      const tKind = terrainGrid[idx] ?? 0;
+      const bmp = atlas.terrainTiles.get(tKind);
+      if (bmp) {
+        ctx.drawImage(bmp, tx * s, ty * s, s, s);
+      }
+    }
+  }
+
+  cachedTerrainSurface = surface;
+  cachedTerrainAtlas = atlas;
+  cachedTerrainGridRef = terrainGrid;
+  cachedTerrainSignature = sig;
+  return surface;
 }
 
 export function renderTacticalWorld(input: WorldRenderInput): void {
@@ -57,19 +143,44 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
     projectiles,
     dragBox,
     placementPreview,
+    vfxManager,
+    nowMs,
+    dtSec,
   } = input;
 
+  const frameNowMs =
+    nowMs ?? (typeof performance !== "undefined" ? performance.now() : Date.now());
+  const frameDtSec = dtSec ?? 0.016;
+
+  // Step trauma-based quadratic camera shake
+  camera.stepShake(frameDtSec, frameNowMs * 0.001);
+
   ctx.save();
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+
   ctx.fillStyle = "#06080c";
   ctx.fillRect(0, 0, camera.viewportWidth, camera.viewportHeight);
 
   ctx.scale(camera.zoom, camera.zoom);
-  ctx.translate(-camera.x, -camera.y);
+  ctx.translate(
+    -camera.x + camera.shakeOffsetX / camera.zoom,
+    -camera.y + camera.shakeOffsetY / camera.zoom
+  );
 
   const bounds = camera.getVisibleTileBounds();
   const s = TILE_PIXEL_SIZE;
 
-  // 1. Draw visible/explored terrain tiles + crystalline ore density
+  // 1. Draw static terrain from OffscreenCanvas cache in a single blit + dynamic crystalline ore overlay
+  const staticTerrainCache = getOrBuildStaticTerrainCache(atlas, terrainGrid);
+  if (staticTerrainCache) {
+    const srcX = bounds.minX * s;
+    const srcY = bounds.minY * s;
+    const srcW = (bounds.maxX - bounds.minX + 1) * s;
+    const srcH = (bounds.maxY - bounds.minY + 1) * s;
+    ctx.drawImage(staticTerrainCache, srcX, srcY, srcW, srcH, srcX, srcY, srcW, srcH);
+  }
+
   for (let ty = bounds.minY; ty <= bounds.maxY; ty++) {
     for (let tx = bounds.minX; tx <= bounds.maxX; tx++) {
       const idx = ty * MAP_WIDTH_TILES + tx;
@@ -77,9 +188,11 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
         continue;
       }
       const tKind = terrainGrid[idx] ?? 0;
-      const bmp = atlas.terrainTiles.get(tKind);
-      if (bmp) {
-        ctx.drawImage(bmp, tx * s, ty * s, s, s);
+      if (!staticTerrainCache) {
+        const bmp = atlas.terrainTiles.get(tKind);
+        if (bmp) {
+          ctx.drawImage(bmp, tx * s, ty * s, s, s);
+        }
       }
       const oreAmount = oreGrid[idx] ?? 0;
       if (oreAmount > 0 && tKind !== 3) {
@@ -91,7 +204,10 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
     }
   }
 
-  // 2. Draw buildings & units with linear interpolation between tick N-1 and tick N
+  // 1b. Persistent ground scorch craters beneath buildings & units
+  vfxManager?.renderCraters(ctx, frameNowMs, visibleCells, exploredCells);
+
+  // 2. Draw buildings & units with linear position + shortest-arc angular interpolation
   const alpha = Math.max(0, Math.min(1, interpolationAlpha));
   for (const ent of currEntities.values()) {
     const prev = prevEntities.get(ent.id);
@@ -116,21 +232,33 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
       if (bmp) {
         ctx.drawImage(bmp, px, py, bw, bh);
       }
+      if (ent.hp < ent.maxHp * 0.55) {
+        vfxManager?.renderDamageSmoke(ctx, px, py, bw, bh, ent.hp, ent.maxHp, frameNowMs);
+      }
       drawHealthBar(ctx, px + 4, py - 6, bw - 8, 4, ent.hp, ent.maxHp);
 
       if (selectedIds.has(ent.id)) {
         drawSelectionBracket(ctx, px, py, bw, bh, FACTIONS[ent.faction].primaryColor);
       }
     } else {
-      const bodyBmp = atlas.unitBodies.get(`${ent.faction}:${ent.kind}:${ent.angleIndex}`);
+      const bodyAngle = prev
+        ? interpolateAngleIndex16(prev.angleIndex, ent.angleIndex, alpha)
+        : ent.angleIndex;
+      const turretAngle = prev
+        ? interpolateAngleIndex16(prev.turretAngleIndex, ent.turretAngleIndex, alpha)
+        : ent.turretAngleIndex;
+
+      const bodyBmp = atlas.unitBodies.get(`${ent.faction}:${ent.kind}:${bodyAngle}`);
       if (bodyBmp) {
         ctx.drawImage(bodyBmp, px, py, s, s);
       }
-      const turretBmp = atlas.unitTurrets.get(
-        `${ent.faction}:${ent.kind}:${ent.turretAngleIndex}`
-      );
+      const turretBmp = atlas.unitTurrets.get(`${ent.faction}:${ent.kind}:${turretAngle}`);
       if (turretBmp) {
         ctx.drawImage(turretBmp, px, py, s, s);
+      }
+
+      if (ent.hp < ent.maxHp * 0.55) {
+        vfxManager?.renderDamageSmoke(ctx, px, py, s, s, ent.hp, ent.maxHp, frameNowMs);
       }
 
       drawHealthBar(ctx, px + 4, py - 5, s - 8, 3, ent.hp, ent.maxHp);
@@ -150,32 +278,44 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
     }
   }
 
-  // 3. Draw active weapon projectiles & lasers
-  for (const proj of projectiles) {
-    const x1 = (proj.fromX + 0.5) * s;
-    const y1 = (proj.fromY + 0.5) * s;
-    const x2 = (proj.toX + 0.5) * s;
-    const y2 = (proj.toY + 0.5) * s;
+  // 3. Draw active weapon projectiles, multi-phase explosions, shockwaves & particles
+  if (vfxManager) {
+    vfxManager.stepAndRenderEffects(
+      ctx,
+      atlas,
+      frameNowMs,
+      frameDtSec,
+      visibleCells,
+      exploredCells
+    );
+  } else {
+    // Fallback static projectile lines if no BattlefieldVfxManager is provided
+    for (const proj of projectiles) {
+      const x1 = (proj.fromX + 0.5) * s;
+      const y1 = (proj.fromY + 0.5) * s;
+      const x2 = (proj.toX + 0.5) * s;
+      const y2 = (proj.toY + 0.5) * s;
 
-    ctx.beginPath();
-    ctx.moveTo(x1, y1);
-    ctx.lineTo(x2, y2);
-    if (proj.weaponStyle === "LASER") {
-      ctx.strokeStyle = "#ef4444";
-      ctx.lineWidth = 3.2;
-    } else if (proj.weaponStyle === "ROCKET") {
-      ctx.strokeStyle = "#f97316";
-      ctx.lineWidth = 2.2;
-    } else {
-      ctx.strokeStyle = "#fde047";
-      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      if (proj.weaponStyle === "LASER") {
+        ctx.strokeStyle = "#ef4444";
+        ctx.lineWidth = 3.2;
+      } else if (proj.weaponStyle === "ROCKET") {
+        ctx.strokeStyle = "#f97316";
+        ctx.lineWidth = 2.2;
+      } else {
+        ctx.strokeStyle = "#fde047";
+        ctx.lineWidth = 1.5;
+      }
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.arc(x2, y2, proj.weaponStyle === "LASER" ? 6 : 4, 0, Math.PI * 2);
+      ctx.fillStyle = proj.weaponStyle === "LASER" ? "#fca5a5" : "#fef08a";
+      ctx.fill();
     }
-    ctx.stroke();
-
-    ctx.beginPath();
-    ctx.arc(x2, y2, proj.weaponStyle === "LASER" ? 6 : 4, 0, Math.PI * 2);
-    ctx.fillStyle = proj.weaponStyle === "LASER" ? "#fca5a5" : "#fef08a";
-    ctx.fill();
   }
 
   // 4. Draw building placement grid footprint preview inside the canvas (zero DOM inline styles!)
@@ -291,6 +431,3 @@ function drawSelectionBracket(
   ctx.lineTo(x, y + h - len);
   ctx.stroke();
 }
-
-export const WORLD_TOTAL_PIXELS_W = MAP_WIDTH_TILES * TILE_PIXEL_SIZE;
-export const WORLD_TOTAL_PIXELS_H = MAP_HEIGHT_TILES * TILE_PIXEL_SIZE;

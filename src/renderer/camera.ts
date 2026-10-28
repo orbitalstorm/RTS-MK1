@@ -1,8 +1,11 @@
 import {
+  CAMERA_SHAKE_DECAY_PER_SEC,
   MAP_HEIGHT_TILES,
   MAP_WIDTH_TILES,
   TILE_PIXEL_SIZE,
   ZOOM_LEVELS,
+  computeCameraShakeOffset,
+  computeDistanceAttenuatedShakeTrauma,
 } from "../shared/constants";
 
 export class TacticalCamera {
@@ -11,6 +14,34 @@ export class TacticalCamera {
   public zoom = 1.0;
   public viewportWidth = 960;
   public viewportHeight = 640;
+  public shakeTrauma = 0;
+  public shakeOffsetX = 0;
+  public shakeOffsetY = 0;
+
+  public addShakeTrauma(amount: number): void {
+    if (!Number.isFinite(amount) || amount <= 0) return;
+    this.shakeTrauma = Math.max(0, Math.min(1, this.shakeTrauma + amount));
+  }
+
+  public addExplosionShake(baseIntensity: number, eventTileX: number, eventTileY: number): void {
+    const center = this.getCenterTile();
+    const trauma = computeDistanceAttenuatedShakeTrauma(
+      baseIntensity,
+      eventTileX,
+      eventTileY,
+      center.tileX,
+      center.tileY
+    );
+    this.addShakeTrauma(trauma);
+  }
+
+  public stepShake(dtSec: number, nowSec: number): void {
+    const safeDt = Number.isFinite(dtSec) ? Math.max(0, dtSec) : 0;
+    this.shakeTrauma = Math.max(0, this.shakeTrauma - CAMERA_SHAKE_DECAY_PER_SEC * safeDt);
+    const offset = computeCameraShakeOffset(this.shakeTrauma, nowSec);
+    this.shakeOffsetX = offset.offsetX;
+    this.shakeOffsetY = offset.offsetY;
+  }
 
   public setViewport(width: number, height: number): void {
     this.viewportWidth = Math.max(1, width);

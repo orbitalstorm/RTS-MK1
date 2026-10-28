@@ -12,13 +12,20 @@ import { RtsSimulation } from "../src/engine/simulation";
 import { LobbyManager } from "../src/server/lobby-manager";
 import { TacticalCamera } from "../src/renderer/camera";
 import {
+  APP_VERSION,
+  CAMERA_SHAKE_MAX_OFFSET_PX,
+  computeCameraShakeOffset,
+  computeDistanceAttenuatedShakeTrauma,
   computeEdgeScrollVelocity,
   EDGE_SCROLL_MARGIN_PX,
   EDGE_SCROLL_MAX_SPEED_PX,
+  interpolateAngleIndex16,
+  SPRITE_ATLAS_SCALE,
   WATCHDOG_DISCONNECT_TIMEOUT_MS,
   ZOOM_LEVELS,
 } from "../src/shared/constants";
 import { ClientLobbyActionSchema } from "../src/shared/schemas/commands";
+import type { VisualEffectEvent } from "../src/shared/schemas/deltas";
 
 function collectSourceFiles(dir: string): string[] {
   const results: string[] = [];
@@ -221,5 +228,90 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
       targetTileY: 18,
     });
     expect(parsedCmd.success).toBe(true);
+  });
+
+  it("v1.2.0 — maintains constant unit speed across waypoint boundaries without stop-and-go braking", () => {
+    const sim = new RtsSimulation("test_smooth_move_v120", [
+      { playerId: "p1", commanderName: "Alpha", faction: "GDI", isAi: false },
+      { playerId: "p2", commanderName: "Beta", faction: "NOD", isAi: true },
+    ]);
+
+    const tank = sim
+      .getAllEntities()
+      .find((e) => e.ownerId === "p1" && e.entityType === "UNIT" && e.kind === "MEDIUM_TANK");
+    expect(tank).toBeDefined();
+    expect(tank!.navigation?.speedTilesPerTick).toBeCloseTo(0.14, 5);
+
+    const startX = tank!.transform.x;
+    const startY = tank!.transform.y;
+    // Order straight-line eastward movement across 5 tiles (from (10,9) to (15,9))
+    sim.issueMoveCommand("p1", [tank!.id], startX + 5, startY);
+
+    let prevX = startX;
+    let prevY = startY;
+    for (let tick = 1; tick <= 12; tick++) {
+      sim.stepTick();
+      const updatedTank = sim.getEntity(tank!.id)!;
+      const stepDist = Math.hypot(
+        updatedTank.transform.x - prevX,
+        updatedTank.transform.y - prevY
+      );
+      // Every single tick (including tick 8 crossing tile boundary 10.98 -> 11.12) must advance ~0.14 tiles
+      expect(stepDist).toBeCloseTo(0.14, 3);
+      expect(stepDist).toBeGreaterThan(0.13);
+      prevX = updatedTank.transform.x;
+      prevY = updatedTank.transform.y;
+    }
+  });
+
+  it("v1.2.0 — supports Game Juice camera shake, shortest-arc 16-angle interpolation, and 2x Hi-DPI sprite scale", () => {
+    expect(APP_VERSION).toBe("1.2.0");
+    expect(SPRITE_ATLAS_SCALE).toBe(2);
+
+    // Zero trauma produces zero offset
+    expect(computeCameraShakeOffset(0, 1.0)).toEqual({ offsetX: 0, offsetY: 0 });
+
+    // Non-zero trauma produces bounded harmonic offset within CAMERA_SHAKE_MAX_OFFSET_PX
+    const shake = computeCameraShakeOffset(0.8, 0.25);
+    expect(Math.hypot(shake.offsetX, shake.offsetY)).toBeGreaterThan(0);
+    expect(Math.abs(shake.offsetX)).toBeLessThanOrEqual(CAMERA_SHAKE_MAX_OFFSET_PX);
+    expect(Math.abs(shake.offsetY)).toBeLessThanOrEqual(CAMERA_SHAKE_MAX_OFFSET_PX);
+
+    // Distance-attenuated trauma and TacticalCamera decay
+    const nearTrauma = computeDistanceAttenuatedShakeTrauma(0.95, 10, 10, 12, 10);
+    const farTrauma = computeDistanceAttenuatedShakeTrauma(0.95, 10, 10, 45, 45);
+    expect(nearTrauma).toBeGreaterThan(0.5);
+    expect(farTrauma).toBe(0);
+
+    const cam = new TacticalCamera();
+    cam.centerOnTile(10, 10);
+    expect(cam.shakeTrauma).toBe(0);
+    cam.addExplosionShake(0.95, 10, 10);
+    const peakTrauma = cam.shakeTrauma;
+    expect(peakTrauma).toBeGreaterThan(0.8);
+    cam.stepShake(0.2, 0.25);
+    expect(cam.shakeTrauma).toBeLessThan(peakTrauma);
+    expect(cam.shakeTrauma).toBeGreaterThan(0);
+
+    // Shortest-arc 16-angle interpolation across North (15 -> 1 midpoint is 0, never 8)
+    expect(interpolateAngleIndex16(15, 1, 0.5)).toBe(0);
+    expect(interpolateAngleIndex16(1, 15, 0.5)).toBe(0);
+
+    // VisualEffectEvent emission on building sell/demolition
+    const sim = new RtsSimulation("test_vfx_v120", [
+      { playerId: "p1", commanderName: "Alpha", faction: "GDI", isAi: false },
+      { playerId: "p2", commanderName: "Beta", faction: "NOD", isAi: true },
+    ]);
+    const powerPlant = sim
+      .getAllEntities()
+      .find((e) => e.ownerId === "p1" && e.entityType === "BUILDING" && e.kind === "POWER_PLANT");
+    expect(powerPlant).toBeDefined();
+    expect(sim.issueSellBuilding("p1", powerPlant!.id)).toBe(true);
+    const delta = sim.stepTick();
+    const explosionVfx: VisualEffectEvent | undefined = delta.visualEffects.find(
+      (vfx) => vfx.effectKind === "UNIT_EXPLOSION"
+    );
+    expect(explosionVfx).toBeDefined();
+    expect(explosionVfx!.shakeIntensity).toBeGreaterThan(0);
   });
 });

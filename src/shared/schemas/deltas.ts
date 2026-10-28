@@ -82,6 +82,27 @@ export const ProjectileVisualSchema = z.object({
   toX: z.number(),
   toY: z.number(),
   weaponStyle: z.enum(["SHELL", "ROCKET", "LASER", "BULLET"]),
+  faction: FactionIdSchema.optional(),
+});
+
+export const VisualEffectKindSchema = z.enum([
+  "MUZZLE_FLASH",
+  "SHELL_IMPACT",
+  "ROCKET_EXPLOSION",
+  "LASER_BURN",
+  "UNIT_EXPLOSION",
+  "BUILDING_DEMOLITION",
+  "HARVEST_SPARKS",
+]);
+
+export const VisualEffectEventSchema = z.object({
+  id: z.string().min(1),
+  effectKind: VisualEffectKindSchema,
+  worldX: z.number(),
+  worldY: z.number(),
+  radiusTiles: z.number().positive().default(1),
+  shakeIntensity: z.number().min(0).max(1).default(0),
+  faction: FactionIdSchema.nullable().default(null),
 });
 
 export const FogPlayerCellsSchema = z.object({
@@ -103,6 +124,7 @@ export const TickDeltaSchema = z.object({
   oreUpdates: z.array(OreTileDeltaSchema),
   players: z.array(PlayerEconomyDeltaSchema),
   projectiles: z.array(ProjectileVisualSchema),
+  visualEffects: z.array(VisualEffectEventSchema).default([]),
   acousticEvents: z.array(AcousticEventSchema),
   fogByPlayer: z.array(FogPlayerCellsSchema),
   winnerPlayerId: z.string().nullable(),
@@ -129,6 +151,8 @@ export type ProductionQueueSlot = z.infer<typeof ProductionQueueSlotSchema>;
 export type PlayerEconomyDelta = z.infer<typeof PlayerEconomyDeltaSchema>;
 export type AcousticEvent = z.infer<typeof AcousticEventSchema>;
 export type ProjectileVisual = z.infer<typeof ProjectileVisualSchema>;
+export type VisualEffectKind = z.infer<typeof VisualEffectKindSchema>;
+export type VisualEffectEvent = z.infer<typeof VisualEffectEventSchema>;
 export type FogPlayerCells = z.infer<typeof FogPlayerCellsSchema>;
 export type TickDelta = z.infer<typeof TickDeltaSchema>;
 export type FullSnapshot = z.infer<typeof FullSnapshotSchema>;

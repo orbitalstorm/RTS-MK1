@@ -18,22 +18,21 @@ import {
 import { APP_VERSION, FACTIONS, type FactionId } from "../../shared/constants";
 import type { CommanderProfile, MatchRecord } from "../../shared/schemas/profile";
 import { useRtsGameStore } from "../../store/game-store";
+import { FactionVectorEmblem } from "../hud/leonardo-icons";
 import { Badge, Button, Card } from "../ui/primitives";
 
 export function PortalCommandCenter() {
   const router = useRouter();
-  const {
-    playerId,
-    commanderName,
-    faction,
-    wsConnected,
-    overview,
-    currentLobbyId,
-    lastError,
-    setCommanderIdentity,
-    connectWebSocket,
-    sendMessage,
-  } = useRtsGameStore();
+  const playerId = useRtsGameStore((s) => s.playerId);
+  const commanderName = useRtsGameStore((s) => s.commanderName);
+  const faction = useRtsGameStore((s) => s.faction);
+  const wsConnected = useRtsGameStore((s) => s.wsConnected);
+  const overview = useRtsGameStore((s) => s.overview);
+  const currentLobbyId = useRtsGameStore((s) => s.currentLobbyId);
+  const lastError = useRtsGameStore((s) => s.lastError);
+  const setCommanderIdentity = useRtsGameStore((s) => s.setCommanderIdentity);
+  const connectWebSocket = useRtsGameStore((s) => s.connectWebSocket);
+  const sendMessage = useRtsGameStore((s) => s.sendMessage);
 
   const [nameInput, setNameInput] = useState(commanderName);
   const [selectedFaction, setSelectedFaction] = useState<FactionId>(faction);
@@ -241,15 +240,21 @@ export function PortalCommandCenter() {
                       onClick={() => setSelectedFaction(fid)}
                       className={
                         active
-                          ? `flex flex-col items-start rounded border p-3 text-left transition ${spec.badgeClass}`
-                          : "flex flex-col items-start rounded border border-slate-800 bg-slate-900/60 p-3 text-left text-slate-300 hover:border-slate-700"
+                          ? `flex items-center gap-3 rounded border p-3 text-left transition ${spec.badgeClass}`
+                          : "flex items-center gap-3 rounded border border-slate-800 bg-slate-900/60 p-3 text-left text-slate-300 hover:border-slate-700"
                       }
                     >
-                      <div className="flex w-full items-center justify-between">
-                        <span className="text-xs font-bold">{spec.name}</span>
-                        {active && <Badge className="border-current">ACTIF</Badge>}
+                      <FactionVectorEmblem
+                        faction={fid}
+                        className="h-10 w-10 shrink-0 rounded border border-slate-800/80 bg-slate-950/90 p-1"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex w-full items-center justify-between">
+                          <span className="text-xs font-bold">{spec.name}</span>
+                          {active && <Badge className="border-current">ACTIF</Badge>}
+                        </div>
+                        <span className="mt-1 block text-[11px] opacity-80">{spec.motto}</span>
                       </div>
-                      <span className="mt-1 text-[11px] opacity-80">{spec.motto}</span>
                     </button>
                   );
                 })}

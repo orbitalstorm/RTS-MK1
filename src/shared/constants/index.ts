@@ -74,17 +74,82 @@ export interface UnitSpec {
   description: string;
 }
 
-export const APP_VERSION = "1.1.0";
+export const APP_VERSION = "1.2.0";
 export const SIM_TICK_RATE_HZ = 20;
 export const SIM_TICK_MS = 50;
 export const MAP_WIDTH_TILES = 48;
 export const MAP_HEIGHT_TILES = 48;
 export const TILE_PIXEL_SIZE = 32;
+export const SPRITE_ATLAS_SCALE = 2; // 64px per tile internal vector rasterization for crisp 2x zoom
 export const BASE_BUILD_RADIUS_TILES = 16;
 export const ZOOM_LEVELS = [1, 1.25, 1.5, 1.75, 2] as const;
 export type ZoomLevel = (typeof ZOOM_LEVELS)[number];
 export const EDGE_SCROLL_MARGIN_PX = 36;
 export const EDGE_SCROLL_MAX_SPEED_PX = 3.2;
+export const CAMERA_SHAKE_MAX_OFFSET_PX = 14;
+export const CAMERA_SHAKE_DECAY_PER_SEC = 2.6;
+export const CAMERA_SHAKE_FALLOFF_TILES = 22;
+
+/**
+ * Pure deterministic trauma-based camera shake calculation (quadratic trauma^2 model).
+ * Produces high-frequency damped harmonic displacement without permanent camera drift.
+ */
+export function computeCameraShakeOffset(
+  trauma: number,
+  elapsedSec: number,
+  maxOffsetPx = CAMERA_SHAKE_MAX_OFFSET_PX
+): { offsetX: number; offsetY: number } {
+  const clamped = Math.max(0, Math.min(1, trauma));
+  if (clamped <= 0.001) {
+    return { offsetX: 0, offsetY: 0 };
+  }
+  const intensity = clamped * clamped * maxOffsetPx;
+  const waveX =
+    Math.sin(elapsedSec * 53.0) * 0.62 +
+    Math.cos(elapsedSec * 89.0 + 1.3) * 0.38;
+  const waveY =
+    Math.cos(elapsedSec * 61.0 + 0.7) * 0.62 +
+    Math.sin(elapsedSec * 97.0 + 2.1) * 0.38;
+  return {
+    offsetX: Number((intensity * waveX).toFixed(3)),
+    offsetY: Number((intensity * waveY).toFixed(3)),
+  };
+}
+
+/**
+ * Distance-attenuated camera trauma contribution when an explosion or heavy weapon
+ * fires at `(eventTileX, eventTileY)` relative to `(cameraCenterTileX, cameraCenterTileY)`.
+ */
+export function computeDistanceAttenuatedShakeTrauma(
+  baseIntensity: number,
+  eventTileX: number,
+  eventTileY: number,
+  cameraCenterTileX: number,
+  cameraCenterTileY: number,
+  falloffTiles = CAMERA_SHAKE_FALLOFF_TILES
+): number {
+  if (baseIntensity <= 0) return 0;
+  const dist = Math.hypot(eventTileX - cameraCenterTileX, eventTileY - cameraCenterTileY);
+  if (dist >= falloffTiles) return 0;
+  const attenuation = 1 - dist / falloffTiles;
+  return Number(Math.max(0, Math.min(1, baseIntensity * (0.35 + 0.65 * attenuation))).toFixed(3));
+}
+
+/**
+ * Shortest-arc interpolation across the 16 discrete orientation indices (0..15)
+ * so rotating chassis and turrets never flip backwards when crossing North (15 -> 0).
+ */
+export function interpolateAngleIndex16(
+  prevAngleIndex: number,
+  currAngleIndex: number,
+  alpha: number
+): number {
+  const t = Math.max(0, Math.min(1, alpha));
+  let diff = ((currAngleIndex - prevAngleIndex + 24) % 16) - 8;
+  if (diff === -8) diff = 8;
+  const interp = (prevAngleIndex + diff * t + 16) % 16;
+  return Math.round(interp) % 16;
+}
 
 /**
  * Pure deterministic edge-scroll velocity calculation with quadratic easing
