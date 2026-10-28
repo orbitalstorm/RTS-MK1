@@ -1,6 +1,6 @@
 import http from "node:http";
 import { WebSocketServer, WebSocket } from "ws";
-import { SIM_TICK_MS, WATCHDOG_INTERVAL_MS } from "../shared/constants";
+import { APP_VERSION, SIM_TICK_MS, WATCHDOG_INTERVAL_MS } from "../shared/constants";
 import { ClientLobbyActionSchema, type ClientMessage } from "../shared/schemas/commands";
 import { validateEnv } from "../shared/schemas/env";
 import type { ServerMessage } from "../shared/schemas/lobby";
@@ -36,7 +36,7 @@ export function createRtsRealtimeServer(customPort?: number) {
         JSON.stringify({
           status: "ok",
           service: "rts-mk1-ws-server",
-          version: "1.0.0",
+          version: APP_VERSION,
           activeLobbyId: lobbyManager.getActiveLobbyId(),
           overview: lobbyManager.getOverview(),
         })
@@ -317,13 +317,21 @@ export function createRtsRealtimeServer(customPort?: number) {
       case "COMMAND_PLACE_BUILDING": {
         lobbyManager.recordPlayerHeartbeat(msg.playerId);
         const lobby = lobbyManager.getLobby(msg.lobbyId);
-        lobby?.simulation?.issuePlaceBuilding(
+        const placed = lobby?.simulation?.issuePlaceBuilding(
           msg.playerId,
           msg.category,
           msg.buildingKind,
           msg.tileX,
           msg.tileY
         );
+        if (!placed) {
+          sendToSocket(session.ws, {
+            type: "ERROR",
+            code: "PLACEMENT_REJECTED",
+            message:
+              "Emplacement invalide : terrain obstrué ou hors du périmètre de construction de la base.",
+          });
+        }
         return;
       }
 
@@ -399,7 +407,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   server.start().then(() => {
     const env = validateEnv();
     console.log(
-      `[RTS-MK1 v1.0.0] Authoritative WS & Single-Active-Match Server listening on 0.0.0.0:${env.WS_PORT}`
+      `[RTS-MK1 v${APP_VERSION}] Authoritative WS & Single-Active-Match Server listening on 0.0.0.0:${env.WS_PORT}`
     );
   });
 }

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { APP_VERSION } from "../../../shared/constants";
 import { validateEnv } from "../../../shared/schemas/env";
 
 export async function GET() {
@@ -7,7 +8,7 @@ export async function GET() {
     status: "ok",
     project: env.PROJECT_NAME,
     domain: env.PUBLIC_DNS_DOMAIN,
-    version: "1.0.0",
+    version: APP_VERSION,
     timestamp: new Date().toISOString(),
   });
 }

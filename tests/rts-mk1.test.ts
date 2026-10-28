@@ -10,7 +10,8 @@ import {
 } from "../src/engine/pathfinding/astar";
 import { RtsSimulation } from "../src/engine/simulation";
 import { LobbyManager } from "../src/server/lobby-manager";
-import { WATCHDOG_DISCONNECT_TIMEOUT_MS } from "../src/shared/constants";
+import { TacticalCamera } from "../src/renderer/camera";
+import { WATCHDOG_DISCONNECT_TIMEOUT_MS, ZOOM_LEVELS } from "../src/shared/constants";
 import { ClientLobbyActionSchema } from "../src/shared/schemas/commands";
 
 function collectSourceFiles(dir: string): string[] {
@@ -72,6 +73,33 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
     }
     const p1State = sim.getPlayerState("p1")!;
     expect(p1State.queues.BUILDING.readyToPlace).toBe(true);
+
+    // Deploy building between ticks and verify it appears in the very next TickDelta.created
+    const placed = sim.issuePlaceBuilding("p1", "BUILDING", "BARRACKS", 11, 5);
+    expect(placed).toBe(true);
+    const postPlaceDelta = sim.stepTick();
+    expect(
+      postPlaceDelta.created.some(
+        (e) =>
+          e.ownerId === "p1" &&
+          e.entityType === "BUILDING" &&
+          e.kind === "BARRACKS" &&
+          e.x === 11 &&
+          e.y === 5
+      )
+    ).toBe(true);
+  });
+
+  it("supports discrete tactical zoom levels 1, 1.25, 1.5, 1.75, 2", () => {
+    expect(ZOOM_LEVELS).toEqual([1, 1.25, 1.5, 1.75, 2]);
+    const cam = new TacticalCamera();
+    expect(cam.zoom).toBe(1);
+    expect(cam.cycleZoom()).toBe(1.25);
+    expect(cam.cycleZoom()).toBe(1.5);
+    expect(cam.cycleZoom()).toBe(1.75);
+    expect(cam.cycleZoom()).toBe(2);
+    expect(cam.cycleZoom()).toBe(1);
+    expect(cam.setZoom(1.75)).toBe(1.75);
   });
 
   it("prevents unit overlap via SpatialReservationGrid and finds 8-way A* paths", () => {

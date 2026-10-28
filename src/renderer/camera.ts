@@ -2,6 +2,7 @@ import {
   MAP_HEIGHT_TILES,
   MAP_WIDTH_TILES,
   TILE_PIXEL_SIZE,
+  ZOOM_LEVELS,
 } from "../shared/constants";
 
 export class TacticalCamera {
@@ -31,13 +32,27 @@ export class TacticalCamera {
     this.clamp();
   }
 
-  public adjustZoom(delta: number): void {
-    const prevCenterTile = this.screenToTile(
-      this.viewportWidth * 0.5,
-      this.viewportHeight * 0.5
-    );
-    this.zoom = Math.max(0.65, Math.min(1.75, Number((this.zoom + delta).toFixed(2))));
-    this.centerOnTile(prevCenterTile.tileX, prevCenterTile.tileY);
+  public setZoom(targetZoom: number): number {
+    const centerWorldX = this.x + this.viewportWidth / (2 * this.zoom);
+    const centerWorldY = this.y + this.viewportHeight / (2 * this.zoom);
+    this.zoom = Math.max(1, Math.min(2, Number(targetZoom.toFixed(2))));
+    this.x = centerWorldX - this.viewportWidth / (2 * this.zoom);
+    this.y = centerWorldY - this.viewportHeight / (2 * this.zoom);
+    this.clamp();
+    return this.zoom;
+  }
+
+  public cycleZoom(): number {
+    const currentIdx = ZOOM_LEVELS.findIndex((z) => Math.abs(z - this.zoom) < 0.05);
+    const nextZoom =
+      currentIdx === -1
+        ? ZOOM_LEVELS[0]
+        : ZOOM_LEVELS[(currentIdx + 1) % ZOOM_LEVELS.length]!;
+    return this.setZoom(nextZoom);
+  }
+
+  public adjustZoom(delta: number): number {
+    return this.setZoom(this.zoom + delta);
   }
 
   public clamp(): void {

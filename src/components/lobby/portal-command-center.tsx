@@ -15,7 +15,7 @@ import {
   Unlock,
   Users,
 } from "lucide-react";
-import { FACTIONS, type FactionId } from "../../shared/constants";
+import { APP_VERSION, FACTIONS, type FactionId } from "../../shared/constants";
 import type { CommanderProfile, MatchRecord } from "../../shared/schemas/profile";
 import { useRtsGameStore } from "../../store/game-store";
 import { Badge, Button, Card } from "../ui/primitives";
@@ -153,7 +153,7 @@ export function PortalCommandCenter() {
                   RTS-MK1 // COMMAND &amp; CONQUER ENGINE
                 </h1>
                 <Badge className="border-emerald-500/40 bg-emerald-500/15 text-emerald-300">
-                  v1.0.0
+                  v{APP_VERSION}
                 </Badge>
               </div>
               <p className="text-xs text-slate-400">

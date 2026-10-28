@@ -74,11 +74,51 @@ export interface UnitSpec {
   description: string;
 }
 
+export const APP_VERSION = "1.1.0";
 export const SIM_TICK_RATE_HZ = 20;
 export const SIM_TICK_MS = 50;
 export const MAP_WIDTH_TILES = 48;
 export const MAP_HEIGHT_TILES = 48;
 export const TILE_PIXEL_SIZE = 32;
+export const BASE_BUILD_RADIUS_TILES = 16;
+export const ZOOM_LEVELS = [1, 1.25, 1.5, 1.75, 2] as const;
+export type ZoomLevel = (typeof ZOOM_LEVELS)[number];
+export const EDGE_SCROLL_MARGIN_PX = 36;
+export const EDGE_SCROLL_MAX_SPEED_PX = 3.2;
+
+/**
+ * Pure deterministic edge-scroll velocity calculation with quadratic easing
+ * so camera panning near screen borders is progressive and never violent.
+ */
+export function computeEdgeScrollVelocity(
+  cursorX: number,
+  cursorY: number,
+  viewportW: number,
+  viewportH: number,
+  marginPx = EDGE_SCROLL_MARGIN_PX,
+  maxSpeedPx = EDGE_SCROLL_MAX_SPEED_PX
+): { vx: number; vy: number } {
+  let vx = 0;
+  let vy = 0;
+
+  if (cursorX >= 0 && cursorX < marginPx) {
+    const t = (marginPx - cursorX) / marginPx;
+    vx = -Number((t * t * maxSpeedPx).toFixed(3));
+  } else if (cursorX <= viewportW && cursorX > viewportW - marginPx) {
+    const t = (cursorX - (viewportW - marginPx)) / marginPx;
+    vx = Number((t * t * maxSpeedPx).toFixed(3));
+  }
+
+  if (cursorY >= 0 && cursorY < marginPx) {
+    const t = (marginPx - cursorY) / marginPx;
+    vy = -Number((t * t * maxSpeedPx).toFixed(3));
+  } else if (cursorY <= viewportH && cursorY > viewportH - marginPx) {
+    const t = (cursorY - (viewportH - marginPx)) / marginPx;
+    vy = Number((t * t * maxSpeedPx).toFixed(3));
+  }
+
+  return { vx, vy };
+}
 export const BASE_STORAGE_CAPACITY = 2000;
 export const SILO_STORAGE_BONUS = 1500;
 export const STARTING_CREDITS = 2500;

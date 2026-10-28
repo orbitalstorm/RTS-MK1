@@ -318,10 +318,40 @@ function applyDelta(
   }
 
   let evaBannerText = st.evaBannerText;
+  let placementBuilding = st.placementBuilding;
+  const myEcon = playersEconomy.get(st.playerId);
+  const prevMyEcon = st.playersEconomy.get(st.playerId);
+
+  if (myEcon) {
+    for (const cat of ["BUILDING", "DEFENSE"] as const) {
+      const slot = myEcon.queues.find((q) => q.category === cat);
+      const prevSlot = prevMyEcon?.queues.find((q) => q.category === cat);
+      if (
+        slot?.readyToPlace &&
+        slot.activeItem &&
+        !prevSlot?.readyToPlace &&
+        !placementBuilding
+      ) {
+        placementBuilding = {
+          category: cat,
+          kind: slot.activeItem as BuildingKind,
+        };
+      }
+      if (
+        placementBuilding?.category === cat &&
+        (!slot?.readyToPlace || !slot.activeItem)
+      ) {
+        placementBuilding = null;
+      }
+    }
+  }
+
   for (const ev of delta.acousticEvents) {
     if (ev.targetPlayerId && ev.targetPlayerId !== st.playerId) continue;
     if (ev.soundKind === "EVA_CONSTRUCTION_COMPLETE") {
       evaBannerText = "EVA : CONSTRUCTION TERMINÉE — PRÊT À DÉPLOYER";
+    } else if (ev.soundKind === "EVA_BUILDING_DEPLOYED") {
+      evaBannerText = "EVA : STRUCTURE DÉPLOYÉE SUR LA GRILLE";
     } else if (ev.soundKind === "EVA_LOW_POWER") {
       evaBannerText = "EVA : ÉNERGIE FAIBLE — PRODUCTION RALENTIE & RADAR COUPÉ";
     } else if (ev.soundKind === "EVA_SILOS_NEEDED") {
@@ -348,6 +378,7 @@ function applyDelta(
     recentProjectiles: delta.projectiles,
     pendingAcousticEvents: [...st.pendingAcousticEvents, ...delta.acousticEvents],
     winnerPlayerId: delta.winnerPlayerId,
+    placementBuilding,
     evaBannerText,
   });
 }

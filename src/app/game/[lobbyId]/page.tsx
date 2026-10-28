@@ -12,14 +12,17 @@ import {
   ShieldCheck,
   Trophy,
   ZoomIn,
-  ZoomOut,
 } from "lucide-react";
 import {
+  BASE_BUILD_RADIUS_TILES,
   BUILDINGS,
+  computeEdgeScrollVelocity,
   FACTIONS,
+  MAP_HEIGHT_TILES,
   MAP_WIDTH_TILES,
   SIM_TICK_MS,
   TILE_PIXEL_SIZE,
+  ZOOM_LEVELS,
   type BuildingKind,
   type FactionId,
 } from "../../../shared/constants";
@@ -33,7 +36,68 @@ import {
 } from "../../../renderer/generator/atlas-generator";
 import { renderMinimapRadar } from "../../../renderer/minimap-renderer";
 import { renderTacticalWorld } from "../../../renderer/world-renderer";
-import { useRtsGameStore } from "../../../store/game-store";
+import { useRtsGameStore, type RtsGameStoreState } from "../../../store/game-store";
+
+function canPlaceBuildingOnGrid(
+  st: RtsGameStoreState,
+  buildingKind: BuildingKind,
+  tileX: number,
+  tileY: number
+): boolean {
+  const spec = BUILDINGS[buildingKind];
+  if (
+    tileX < 0 ||
+    tileY < 0 ||
+    tileX + spec.footprintW > MAP_WIDTH_TILES ||
+    tileY + spec.footprintH > MAP_HEIGHT_TILES
+  ) {
+    return false;
+  }
+
+  for (let dy = 0; dy < spec.footprintH; dy++) {
+    for (let dx = 0; dx < spec.footprintW; dx++) {
+      const idx = (tileY + dy) * MAP_WIDTH_TILES + (tileX + dx);
+      if (st.terrainGrid[idx] === 2) {
+        return false;
+      }
+    }
+  }
+
+  const cx = tileX + spec.footprintW * 0.5;
+  const cy = tileY + spec.footprintH * 0.5;
+  let withinBaseRadius = false;
+
+  for (const ent of st.currEntities.values()) {
+    if (ent.entityType === "BUILDING") {
+      const bSpec = BUILDINGS[ent.kind as BuildingKind];
+      const overlapsX = tileX < ent.x + bSpec.footprintW && tileX + spec.footprintW > ent.x;
+      const overlapsY = tileY < ent.y + bSpec.footprintH && tileY + spec.footprintH > ent.y;
+      if (overlapsX && overlapsY) {
+        return false;
+      }
+      if (ent.ownerId === st.playerId) {
+        const bx = ent.x + bSpec.footprintW * 0.5;
+        const by = ent.y + bSpec.footprintH * 0.5;
+        if (Math.hypot(cx - bx, cy - by) <= BASE_BUILD_RADIUS_TILES) {
+          withinBaseRadius = true;
+        }
+      }
+    } else if (ent.entityType === "UNIT" && ent.ownerId !== st.playerId) {
+      const ux = Math.round(ent.x);
+      const uy = Math.round(ent.y);
+      if (
+        ux >= tileX &&
+        ux < tileX + spec.footprintW &&
+        uy >= tileY &&
+        uy < tileY + spec.footprintH
+      ) {
+        return false;
+      }
+    }
+  }
+
+  return withinBaseRadius;
+}
 
 export default function GameMatchPage() {
   const params = useParams<{ lobbyId: string }>();
@@ -57,6 +121,7 @@ export default function GameMatchPage() {
   const [atlasProgress, setAtlasProgress] = useState(0);
   const [atlasStage, setAtlasStage] = useState("Initialisation OffscreenCanvas...");
   const [chatInput, setChatInput] = useState("");
+  const [zoomLevel, setZoomLevel] = useState<number>(1);
 
   const worldCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const minimapCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -64,6 +129,11 @@ export default function GameMatchPage() {
   const dragStartRef = useRef<{ x: number; y: number } | null>(null);
   const dragCurrRef = useRef<{ x: number; y: number } | null>(null);
   const hoverTileRef = useRef<{ tileX: number; tileY: number }>({ tileX: 6, tileY: 6 });
+  const pointerCanvasRef = useRef<{ x: number; y: number; inside: boolean }>({
+    x: -1,
+    y: -1,
+    inside: false,
+  });
   const keysPressedRef = useRef<Set<string>>(new Set());
 
   // 1. Connect WebSocket & join lobby
@@ -138,11 +208,28 @@ export default function GameMatchPage() {
 
       // Smooth keyboard camera pan
       const keys = keysPressedRef.current;
-      const panSpeed = 10;
+      const panSpeed = 7;
       if (keys.has("w") || keys.has("arrowup")) cam.pan(0, -panSpeed);
       if (keys.has("s") || keys.has("arrowdown")) cam.pan(0, panSpeed);
       if (keys.has("a") || keys.has("arrowleft")) cam.pan(-panSpeed, 0);
       if (keys.has("d") || keys.has("arrowright")) cam.pan(panSpeed, 0);
+
+      // Gentle, progressive edge-of-screen camera auto-scroll when cursor is near a canvas border
+      if (pointerCanvasRef.current.inside && !dragStartRef.current) {
+        const { vx, vy } = computeEdgeScrollVelocity(
+          pointerCanvasRef.current.x,
+          pointerCanvasRef.current.y,
+          cam.viewportWidth,
+          cam.viewportHeight
+        );
+        if (vx !== 0 || vy !== 0) {
+          cam.pan(vx, vy);
+          hoverTileRef.current = cam.screenToTile(
+            pointerCanvasRef.current.x,
+            pointerCanvasRef.current.y
+          );
+        }
+      }
 
       // Process acoustic events with camera spatialization
       const events = st.consumeAcousticEvents();
@@ -171,6 +258,7 @@ export default function GameMatchPage() {
           const visible = st.visibleByPlayer.get(st.playerId) ?? new Set<number>();
 
           let placementPreview: {
+            faction: FactionId;
             buildingKind: BuildingKind;
             tileX: number;
             tileY: number;
@@ -179,17 +267,12 @@ export default function GameMatchPage() {
 
           if (st.placementBuilding) {
             const bKind = st.placementBuilding.kind;
-            const spec = BUILDINGS[bKind];
             const tx = hoverTileRef.current.tileX;
             const ty = hoverTileRef.current.tileY;
-            let valid = true;
-            for (let dy = 0; dy < spec.footprintH; dy++) {
-              for (let dx = 0; dx < spec.footprintW; dx++) {
-                const idx = (ty + dy) * MAP_WIDTH_TILES + (tx + dx);
-                if (st.terrainGrid[idx] === 2) valid = false;
-              }
-            }
+            const myEcon = st.playersEconomy.get(st.playerId);
+            const valid = canPlaceBuildingOnGrid(st, bKind, tx, ty);
             placementPreview = {
+              faction: myEcon?.faction ?? st.faction,
               buildingKind: bKind,
               tileX: tx,
               tileY: ty,
@@ -309,6 +392,19 @@ export default function GameMatchPage() {
 
     // Left-click: Place building, Sell structure, or start selection box
     if (st.placementBuilding) {
+      const valid = canPlaceBuildingOnGrid(
+        st,
+        st.placementBuilding.kind,
+        tileX,
+        tileY
+      );
+      if (!valid) {
+        useRtsGameStore.setState({
+          evaBannerText:
+            "EVA : ZONE DE DÉPLOIEMENT INVALIDE — CLIQUEZ SUR UN EMPLACEMENT VERT PRÈS DE LA BASE",
+        });
+        return;
+      }
       globalAudioMixer.playUiClick();
       sendMessage({
         type: "COMMAND_PLACE_BUILDING",
@@ -355,10 +451,15 @@ export default function GameMatchPage() {
     const rect = e.currentTarget.getBoundingClientRect();
     const sx = e.clientX - rect.left;
     const sy = e.clientY - rect.top;
+    pointerCanvasRef.current = { x: sx, y: sy, inside: true };
     hoverTileRef.current = cameraRef.current.screenToTile(sx, sy);
     if (dragStartRef.current) {
       dragCurrRef.current = { x: sx, y: sy };
     }
+  }
+
+  function handleCanvasMouseLeave(): void {
+    pointerCanvasRef.current.inside = false;
   }
 
   function handleCanvasMouseUp(e: React.MouseEvent<HTMLCanvasElement>): void {
@@ -417,6 +518,18 @@ export default function GameMatchPage() {
     });
     useRtsGameStore.setState({ currentLobbyId: null });
     router.push("/");
+  }
+
+  function handleCycleZoom(): void {
+    globalAudioMixer.playUiClick();
+    const next = cameraRef.current.cycleZoom();
+    setZoomLevel(next);
+  }
+
+  function handleSelectZoom(targetZoom: number): void {
+    globalAudioMixer.playUiClick();
+    const next = cameraRef.current.setZoom(targetZoom);
+    setZoomLevel(next);
   }
 
   // Screen 1: Asynchronous Batched OffscreenCanvas Sprite Atlas Rasterization Progress
@@ -614,23 +727,33 @@ export default function GameMatchPage() {
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="text-[11px] text-slate-400">
-              Clic Gauche : Sélection/Poser • Clic Droit : Ordre Mouvement/Attaque • WASD : Caméra
+            <span className="hidden xl:inline text-[11px] text-slate-400">
+              Clic Gauche : Sélection/Poser • Clic Droit : Ordre/Annuler • WASD : Caméra
             </span>
             <Button
-              variant="ghost"
+              variant="tactical"
               size="sm"
-              onClick={() => cameraRef.current.adjustZoom(0.15)}
+              onClick={handleCycleZoom}
             >
               <ZoomIn className="h-3.5 w-3.5" />
+              Zoom {zoomLevel}x
             </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => cameraRef.current.adjustZoom(-0.15)}
-            >
-              <ZoomOut className="h-3.5 w-3.5" />
-            </Button>
+            <div className="flex items-center gap-1 rounded border border-slate-800 bg-slate-900 p-0.5">
+              {ZOOM_LEVELS.map((z) => (
+                <button
+                  key={z}
+                  type="button"
+                  onClick={() => handleSelectZoom(z)}
+                  className={
+                    Math.abs(zoomLevel - z) < 0.01
+                      ? "rounded border border-amber-400/60 bg-amber-500/25 px-1.5 py-0.5 text-[10px] font-bold text-amber-300"
+                      : "rounded px-1.5 py-0.5 text-[10px] text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+                  }
+                >
+                  {z}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -641,6 +764,7 @@ export default function GameMatchPage() {
             onMouseDown={handleCanvasMouseDown}
             onMouseMove={handleCanvasMouseMove}
             onMouseUp={handleCanvasMouseUp}
+            onMouseLeave={handleCanvasMouseLeave}
             onContextMenu={(e) => e.preventDefault()}
             className="h-full w-full cursor-crosshair block"
           />
@@ -670,6 +794,9 @@ export default function GameMatchPage() {
         minimapCanvasRef={minimapCanvasRef}
         onMinimapClickTile={(tx, ty) => cameraRef.current.centerOnTile(tx, ty)}
         onLeaveMatch={handleLeave}
+        zoomLevel={zoomLevel}
+        onCycleZoom={handleCycleZoom}
+        onSelectZoom={handleSelectZoom}
       />
     </div>
   );

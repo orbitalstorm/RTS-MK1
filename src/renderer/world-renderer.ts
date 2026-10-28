@@ -5,6 +5,7 @@ import {
   MAP_WIDTH_TILES,
   TILE_PIXEL_SIZE,
   type BuildingKind,
+  type FactionId,
 } from "../shared/constants";
 import type { EntityState, ProjectileVisual } from "../shared/schemas/deltas";
 import type { TacticalCamera } from "./camera";
@@ -31,6 +32,7 @@ export interface WorldRenderInput {
     endY: number;
   } | null;
   placementPreview: {
+    faction: FactionId;
     buildingKind: BuildingKind;
     tileX: number;
     tileY: number;
@@ -179,6 +181,21 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
   // 4. Draw building placement grid footprint preview inside the canvas (zero DOM inline styles!)
   if (placementPreview) {
     const spec = BUILDINGS[placementPreview.buildingKind];
+    const ghostBmp = atlas.buildings.get(
+      `${placementPreview.faction}:${placementPreview.buildingKind}`
+    );
+    if (ghostBmp) {
+      ctx.save();
+      ctx.globalAlpha = 0.65;
+      ctx.drawImage(
+        ghostBmp,
+        placementPreview.tileX * s,
+        placementPreview.tileY * s,
+        spec.footprintW * s,
+        spec.footprintH * s
+      );
+      ctx.restore();
+    }
     for (let dy = 0; dy < spec.footprintH; dy++) {
       for (let dx = 0; dx < spec.footprintW; dx++) {
         const tx = placementPreview.tileX + dx;

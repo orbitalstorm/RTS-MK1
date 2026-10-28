@@ -1,4 +1,5 @@
 import {
+  BASE_BUILD_RADIUS_TILES,
   BASE_STORAGE_CAPACITY,
   BUILDINGS,
   FACTIONS,
@@ -481,15 +482,90 @@ export class RtsSimulation {
     const slot = player.queues[category];
     if (!slot.readyToPlace || slot.activeItem !== buildingKind) return false;
 
+    this.rebuildSpatialReservations();
+
     const spec = BUILDINGS[buildingKind];
-    if (!this.reservationGrid.isFootprintBuildable(tileX, tileY, spec.footprintW, spec.footprintH)) {
-      return false;
-    }
     if (!this.isWithinBaseBuildRadius(playerId, tileX, tileY, spec.footprintW, spec.footprintH)) {
       return false;
     }
 
+    // Check terrain & static buildings first; relocate any friendly mobile units standing on the footprint
+    for (let dy = 0; dy < spec.footprintH; dy++) {
+      for (let dx = 0; dx < spec.footprintW; dx++) {
+        const cx = tileX + dx;
+        const cy = tileY + dy;
+        if (!this.reservationGrid.inBounds(cx, cy)) return false;
+        const idx = cy * this.width + cx;
+        if (this.terrainGrid[idx] === 2) return false;
+        // Check if any building or enemy unit occupies (cx, cy)
+        for (const ent of this.entities.values()) {
+          if (ent.entityType === "BUILDING" && ent.building) {
+            if (
+              cx >= ent.transform.x &&
+              cx < ent.transform.x + ent.building.footprintW &&
+              cy >= ent.transform.y &&
+              cy < ent.transform.y + ent.building.footprintH
+            ) {
+              return false;
+            }
+          } else if (
+            ent.entityType === "UNIT" &&
+            ent.ownerId !== playerId &&
+            Math.round(ent.transform.x) === cx &&
+            Math.round(ent.transform.y) === cy
+          ) {
+            return false;
+          }
+        }
+      }
+    }
+
+    // Relocate any friendly mobile units currently inside the new building footprint to perimeter dock tiles
+    for (const ent of this.entities.values()) {
+      if (ent.entityType === "UNIT" && ent.ownerId === playerId) {
+        const ux = Math.round(ent.transform.x);
+        const uy = Math.round(ent.transform.y);
+        if (
+          ux >= tileX &&
+          ux < tileX + spec.footprintW &&
+          uy >= tileY &&
+          uy < tileY + spec.footprintH
+        ) {
+          this.reservationGrid.releaseUnitTile(ux, uy, ent.id);
+        }
+      }
+    }
+
     const created = this.createBuildingEntity(playerId, player.faction, buildingKind, tileX, tileY);
+
+    for (const ent of this.entities.values()) {
+      if (ent.entityType === "UNIT" && ent.ownerId === playerId) {
+        const ux = Math.round(ent.transform.x);
+        const uy = Math.round(ent.transform.y);
+        if (
+          ux >= tileX &&
+          ux < tileX + spec.footprintW &&
+          uy >= tileY &&
+          uy < tileY + spec.footprintH
+        ) {
+          const dock = this.reservationGrid.findNearestFreeDockTile(
+            tileX,
+            tileY,
+            spec.footprintW,
+            spec.footprintH,
+            ux,
+            uy,
+            ent.id
+          );
+          if (dock) {
+            ent.transform.x = dock.x;
+            ent.transform.y = dock.y;
+            this.reservationGrid.reserveUnitTile(dock.x, dock.y, ent.id);
+            ent.dirty = true;
+          }
+        }
+      }
+    }
     slot.activeItem = null;
     slot.ticksElapsed = 0;
     slot.ticksRequired = 0;
@@ -537,16 +613,6 @@ export class RtsSimulation {
     const prevTickId = this.tickCounter;
     this.tickCounter++;
 
-    this.createdThisTick = [];
-    this.destroyedThisTick = [];
-    this.oreUpdatesThisTick.clear();
-    this.projectilesThisTick = [];
-    this.acousticEventsThisTick = [];
-
-    for (const ent of this.entities.values()) {
-      ent.dirty = false;
-    }
-
     this.rebuildSpatialReservations();
     this.recomputeAllPlayerEconomies();
 
@@ -592,6 +658,16 @@ export class RtsSimulation {
       fogByPlayer,
       winnerPlayerId: this.winnerPlayerId,
     };
+
+    this.createdThisTick = [];
+    this.destroyedThisTick = [];
+    this.oreUpdatesThisTick.clear();
+    this.projectilesThisTick = [];
+    this.acousticEventsThisTick = [];
+
+    for (const ent of this.entities.values()) {
+      ent.dirty = false;
+    }
 
     return TickDeltaSchema.parse(delta);
   }
@@ -1206,7 +1282,7 @@ export class RtsSimulation {
       if (ent.ownerId === playerId && ent.entityType === "BUILDING" && ent.building) {
         const bx = ent.transform.x + ent.building.footprintW * 0.5;
         const by = ent.transform.y + ent.building.footprintH * 0.5;
-        if (Math.hypot(cx - bx, cy - by) <= 10) {
+        if (Math.hypot(cx - bx, cy - by) <= BASE_BUILD_RADIUS_TILES) {
           return true;
         }
       }

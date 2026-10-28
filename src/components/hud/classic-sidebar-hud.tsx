@@ -12,11 +12,13 @@ import {
   Volume2,
   VolumeX,
   Zap,
+  ZoomIn,
 } from "lucide-react";
 import {
   BUILDING_LIST,
   FACTIONS,
   UNIT_LIST,
+  ZOOM_LEVELS,
   type BuildingKind,
   type ProductionCategory,
   type UnitKind,
@@ -29,12 +31,18 @@ interface ClassicSidebarHudProps {
   minimapCanvasRef: React.RefObject<HTMLCanvasElement | null>;
   onMinimapClickTile: (tileX: number, tileY: number) => void;
   onLeaveMatch: () => void;
+  zoomLevel: number;
+  onCycleZoom: () => void;
+  onSelectZoom: (zoom: number) => void;
 }
 
 export function ClassicSidebarHud({
   minimapCanvasRef,
   onMinimapClickTile,
   onLeaveMatch,
+  zoomLevel,
+  onCycleZoom,
+  onSelectZoom,
 }: ClassicSidebarHudProps) {
   const {
     playerId,
@@ -158,8 +166,35 @@ export function ClassicSidebarHud({
         />
       </div>
 
-      {/* Tactical Mode Actions (Place Ready Building / Sell Structure) */}
-      <div className="flex items-center gap-2 border-b border-slate-800 px-3 py-2">
+      {/* Tactical Mode Actions (Zoom Selector & Sell Structure) */}
+      <div className="border-b border-slate-800 px-3 py-2 space-y-2">
+        <div className="flex items-center justify-between gap-1.5">
+          <Button
+            variant="tactical"
+            size="sm"
+            onClick={onCycleZoom}
+            className="shrink-0"
+          >
+            <ZoomIn className="h-3.5 w-3.5" />
+            Zoom {zoomLevel}x
+          </Button>
+          <div className="grid flex-1 grid-cols-5 gap-1 rounded border border-slate-800 bg-slate-950 p-0.5">
+            {ZOOM_LEVELS.map((z) => (
+              <button
+                key={z}
+                type="button"
+                onClick={() => onSelectZoom(z)}
+                className={
+                  Math.abs(zoomLevel - z) < 0.01
+                    ? "rounded border border-amber-400/60 bg-amber-500/25 py-1 text-[10px] font-bold text-amber-300"
+                    : "rounded py-1 text-[10px] text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+                }
+              >
+                {z}
+              </button>
+            ))}
+          </div>
+        </div>
         <Button
           variant={sellMode ? "danger" : "ghost"}
           size="sm"
