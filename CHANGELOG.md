@@ -5,11 +5,12 @@ All notable changes to **RTS-MK1** (`https://rts-mk1.orbital8.cloud`) follow str
 ## [v1.1.0] — 2026-10-28
 
 ### Added
+- **Smooth Edge-of-Screen Camera Auto-Scroll (`src/shared/constants/index.ts`, `src/app/game/[lobbyId]/page.tsx`)**: Added progressive quadratic edge-of-screen camera panning (`computeEdgeScrollVelocity`, `EDGE_SCROLL_MARGIN_PX = 36`, `EDGE_SCROLL_MAX_SPEED_PX = 3.2`) when the cursor enters a 36px viewport border zone, ensuring gentle, non-violent camera movement without interfering with box-selection drags.
 - **Tactical Camera Zoom Selector (`1`, `1.25`, `1.5`, `1.75`, `2`)**: Added `ZOOM_LEVELS` (`[1, 1.25, 1.5, 1.75, 2]`) in `src/shared/constants/index.ts`, center-preserving `setZoom()` and `cycleZoom()` in `src/renderer/camera.ts`, and interactive Zoom cycle + direct level selector buttons (`1`, `1.25`, `1.5`, `1.75`, `2`) in both the top tactical viewport bar (`src/app/game/[lobbyId]/page.tsx`) and the classic sidebar HUD (`src/components/hud/classic-sidebar-hud.tsx`).
 - **Ghost Building Sprite & Placement Validation Preview**: Rendered the faction-colored building sprite preview inside `renderTacticalWorld` (`src/renderer/world-renderer.ts`) and synchronized client-side placement validation (`canPlaceBuildingOnGrid`) with server-side footprint, unit-occupancy, and base build radius rules (`BASE_BUILD_RADIUS_TILES = 16`).
 
 ### Fixed
-- **Root-Cause Building Deployment Delta Synchronization (`src/engine/simulation.ts`)**: Fixed the tick lifecycle in `RtsSimulation.stepTick()` where `createdThisTick`, `destroyedThisTick`, `acousticEventsThisTick`, and `ent.dirty` were cleared at the *beginning* of `stepTick()` instead of at the *end* after serializing `TickDelta`. WebSocket commands (`COMMAND_PLACE_BUILDING`, `COMMAND_SELL_BUILDING`) executed between 20 Hz ticks now reliably include the deployed or sold building in the next `SIM_DELTA` packet (`delta.created` / `delta.destroyedIds`).
+- **Root-Cause Building Deployment Delta Synchronization & Friendly Unit Relocation (`src/engine/simulation.ts`)**: Fixed the tick lifecycle in `RtsSimulation.stepTick()` where `createdThisTick`, `destroyedThisTick`, `acousticEventsThisTick`, and `ent.dirty` were cleared at the *beginning* of `stepTick()` instead of at the *end* after serializing `TickDelta`. WebSocket commands (`COMMAND_PLACE_BUILDING`, `COMMAND_SELL_BUILDING`) executed between 20 Hz ticks now reliably include the deployed or sold building in the next `SIM_DELTA` packet (`delta.created` / `delta.destroyedIds`). Friendly mobile units standing on a new building footprint are also automatically relocated to the nearest free perimeter tile instead of silently blocking deployment.
 
 ## [v1.0.0] — 2026-10-28
 

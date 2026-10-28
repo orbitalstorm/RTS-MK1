@@ -11,7 +11,13 @@ import {
 import { RtsSimulation } from "../src/engine/simulation";
 import { LobbyManager } from "../src/server/lobby-manager";
 import { TacticalCamera } from "../src/renderer/camera";
-import { WATCHDOG_DISCONNECT_TIMEOUT_MS, ZOOM_LEVELS } from "../src/shared/constants";
+import {
+  computeEdgeScrollVelocity,
+  EDGE_SCROLL_MARGIN_PX,
+  EDGE_SCROLL_MAX_SPEED_PX,
+  WATCHDOG_DISCONNECT_TIMEOUT_MS,
+  ZOOM_LEVELS,
+} from "../src/shared/constants";
 import { ClientLobbyActionSchema } from "../src/shared/schemas/commands";
 
 function collectSourceFiles(dir: string): string[] {
@@ -90,7 +96,7 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
     ).toBe(true);
   });
 
-  it("supports discrete tactical zoom levels 1, 1.25, 1.5, 1.75, 2", () => {
+  it("supports discrete tactical zoom levels 1, 1.25, 1.5, 1.75, 2 and gentle quadratic edge-scroll", () => {
     expect(ZOOM_LEVELS).toEqual([1, 1.25, 1.5, 1.75, 2]);
     const cam = new TacticalCamera();
     expect(cam.zoom).toBe(1);
@@ -100,6 +106,19 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
     expect(cam.cycleZoom()).toBe(2);
     expect(cam.cycleZoom()).toBe(1);
     expect(cam.setZoom(1.75)).toBe(1.75);
+
+    // Center of viewport -> zero velocity
+    expect(computeEdgeScrollVelocity(500, 400, 1000, 800)).toEqual({ vx: 0, vy: 0 });
+
+    // Halfway into left margin (18px of 36px) -> gentle quadratic velocity (0.25 * maxSpeed)
+    const halfLeft = computeEdgeScrollVelocity(EDGE_SCROLL_MARGIN_PX / 2, 400, 1000, 800);
+    expect(halfLeft.vx).toBeCloseTo(-0.25 * EDGE_SCROLL_MAX_SPEED_PX, 5);
+    expect(halfLeft.vy).toBe(0);
+
+    // Extreme bottom-right edge -> capped at gentle max speed (3.2 px/frame)
+    const corner = computeEdgeScrollVelocity(1000, 800, 1000, 800);
+    expect(corner.vx).toBeCloseTo(EDGE_SCROLL_MAX_SPEED_PX, 5);
+    expect(corner.vy).toBeCloseTo(EDGE_SCROLL_MAX_SPEED_PX, 5);
   });
 
   it("prevents unit overlap via SpatialReservationGrid and finds 8-way A* paths", () => {
