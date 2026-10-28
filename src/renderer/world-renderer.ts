@@ -1,5 +1,6 @@
 import {
   BUILDINGS,
+  canPlaceBuildingOnTerrainTile,
   computeTerrainNeighborMask,
   FACTIONS,
   HARVESTER_MAX_LOAD,
@@ -979,37 +980,122 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
     }
   }
 
-  // 4. Draw building placement grid footprint preview inside the canvas (zero DOM inline styles!)
+  // 4. Smooth diagonal Fog of War & Unexplored Shroud (eliminates rectangular staircase effect)
+  if (hasFog) {
+    renderSmoothFogAndShroud(ctx, bounds, s, exploredCells, visibleCells);
+  }
+
+  // 5. Draw building placement blueprint footprint preview under the cursor (rendered on top of fog so always visible)
   if (placementPreview) {
     const spec = BUILDINGS[placementPreview.buildingKind];
+    const px = placementPreview.tileX * s;
+    const py = placementPreview.tileY * s;
+    const bw = spec.footprintW * s;
+    const bh = spec.footprintH * s;
     const ghostBmp = atlas.buildings.get(
       `${placementPreview.faction}:${placementPreview.buildingKind}`
     );
     if (ghostBmp) {
       ctx.save();
-      ctx.globalAlpha = 0.65;
-      ctx.drawImage(
-        ghostBmp,
-        placementPreview.tileX * s,
-        placementPreview.tileY * s,
-        spec.footprintW * s,
-        spec.footprintH * s
-      );
+      ctx.globalAlpha = 0.72;
+      ctx.drawImage(ghostBmp, px, py, bw, bh);
       ctx.restore();
     }
+
     for (let dy = 0; dy < spec.footprintH; dy++) {
       for (let dx = 0; dx < spec.footprintW; dx++) {
         const tx = placementPreview.tileX + dx;
         const ty = placementPreview.tileY + dy;
-        ctx.fillStyle = placementPreview.valid
-          ? "rgba(34, 197, 94, 0.35)"
-          : "rgba(239, 68, 68, 0.42)";
+        const idx = ty * MAP_WIDTH_TILES + tx;
+        const cellTerrain =
+          tx >= 0 && ty >= 0 && tx < MAP_WIDTH_TILES && ty < MAP_HEIGHT_TILES
+            ? (terrainGrid[idx] ?? 0)
+            : -1;
+        const tileFoundationOk =
+          cellTerrain >= 0 &&
+          canPlaceBuildingOnTerrainTile(placementPreview.buildingKind, cellTerrain) &&
+          !(placementPreview.buildingKind === "CONCRETE_SLAB" && cellTerrain === TERRAIN_KIND.CONCRETE_SLAB);
+        const cellValid = placementPreview.valid && tileFoundationOk;
+
+        ctx.fillStyle = cellValid
+          ? "rgba(34, 197, 94, 0.34)"
+          : tileFoundationOk
+            ? "rgba(245, 158, 11, 0.38)"
+            : "rgba(239, 68, 68, 0.44)";
         ctx.fillRect(tx * s, ty * s, s, s);
-        ctx.strokeStyle = placementPreview.valid ? "#22c55e" : "#ef4444";
-        ctx.lineWidth = 1.5;
+
+        // Diagonal blueprint hatching inside each footprint tile
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(tx * s + 1, ty * s + 1, s - 2, s - 2);
+        ctx.clip();
+        ctx.strokeStyle = cellValid
+          ? "rgba(74, 222, 128, 0.45)"
+          : "rgba(248, 113, 113, 0.45)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(tx * s, ty * s + s);
+        ctx.lineTo(tx * s + s, ty * s);
+        ctx.moveTo(tx * s - s * 0.5, ty * s + s);
+        ctx.lineTo(tx * s + s * 0.5, ty * s);
+        ctx.moveTo(tx * s + s * 0.5, ty * s + s);
+        ctx.lineTo(tx * s + s * 1.5, ty * s);
+        ctx.stroke();
+        ctx.restore();
+
+        ctx.strokeStyle = cellValid ? "#22c55e" : "#ef4444";
+        ctx.lineWidth = 1.6;
         ctx.strokeRect(tx * s + 1, ty * s + 1, s - 2, s - 2);
       }
     }
+
+    // Outer technical blueprint corner brackets around the full WxH footprint
+    const bracketLen = Math.min(10, Math.min(bw, bh) * 0.32);
+    ctx.save();
+    ctx.strokeStyle = placementPreview.valid ? "#4ade80" : "#f87171";
+    ctx.lineWidth = 2.4;
+    ctx.beginPath();
+    // Top-left
+    ctx.moveTo(px - 1, py + bracketLen);
+    ctx.lineTo(px - 1, py - 1);
+    ctx.lineTo(px + bracketLen, py - 1);
+    // Top-right
+    ctx.moveTo(px + bw - bracketLen, py - 1);
+    ctx.lineTo(px + bw + 1, py - 1);
+    ctx.lineTo(px + bw + 1, py + bracketLen);
+    // Bottom-right
+    ctx.moveTo(px + bw + 1, py + bh - bracketLen);
+    ctx.lineTo(px + bw + 1, py + bh + 1);
+    ctx.lineTo(px + bw - bracketLen, py + bh + 1);
+    // Bottom-left
+    ctx.moveTo(px + bracketLen, py + bh + 1);
+    ctx.lineTo(px - 1, py + bh + 1);
+    ctx.lineTo(px - 1, py + bh - bracketLen);
+    ctx.stroke();
+
+    // Floating blueprint label above the cursor footprint
+    const labelText = `PATRON : ${spec.name.toUpperCase()} (${spec.footprintW}×${spec.footprintH})`;
+    const subText = placementPreview.valid
+      ? "CLIC GAUCHE : POSER LE PATRON"
+      : placementPreview.buildingKind === "SILVER_MINE"
+        ? "REQUIS : ROCHER ARGENTÉ 2×2 INTÉGRAL"
+        : "REQUIS : DALLE BÉTON LIBRE PRÈS DE LA BASE";
+    ctx.font = "bold 9px monospace";
+    ctx.textAlign = "center";
+    const boxW = Math.max(bw + 16, Math.max(labelText.length, subText.length) * 5.6 + 12);
+    const boxX = px + bw * 0.5 - boxW * 0.5;
+    const boxY = py - 26;
+    ctx.fillStyle = "rgba(9, 13, 22, 0.9)";
+    ctx.fillRect(boxX, boxY, boxW, 22);
+    ctx.strokeStyle = placementPreview.valid ? "#22c55e" : "#ef4444";
+    ctx.lineWidth = 1.2;
+    ctx.strokeRect(boxX, boxY, boxW, 22);
+    ctx.fillStyle = "#f8fafc";
+    ctx.fillText(labelText, px + bw * 0.5, boxY + 9);
+    ctx.fillStyle = placementPreview.valid ? "#4ade80" : "#fca5a5";
+    ctx.fillText(subText, px + bw * 0.5, boxY + 19);
+    ctx.restore();
+
     if (spec.attackRange > 0) {
       drawTacticalRangeCircles(
         ctx,
@@ -1020,11 +1106,6 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
         placementPreview.valid ? "#22c55e" : "#ef4444"
       );
     }
-  }
-
-  // 5. Smooth diagonal Fog of War & Unexplored Shroud (eliminates rectangular staircase effect)
-  if (hasFog) {
-    renderSmoothFogAndShroud(ctx, bounds, s, exploredCells, visibleCells);
   }
 
   ctx.restore();

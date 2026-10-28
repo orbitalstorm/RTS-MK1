@@ -55,6 +55,7 @@ import {
 } from "../src/shared/constants";
 import { ClientLobbyActionSchema } from "../src/shared/schemas/commands";
 import type { VisualEffectEvent } from "../src/shared/schemas/deltas";
+import { useRtsGameStore } from "../src/store/game-store";
 
 function collectSourceFiles(dir: string): string[] {
   const results: string[] = [];
@@ -294,7 +295,7 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
   });
 
   it("v1.2.0 — supports Game Juice camera shake, shortest-arc 16-angle interpolation, and 2x Hi-DPI sprite scale", () => {
-    expect(APP_VERSION).toBe("1.8.0");
+    expect(APP_VERSION).toBe("1.8.1");
     expect(SPRITE_ATLAS_SCALE).toBe(2);
 
     // Zero trauma produces zero offset
@@ -1239,5 +1240,42 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
       if (!sim.getEntity(testTree.id)) break;
     }
     expect(sim.getEntity(testTree.id)).toBeUndefined();
+  });
+
+  it("v1.8.1 — preserves active blueprint placement mode (placementBuilding) across 20 Hz SIM_DELTA ticks when clicking 'Poser le Patron' for any building", () => {
+    const sim = new RtsSimulation("test_v181_placement_persistence", [
+      { playerId: "p1", commanderName: "Alpha", faction: "GDI", isAi: false },
+      { playerId: "p2", commanderName: "Beta", faction: "NOD", isAi: false },
+    ]);
+
+    const store = useRtsGameStore.getState();
+    store.setCommanderIdentity("p1", "Alpha", "GDI");
+    store.ingestServerSnapshot(sim.getFullSnapshot());
+
+    for (const item of [
+      { category: "BUILDING" as const, kind: "POWER_PLANT" as const },
+      { category: "BUILDING" as const, kind: "BARRACKS" as const },
+      { category: "BUILDING" as const, kind: "REFINERY" as const },
+      { category: "BUILDING" as const, kind: "SILO" as const },
+      { category: "BUILDING" as const, kind: "SILVER_MINE" as const },
+      { category: "DEFENSE" as const, kind: "GUARD_TOWER" as const },
+    ]) {
+      useRtsGameStore.getState().setPlacementBuilding(item);
+      expect(useRtsGameStore.getState().placementBuilding).toEqual(item);
+
+      // Step 10 consecutive 20 Hz simulation deltas while no queue item is active:
+      // placementBuilding MUST remain active under the cursor and never reset to null!
+      for (let t = 0; t < 10; t++) {
+        const delta = sim.stepTick();
+        useRtsGameStore.getState().ingestServerDelta(delta);
+        expect(useRtsGameStore.getState().placementBuilding).toEqual(item);
+      }
+    }
+
+    // Place the selected blueprint onto the 8x8 Concrete Slab pad at (11, 5)
+    useRtsGameStore.getState().setPlacementBuilding({ category: "BUILDING", kind: "POWER_PLANT" });
+    expect(sim.issuePlaceBuilding("p1", "BUILDING", "POWER_PLANT", 11, 5)).toBe(true);
+    useRtsGameStore.getState().setPlacementBuilding(null);
+    expect(useRtsGameStore.getState().placementBuilding).toBeNull();
   });
 });

@@ -293,7 +293,7 @@ export default function GameMatchPage() {
     };
   }, []);
 
-  // 3. Keyboard camera panning (WASD / Arrows)
+  // 3. Keyboard camera panning (WASD / Arrows) & global cursor tracking for placement preview
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       keysPressedRef.current.add(e.key.toLowerCase());
@@ -304,13 +304,39 @@ export default function GameMatchPage() {
     const onKeyUp = (e: KeyboardEvent) => {
       keysPressedRef.current.delete(e.key.toLowerCase());
     };
+    const onWindowPointerMove = (e: PointerEvent) => {
+      const canvas = worldCanvasRef.current;
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+      if (sx >= 0 && sy >= 0 && sx <= rect.width && sy <= rect.height) {
+        pointerCanvasRef.current = { x: sx, y: sy, inside: true };
+        hoverTileRef.current = cameraRef.current.screenToTile(sx, sy);
+      } else {
+        pointerCanvasRef.current.inside = false;
+      }
+    };
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("pointermove", onWindowPointerMove, { passive: true });
     return () => {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("pointermove", onWindowPointerMove);
     };
   }, [setPlacementBuilding]);
+
+  // Snap initial placement preview tile into visible camera view when selecting a building in the HUD
+  useEffect(() => {
+    if (hasPlacementBuilding && !pointerCanvasRef.current.inside) {
+      const center = cameraRef.current.getCenterTile();
+      hoverTileRef.current = {
+        tileX: Math.max(0, Math.min(MAP_WIDTH_TILES - 2, Math.floor(center.tileX))),
+        tileY: Math.max(0, Math.min(MAP_HEIGHT_TILES - 2, Math.floor(center.tileY))),
+      };
+    }
+  }, [hasPlacementBuilding]);
 
   // 4. ResizeObserver for World Canvas (Zero getBoundingClientRect inside 60 FPS RAF loop)
   useEffect(() => {
@@ -671,14 +697,18 @@ export default function GameMatchPage() {
         tileX,
         tileY,
       });
-      pendingPlacedTilesRef.current.set(`${tileX},${tileY}`, {
-        tileX,
-        tileY,
-        kind: bKind,
-        expiresAtMs: nowMs + 350,
-      });
+      for (let dy = 0; dy < spec.footprintH; dy++) {
+        for (let dx = 0; dx < spec.footprintW; dx++) {
+          pendingPlacedTilesRef.current.set(`${tileX + dx},${tileY + dy}`, {
+            tileX: tileX + dx,
+            tileY: tileY + dy,
+            kind: bKind,
+            expiresAtMs: nowMs + 350,
+          });
+        }
+      }
       lastDragPlacedTileRef.current = { tileX, tileY };
-      if (!repeatable) {
+      if (!repeatable && !e.shiftKey) {
         setPlacementBuilding(null);
       }
       return;
@@ -1243,12 +1273,16 @@ export default function GameMatchPage() {
         tileX: deployX,
         tileY: deployY,
       });
-      pendingPlacedTilesRef.current.set(`${deployX},${deployY}`, {
-        tileX: deployX,
-        tileY: deployY,
-        kind: bKind,
-        expiresAtMs: nowMs + 350,
-      });
+      for (let dy = 0; dy < spec.footprintH; dy++) {
+        for (let dx = 0; dx < spec.footprintW; dx++) {
+          pendingPlacedTilesRef.current.set(`${deployX + dx},${deployY + dy}`, {
+            tileX: deployX + dx,
+            tileY: deployY + dy,
+            kind: bKind,
+            expiresAtMs: nowMs + 350,
+          });
+        }
+      }
       if (!repeatable) {
         setPlacementBuilding(null);
       }

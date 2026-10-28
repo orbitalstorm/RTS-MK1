@@ -2,6 +2,17 @@
 
 All notable changes to **RTS-MK1** (`https://rts-mk1.orbital8.cloud`) follow strict non-reusable `v1.x.y` versioning.
 
+## [v1.8.1] — 2026-10-28
+
+### Fixed & Changed
+- **Root-Cause Fix for Direct Blueprint Placement Mode (`Poser le Patron`) Resetting on 20 Hz Ticks (`src/store/game-store.ts`)**:
+  - Fixed a regression in `applyDelta` (`src/store/game-store.ts`) where `!isRepeatableBuildingKind(placementBuilding.kind) && (!slot?.readyToPlace || !slot.activeItem)` automatically reset `placementBuilding = null` on the very next 20 Hz `SIM_DELTA` tick (`50 ms` after clicking *"Poser le Patron"*) for all buildings and defense turrets (`POWER_PLANT`, `REFINERY`, `SILO`, `BARRACKS`, `WAR_FACTORY`, `RADAR_DOME`, `TECH_CENTER`, `SILVER_MINE`, `GUARD_TOWER`, `SAM_SITE`, `OBELISK`).
+  - `placementBuilding` now remains active across all simulation ticks until the player places the blueprint on a valid Concrete Slab (or 2×2 Silver Ore rock for `SILVER_MINE`), right-clicks, presses `Escape`, or toggles the button off.
+- **High-Visibility Cursor Blueprint Footprint Preview (`Empreinte du Patron sous le Curseur`) (`src/renderer/world-renderer.ts`, `src/app/game/[lobbyId]/page.tsx`)**:
+  - Moved `placementPreview` rendering after `renderSmoothFogAndShroud` in `renderTacticalWorld` so the footprint under the cursor is never obscured by fog/shroud.
+  - Added global `window` `pointermove` tracking and initial camera-center snapping in `GameMatchPage` so the blueprint footprint is immediately visible when clicking *"Poser le Patron"* in the HUD and tracks the cursor across every tile.
+  - Upgraded the cursor footprint overlay with the building ghost sprite (`0.72` opacity), per-tile foundation validity coloring (`#22c55e` valid Concrete Slab vs `#ef4444` invalid foundation/occupied), diagonal blueprint hatching, outer technical corner brackets, and a floating status badge (`PATRON : [NOM] (W×H) — CLIC GAUCHE : POSER LE PATRON`).
+
 ## [v1.8.0] — 2026-10-28
 
 ### Added & Changed

@@ -2,6 +2,7 @@
 
 import { create } from "zustand";
 import {
+  BUILDINGS,
   interpolateEntityPose,
   isRepeatableBuildingKind,
   MAP_HEIGHT_TILES,
@@ -78,6 +79,8 @@ export interface RtsGameStoreState {
   consumeAcousticEvents: () => AcousticEvent[];
   consumeVisualEffects: () => VisualEffectEvent[];
   triggerProduction: (category: ProductionCategory, itemKind: BuildingKind | UnitKind) => void;
+  ingestServerSnapshot: (snap: FullSnapshot) => void;
+  ingestServerDelta: (delta: TickDelta) => void;
 }
 
 let activeSocket: WebSocket | null = null;
@@ -279,6 +282,13 @@ export const useRtsGameStore = create<RtsGameStoreState>((set, get) => ({
       sellMode: false,
       repairMode: false,
       forceAttackMode: false,
+      evaBannerText: b
+        ? b.kind === "SILVER_MINE"
+          ? "EVA : PATRON SÉLECTIONNÉ (MINE D'ARGENT) — PLACEZ L'EMPREINTE SUR UN ROCHER ARGENTÉ 2×2"
+          : isRepeatableBuildingKind(b.kind)
+            ? `EVA : POSE CONTINUE (${BUILDINGS[b.kind].name.toUpperCase()}) — CLIQUEZ SUR LA CARTE POUR POSER`
+            : `EVA : PATRON SÉLECTIONNÉ (${BUILDINGS[b.kind].name.toUpperCase()}) — PLACEZ L'EMPREINTE SUR UNE DALLE EN BÉTON`
+        : "LIAISON TACTIQUE EVA PRÊTE",
     }),
   setSellMode: (enabled) =>
     set({
@@ -326,6 +336,8 @@ export const useRtsGameStore = create<RtsGameStoreState>((set, get) => ({
       itemKind,
     });
   },
+  ingestServerSnapshot: (snap) => applySnapshot(set, get, snap),
+  ingestServerDelta: (delta) => applyDelta(set, get, delta),
 }));
 
 function applySnapshot(
@@ -508,10 +520,14 @@ function applyDelta(
           kind: slot.activeItem as BuildingKind,
         };
       }
+      // Only auto-clear placementBuilding if it came from a completed queue slot that just transitioned from readyToPlace -> false.
+      // Never wipe out direct blueprint placement tools selected by the player ("Poser le Patron").
       if (
         placementBuilding?.category === cat &&
         !isRepeatableBuildingKind(placementBuilding.kind) &&
-        (!slot?.readyToPlace || !slot.activeItem)
+        prevSlot?.readyToPlace &&
+        prevSlot.activeItem === placementBuilding.kind &&
+        !slot?.readyToPlace
       ) {
         placementBuilding = null;
       }

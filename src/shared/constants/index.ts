@@ -95,7 +95,7 @@ export interface UnitSpec {
   description: string;
 }
 
-export const APP_VERSION = "1.8.0";
+export const APP_VERSION = "1.8.1";
 export const SIM_TICK_RATE_HZ = 20;
 export const SIM_TICK_MS = 50;
 export const MAP_WIDTH_TILES = 72;
