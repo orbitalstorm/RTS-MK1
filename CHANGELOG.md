@@ -2,6 +2,14 @@
 
 All notable changes to **RTS-MK1** (`https://rts-mk1.orbital8.cloud`) follow strict non-reusable `v1.x.y` versioning.
 
+## [v1.3.0] — 2026-10-28
+
+### Added
+- **Responsive Mobile Landscape Mode & Multi-Touch Tactical Controls (`src/shared/constants/index.ts`, `src/app/layout.tsx`, `src/app/game/[lobbyId]/page.tsx`, `src/components/hud/classic-sidebar-hud.tsx`, `src/components/lobby/portal-command-center.tsx`)**:
+  - Added pure deterministic touch action resolver (`resolveTouchTapAction`, `TOUCH_INTERACTION_MODES`: `AUTO`, `PAN`, `SELECT`, `COMMAND`) enabling 1-tap unit selection, 1-tap ground move (`COMMAND_MOVE`), 1-tap enemy targeting (`COMMAND_ATTACK`), 1-tap building placement (`COMMAND_PLACE_BUILDING`), and structure selling on mobile touchscreens.
+  - Added 1-finger map drag panning (in `AUTO`/`PAN` modes), 1-finger touch box-selection (in `SELECT` mode), 2-finger touch drag & pinch-to-zoom, an on-screen directional camera pad + "Base" & "Sélect. Armée" quick-action bar, and continuous touch-drag camera navigation on the Radar Minimap.
+  - Redesigned the battlefield viewport (`h-dvh w-dvw touch-none`), lobby portal, and Classic C&C Sidebar HUD for **Mobile Landscape (`Paysage`)** with a collapsible sidebar drawer, toggleable compact Radar view, smooth vertical touch scrolling (`touch-pan-y`) for all 4 production queues (`Base`, `Déf.`, `Inf.`, `Blindés`), and a portrait-orientation advisory banner.
+
 ## [v1.2.0] — 2026-10-28
 
 ### Added

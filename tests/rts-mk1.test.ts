@@ -20,7 +20,9 @@ import {
   EDGE_SCROLL_MARGIN_PX,
   EDGE_SCROLL_MAX_SPEED_PX,
   interpolateAngleIndex16,
+  resolveTouchTapAction,
   SPRITE_ATLAS_SCALE,
+  TOUCH_INTERACTION_MODES,
   WATCHDOG_DISCONNECT_TIMEOUT_MS,
   ZOOM_LEVELS,
 } from "../src/shared/constants";
@@ -265,7 +267,7 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
   });
 
   it("v1.2.0 — supports Game Juice camera shake, shortest-arc 16-angle interpolation, and 2x Hi-DPI sprite scale", () => {
-    expect(APP_VERSION).toBe("1.2.0");
+    expect(APP_VERSION).toBe("1.3.0");
     expect(SPRITE_ATLAS_SCALE).toBe(2);
 
     // Zero trauma produces zero offset
@@ -313,5 +315,87 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
     );
     expect(explosionVfx).toBeDefined();
     expect(explosionVfx!.shakeIntensity).toBeGreaterThan(0);
+  });
+
+  it("v1.3.0 — resolves mobile landscape touch tap actions across AUTO, SELECT, COMMAND, placement, and sell modes", () => {
+    expect(TOUCH_INTERACTION_MODES).toEqual(["AUTO", "PAN", "SELECT", "COMMAND"]);
+
+    // AUTO mode: tap friendly unit -> SELECT_ENTITY
+    expect(
+      resolveTouchTapAction({
+        mode: "AUTO",
+        hasPlacementBuilding: false,
+        sellMode: false,
+        tappedOwnUnitId: "unt_1",
+        tappedOwnBuildingId: null,
+        tappedEnemyEntityId: null,
+        selectedUnitCount: 0,
+      })
+    ).toBe("SELECT_ENTITY");
+
+    // AUTO mode: tap ground with selected units -> MOVE_UNITS
+    expect(
+      resolveTouchTapAction({
+        mode: "AUTO",
+        hasPlacementBuilding: false,
+        sellMode: false,
+        tappedOwnUnitId: null,
+        tappedOwnBuildingId: null,
+        tappedEnemyEntityId: null,
+        selectedUnitCount: 3,
+      })
+    ).toBe("MOVE_UNITS");
+
+    // AUTO mode: tap enemy with selected units -> ATTACK_ENEMY
+    expect(
+      resolveTouchTapAction({
+        mode: "AUTO",
+        hasPlacementBuilding: false,
+        sellMode: false,
+        tappedOwnUnitId: null,
+        tappedOwnBuildingId: null,
+        tappedEnemyEntityId: "unt_enemy_9",
+        selectedUnitCount: 2,
+      })
+    ).toBe("ATTACK_ENEMY");
+
+    // Placement ready: tap anywhere -> PLACE_BUILDING
+    expect(
+      resolveTouchTapAction({
+        mode: "AUTO",
+        hasPlacementBuilding: true,
+        sellMode: false,
+        tappedOwnUnitId: null,
+        tappedOwnBuildingId: null,
+        tappedEnemyEntityId: null,
+        selectedUnitCount: 0,
+      })
+    ).toBe("PLACE_BUILDING");
+
+    // Sell mode: tap friendly building -> SELL_BUILDING
+    expect(
+      resolveTouchTapAction({
+        mode: "AUTO",
+        hasPlacementBuilding: false,
+        sellMode: true,
+        tappedOwnUnitId: null,
+        tappedOwnBuildingId: "bld_2",
+        tappedEnemyEntityId: null,
+        selectedUnitCount: 0,
+      })
+    ).toBe("SELL_BUILDING");
+
+    // SELECT mode: tap empty ground -> CLEAR_SELECTION
+    expect(
+      resolveTouchTapAction({
+        mode: "SELECT",
+        hasPlacementBuilding: false,
+        sellMode: false,
+        tappedOwnUnitId: null,
+        tappedOwnBuildingId: null,
+        tappedEnemyEntityId: null,
+        selectedUnitCount: 2,
+      })
+    ).toBe("CLEAR_SELECTION");
   });
 });

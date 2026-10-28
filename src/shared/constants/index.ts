@@ -74,7 +74,7 @@ export interface UnitSpec {
   description: string;
 }
 
-export const APP_VERSION = "1.2.0";
+export const APP_VERSION = "1.3.0";
 export const SIM_TICK_RATE_HZ = 20;
 export const SIM_TICK_MS = 50;
 export const MAP_WIDTH_TILES = 48;
@@ -89,6 +89,71 @@ export const EDGE_SCROLL_MAX_SPEED_PX = 3.2;
 export const CAMERA_SHAKE_MAX_OFFSET_PX = 14;
 export const CAMERA_SHAKE_DECAY_PER_SEC = 2.6;
 export const CAMERA_SHAKE_FALLOFF_TILES = 22;
+
+export const TOUCH_INTERACTION_MODES = ["AUTO", "PAN", "SELECT", "COMMAND"] as const;
+export type TouchInteractionMode = (typeof TOUCH_INTERACTION_MODES)[number];
+export const TOUCH_TAP_MAX_DISTANCE_PX = 14;
+
+export interface TouchTapResolutionInput {
+  mode: TouchInteractionMode;
+  hasPlacementBuilding: boolean;
+  sellMode: boolean;
+  tappedOwnUnitId: string | null;
+  tappedOwnBuildingId: string | null;
+  tappedEnemyEntityId: string | null;
+  selectedUnitCount: number;
+}
+
+export type TouchTapResolvedAction =
+  | "PLACE_BUILDING"
+  | "SELL_BUILDING"
+  | "SELECT_ENTITY"
+  | "ATTACK_ENEMY"
+  | "MOVE_UNITS"
+  | "CLEAR_SELECTION"
+  | "NONE";
+
+/**
+ * Pure deterministic decision function for mobile touch taps on the tactical canvas.
+ * Allows effortless 1-tap unit selection, movement, attack, building placement, and selling.
+ */
+export function resolveTouchTapAction(input: TouchTapResolutionInput): TouchTapResolvedAction {
+  if (input.hasPlacementBuilding) {
+    return "PLACE_BUILDING";
+  }
+  if (input.sellMode) {
+    return input.tappedOwnBuildingId ? "SELL_BUILDING" : "NONE";
+  }
+
+  if (input.mode === "COMMAND") {
+    if (input.selectedUnitCount <= 0) {
+      return input.tappedOwnUnitId ? "SELECT_ENTITY" : "NONE";
+    }
+    return input.tappedEnemyEntityId ? "ATTACK_ENEMY" : "MOVE_UNITS";
+  }
+
+  if (input.mode === "SELECT") {
+    if (input.tappedOwnUnitId || input.tappedOwnBuildingId) {
+      return "SELECT_ENTITY";
+    }
+    return "CLEAR_SELECTION";
+  }
+
+  // "AUTO" or "PAN" mode: tap friendly unit -> select it; if units already selected -> tap enemy to attack or ground to move
+  if (input.tappedOwnUnitId) {
+    return "SELECT_ENTITY";
+  }
+  if (input.selectedUnitCount > 0) {
+    if (input.tappedEnemyEntityId) {
+      return "ATTACK_ENEMY";
+    }
+    return "MOVE_UNITS";
+  }
+  if (input.tappedOwnBuildingId) {
+    return "SELECT_ENTITY";
+  }
+  return "NONE";
+}
 
 /**
  * Pure deterministic trauma-based camera shake calculation (quadratic trauma^2 model).

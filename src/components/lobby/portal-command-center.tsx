@@ -138,25 +138,25 @@ export function PortalCommandCenter() {
   const isServerFree = overview.activeStatus === "FREE";
 
   return (
-    <div className="min-h-screen bg-obsidian text-slate-100 font-mono">
+    <div className="min-h-dvh bg-obsidian text-slate-100 font-mono">
       {/* Top Command Header */}
-      <header className="border-b border-slate-800 bg-tactical px-6 py-4">
-        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4">
+      <header className="border-b border-slate-800 bg-tactical px-3 py-3 sm:px-6 sm:py-4">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 sm:gap-4">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded border border-amber-500/50 bg-amber-500/10 text-amber-400">
+            <div className="flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded border border-amber-500/50 bg-amber-500/10 text-amber-400">
               <Swords className="h-5 w-5" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-lg font-bold tracking-widest text-amber-400">
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="text-sm sm:text-lg font-bold tracking-widest text-amber-400">
                   RTS-MK1 // COMMAND &amp; CONQUER ENGINE
                 </h1>
                 <Badge className="border-emerald-500/40 bg-emerald-500/15 text-emerald-300">
                   v{APP_VERSION}
                 </Badge>
               </div>
-              <p className="text-xs text-slate-400">
-                Pipeline Hybride OffscreenCanvas 16-Angles • Simulation Déterministe 20 Hz • Mutex Salon Unique
+              <p className="text-[11px] sm:text-xs text-slate-400">
+                Pipeline Hybride OffscreenCanvas 16-Angles • Simulation 20 Hz • Mobile Paysage Tactile
               </p>
             </div>
           </div>
@@ -200,10 +200,10 @@ export function PortalCommandCenter() {
         </div>
       </header>
 
-      <main className="mx-auto grid max-w-7xl grid-cols-1 gap-6 p-6 lg:grid-cols-12">
+      <main className="mx-auto grid max-w-7xl grid-cols-1 gap-4 p-3 sm:gap-6 sm:p-6 lg:grid-cols-12">
         {/* Left Column: Commander Profile & Faction Selector */}
-        <section className="space-y-6 lg:col-span-4">
-          <Card className="p-5 space-y-4">
+        <section className="space-y-4 sm:space-y-6 lg:col-span-4">
+          <Card className="p-3.5 sm:p-5 space-y-3 sm:space-y-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2 text-sm font-bold uppercase text-amber-400">
                 <Shield className="h-4 w-4" />
@@ -267,7 +267,7 @@ export function PortalCommandCenter() {
           </Card>
 
           {/* Top Commanders Leaderboard */}
-          <Card className="p-5 space-y-3">
+          <Card className="p-3.5 sm:p-5 space-y-3">
             <div className="flex items-center gap-2 border-b border-slate-800 pb-2.5 text-sm font-bold uppercase text-amber-400">
               <Award className="h-4 w-4" />
               Classement des Commandants
@@ -297,9 +297,9 @@ export function PortalCommandCenter() {
         </section>
 
         {/* Right Column: Single Active Match Mutex Control & Lobby Browser */}
-        <section className="space-y-6 lg:col-span-8">
+        <section className="space-y-4 sm:space-y-6 lg:col-span-8">
           {/* Quick Create / Instant Skirmish Launch */}
-          <Card className="p-5 space-y-4">
+          <Card className="p-3.5 sm:p-5 space-y-3 sm:space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2 text-sm font-bold uppercase text-emerald-400">
                 <PlusCircle className="h-4 w-4" />
@@ -359,7 +359,7 @@ export function PortalCommandCenter() {
           </Card>
 
           {/* Active & Waiting Lobbies Browser */}
-          <Card className="p-5 space-y-4">
+          <Card className="p-3.5 sm:p-5 space-y-3 sm:space-y-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2 text-sm font-bold uppercase text-amber-400">
                 <Users className="h-4 w-4" />
@@ -430,7 +430,7 @@ export function PortalCommandCenter() {
           </Card>
 
           {/* Recent Battles Archive */}
-          <Card className="p-5 space-y-3">
+          <Card className="p-3.5 sm:p-5 space-y-3">
             <div className="flex items-center gap-2 border-b border-slate-800 pb-2.5 text-sm font-bold uppercase text-slate-300">
               <Activity className="h-4 w-4 text-emerald-400" />
               Journal des Opérations Récentes

@@ -4,13 +4,27 @@ import React, { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   AlertTriangle,
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+  ArrowUp,
   Clock,
+  Crosshair,
+  Hand,
+  Home,
   Layers,
   Lock,
+  MousePointerClick,
+  PanelRightClose,
+  PanelRightOpen,
   Play,
   Send,
   ShieldCheck,
+  Smartphone,
+  SquareDashedMousePointer,
+  Swords,
   Trophy,
+  X,
   ZoomIn,
 } from "lucide-react";
 import {
@@ -20,10 +34,13 @@ import {
   FACTIONS,
   MAP_HEIGHT_TILES,
   MAP_WIDTH_TILES,
+  resolveTouchTapAction,
   TILE_PIXEL_SIZE,
+  TOUCH_TAP_MAX_DISTANCE_PX,
   ZOOM_LEVELS,
   type BuildingKind,
   type FactionId,
+  type TouchInteractionMode,
 } from "../../../shared/constants";
 import { globalAudioMixer } from "../../../audio/mixer";
 import { ClassicSidebarHud } from "../../../components/hud/classic-sidebar-hud";
@@ -111,6 +128,8 @@ export default function GameMatchPage() {
   const overview = useRtsGameStore((s) => s.overview);
   const evaBannerText = useRtsGameStore((s) => s.evaBannerText);
   const winnerPlayerId = useRtsGameStore((s) => s.winnerPlayerId);
+  const selectedUnitCount = useRtsGameStore((s) => s.selectedEntityIds.size);
+  const hasPlacementBuilding = useRtsGameStore((s) => s.placementBuilding !== null);
   const connectWebSocket = useRtsGameStore((s) => s.connectWebSocket);
   const sendMessage = useRtsGameStore((s) => s.sendMessage);
   const setSelectedEntities = useRtsGameStore((s) => s.setSelectedEntities);
@@ -123,6 +142,8 @@ export default function GameMatchPage() {
   const [atlasStage, setAtlasStage] = useState("Initialisation OffscreenCanvas...");
   const [chatInput, setChatInput] = useState("");
   const [zoomLevel, setZoomLevel] = useState<number>(1);
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(true);
+  const [touchMode, setTouchMode] = useState<TouchInteractionMode>("AUTO");
 
   const worldCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const minimapCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -139,6 +160,27 @@ export default function GameMatchPage() {
     inside: false,
   });
   const keysPressedRef = useRef<Set<string>>(new Set());
+  const touchStateRef = useRef<{
+    active: boolean;
+    startX: number;
+    startY: number;
+    lastX: number;
+    lastY: number;
+    movedDistance: number;
+    isTwoFinger: boolean;
+    pinchStartDist: number;
+    pinchStartZoom: number;
+  }>({
+    active: false,
+    startX: 0,
+    startY: 0,
+    lastX: 0,
+    lastY: 0,
+    movedDistance: 0,
+    isTwoFinger: false,
+    pinchStartDist: 0,
+    pinchStartZoom: 1,
+  });
 
   // 1. Connect WebSocket & join lobby
   useEffect(() => {
@@ -226,7 +268,7 @@ export default function GameMatchPage() {
     });
     observer.observe(canvas);
     return () => observer.disconnect();
-  }, [atlas, lobby?.status]);
+  }, [atlas, lobby?.status, sidebarOpen]);
 
   // 5. 60+ FPS Tactical World & Radar Minimap Render Loop with Tick Interpolation
   useEffect(() => {
@@ -577,6 +619,383 @@ export default function GameMatchPage() {
     setZoomLevel(next);
   }
 
+  function handleCenterOnBase(): void {
+    globalAudioMixer.playUiClick();
+    const st = useRtsGameStore.getState();
+    for (const ent of st.currEntities.values()) {
+      if (ent.ownerId === st.playerId && ent.kind === "CONSTRUCTION_YARD") {
+        cameraRef.current.centerOnTile(ent.x + 1, ent.y + 1);
+        return;
+      }
+    }
+    for (const ent of st.currEntities.values()) {
+      if (ent.ownerId === st.playerId) {
+        cameraRef.current.centerOnTile(ent.x, ent.y);
+        return;
+      }
+    }
+    cameraRef.current.centerOnTile(8, 8);
+  }
+
+  function handleSelectAllCombatUnits(): void {
+    globalAudioMixer.playUiClick();
+    const st = useRtsGameStore.getState();
+    const combatIds = new Set<string>();
+    const allUnitIds = new Set<string>();
+    for (const ent of st.currEntities.values()) {
+      if (ent.ownerId === st.playerId && ent.entityType === "UNIT") {
+        allUnitIds.add(ent.id);
+        if (ent.kind !== "HARVESTER" && ent.kind !== "MCV") {
+          combatIds.add(ent.id);
+        }
+      }
+    }
+    const targetSet = combatIds.size > 0 ? combatIds : allUnitIds;
+    setSelectedEntities(targetSet);
+    useRtsGameStore.setState({
+      evaBannerText:
+        targetSet.size > 0
+          ? `EVA : ${targetSet.size} UNITÉ(S) SÉLECTIONNÉE(S) — TOUCHEZ LA CARTE POUR DÉPLACER OU ATTAQUER`
+          : "EVA : AUCUNE UNITÉ DISPONIBLE SUR LE SECTEUR",
+    });
+  }
+
+  function startHoldPanKey(key: string, nudgeX: number, nudgeY: number): void {
+    cameraRef.current.pan(nudgeX, nudgeY);
+    keysPressedRef.current.add(key);
+  }
+
+  function stopHoldPanKey(key: string): void {
+    keysPressedRef.current.delete(key);
+  }
+
+  function handleCanvasTouchStart(e: React.TouchEvent<HTMLCanvasElement>): void {
+    e.preventDefault();
+    const rect = e.currentTarget.getBoundingClientRect();
+
+    if (e.touches.length >= 2) {
+      const t0 = e.touches[0]!;
+      const t1 = e.touches[1]!;
+      const midX = (t0.clientX + t1.clientX) * 0.5 - rect.left;
+      const midY = (t0.clientY + t1.clientY) * 0.5 - rect.top;
+      const dist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+      touchStateRef.current = {
+        active: true,
+        startX: midX,
+        startY: midY,
+        lastX: midX,
+        lastY: midY,
+        movedDistance: 999,
+        isTwoFinger: true,
+        pinchStartDist: Math.max(10, dist),
+        pinchStartZoom: cameraRef.current.zoom,
+      };
+      dragStartRef.current = null;
+      dragCurrRef.current = null;
+      return;
+    }
+
+    const t0 = e.touches[0];
+    if (!t0) return;
+    const sx = t0.clientX - rect.left;
+    const sy = t0.clientY - rect.top;
+
+    touchStateRef.current = {
+      active: true,
+      startX: sx,
+      startY: sy,
+      lastX: sx,
+      lastY: sy,
+      movedDistance: 0,
+      isTwoFinger: false,
+      pinchStartDist: 0,
+      pinchStartZoom: cameraRef.current.zoom,
+    };
+
+    hoverTileRef.current = cameraRef.current.screenToTile(sx, sy);
+
+    if (touchMode === "SELECT" && !useRtsGameStore.getState().placementBuilding) {
+      dragStartRef.current = { x: sx, y: sy };
+      dragCurrRef.current = { x: sx, y: sy };
+    }
+  }
+
+  function handleCanvasTouchMove(e: React.TouchEvent<HTMLCanvasElement>): void {
+    e.preventDefault();
+    const rect = e.currentTarget.getBoundingClientRect();
+
+    if (e.touches.length >= 2) {
+      const t0 = e.touches[0]!;
+      const t1 = e.touches[1]!;
+      const midX = (t0.clientX + t1.clientX) * 0.5 - rect.left;
+      const midY = (t0.clientY + t1.clientY) * 0.5 - rect.top;
+      const dist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+
+      if (!touchStateRef.current.isTwoFinger) {
+        touchStateRef.current.isTwoFinger = true;
+        touchStateRef.current.lastX = midX;
+        touchStateRef.current.lastY = midY;
+        touchStateRef.current.pinchStartDist = Math.max(10, dist);
+        touchStateRef.current.pinchStartZoom = cameraRef.current.zoom;
+        touchStateRef.current.movedDistance = 999;
+        dragStartRef.current = null;
+        dragCurrRef.current = null;
+        return;
+      }
+
+      const dx = midX - touchStateRef.current.lastX;
+      const dy = midY - touchStateRef.current.lastY;
+      cameraRef.current.pan(-dx, -dy);
+
+      if (touchStateRef.current.pinchStartDist > 10) {
+        const ratio = dist / touchStateRef.current.pinchStartDist;
+        const nextZoom = cameraRef.current.setZoom(touchStateRef.current.pinchStartZoom * ratio);
+        setZoomLevel(nextZoom);
+      }
+
+      touchStateRef.current.lastX = midX;
+      touchStateRef.current.lastY = midY;
+      return;
+    }
+
+    const t0 = e.touches[0];
+    if (!t0 || touchStateRef.current.isTwoFinger) return;
+
+    const sx = t0.clientX - rect.left;
+    const sy = t0.clientY - rect.top;
+    const dx = sx - touchStateRef.current.lastX;
+    const dy = sy - touchStateRef.current.lastY;
+    touchStateRef.current.lastX = sx;
+    touchStateRef.current.lastY = sy;
+    touchStateRef.current.movedDistance += Math.hypot(dx, dy);
+
+    hoverTileRef.current = cameraRef.current.screenToTile(sx, sy);
+    const st = useRtsGameStore.getState();
+
+    if (st.placementBuilding) {
+      return;
+    }
+
+    if (touchMode === "SELECT") {
+      if (!dragStartRef.current) {
+        dragStartRef.current = {
+          x: touchStateRef.current.startX,
+          y: touchStateRef.current.startY,
+        };
+      }
+      dragCurrRef.current = { x: sx, y: sy };
+      return;
+    }
+
+    if (touchStateRef.current.movedDistance > 4) {
+      cameraRef.current.pan(-dx, -dy);
+    }
+  }
+
+  function handleCanvasTouchEnd(e: React.TouchEvent<HTMLCanvasElement>): void {
+    e.preventDefault();
+    const ts = touchStateRef.current;
+    if (!ts.active) return;
+    if (e.touches.length > 0) return;
+    touchStateRef.current.active = false;
+
+    if (ts.isTwoFinger) {
+      dragStartRef.current = null;
+      dragCurrRef.current = null;
+      return;
+    }
+
+    const st = useRtsGameStore.getState();
+    const cam = cameraRef.current;
+
+    // 1. Box Selection completed in SELECT mode
+    if (
+      touchMode === "SELECT" &&
+      dragStartRef.current &&
+      dragCurrRef.current &&
+      ts.movedDistance > TOUCH_TAP_MAX_DISTANCE_PX
+    ) {
+      const minX = Math.min(dragStartRef.current.x, dragCurrRef.current.x);
+      const maxX = Math.max(dragStartRef.current.x, dragCurrRef.current.x);
+      const minY = Math.min(dragStartRef.current.y, dragCurrRef.current.y);
+      const maxY = Math.max(dragStartRef.current.y, dragCurrRef.current.y);
+      dragStartRef.current = null;
+      dragCurrRef.current = null;
+
+      const picked = new Set<string>();
+      for (const ent of st.currEntities.values()) {
+        if (ent.ownerId !== st.playerId || ent.entityType !== "UNIT") continue;
+        const screenX = (ent.x * TILE_PIXEL_SIZE - cam.x) * cam.zoom;
+        const screenY = (ent.y * TILE_PIXEL_SIZE - cam.y) * cam.zoom;
+        const sizePx = TILE_PIXEL_SIZE * cam.zoom;
+        if (
+          screenX + sizePx * 0.5 >= minX &&
+          screenX + sizePx * 0.5 <= maxX &&
+          screenY + sizePx * 0.5 >= minY &&
+          screenY + sizePx * 0.5 <= maxY
+        ) {
+          picked.add(ent.id);
+        }
+      }
+      globalAudioMixer.playUiClick();
+      setSelectedEntities(picked);
+      return;
+    }
+
+    dragStartRef.current = null;
+    dragCurrRef.current = null;
+
+    if (ts.movedDistance > TOUCH_TAP_MAX_DISTANCE_PX) {
+      return;
+    }
+
+    // 2. Single-finger Tap (< 14px movement): Resolve tactical action
+    const sx = ts.lastX;
+    const sy = ts.lastY;
+    const { tileX, tileY } = cam.screenToTile(sx, sy);
+    const worldTileFloatX = (cam.x + sx / cam.zoom) / TILE_PIXEL_SIZE;
+    const worldTileFloatY = (cam.y + sy / cam.zoom) / TILE_PIXEL_SIZE;
+
+    let tappedOwnUnitId: string | null = null;
+    let bestOwnUnitDist = 1.35;
+    let tappedOwnBuildingId: string | null = null;
+    let tappedEnemyEntityId: string | null = null;
+    let bestEnemyDist = 1.35;
+
+    for (const ent of st.currEntities.values()) {
+      if (ent.entityType === "UNIT") {
+        const cx = ent.x + 0.5;
+        const cy = ent.y + 0.5;
+        const dist = Math.hypot(worldTileFloatX - cx, worldTileFloatY - cy);
+        if (ent.ownerId === st.playerId) {
+          if (dist <= bestOwnUnitDist) {
+            bestOwnUnitDist = dist;
+            tappedOwnUnitId = ent.id;
+          }
+        } else if (dist <= bestEnemyDist) {
+          bestEnemyDist = dist;
+          tappedEnemyEntityId = ent.id;
+        }
+      } else {
+        const spec = BUILDINGS[ent.kind as BuildingKind];
+        const inFootprint =
+          worldTileFloatX >= ent.x - 0.35 &&
+          worldTileFloatX <= ent.x + spec.footprintW + 0.35 &&
+          worldTileFloatY >= ent.y - 0.35 &&
+          worldTileFloatY <= ent.y + spec.footprintH + 0.35;
+        if (inFootprint) {
+          if (ent.ownerId === st.playerId) {
+            tappedOwnBuildingId = ent.id;
+          } else if (!tappedEnemyEntityId) {
+            tappedEnemyEntityId = ent.id;
+          }
+        }
+      }
+    }
+
+    const action = resolveTouchTapAction({
+      mode: touchMode,
+      hasPlacementBuilding: Boolean(st.placementBuilding),
+      sellMode: st.sellMode,
+      tappedOwnUnitId,
+      tappedOwnBuildingId,
+      tappedEnemyEntityId,
+      selectedUnitCount: st.selectedEntityIds.size,
+    });
+
+    if (action === "PLACE_BUILDING" && st.placementBuilding) {
+      const bKind = st.placementBuilding.kind;
+      const spec = BUILDINGS[bKind];
+      let deployX = tileX;
+      let deployY = tileY;
+      let valid = canPlaceBuildingOnGrid(st, bKind, deployX, deployY);
+      if (!valid) {
+        const centeredX = tileX - Math.floor(spec.footprintW * 0.5);
+        const centeredY = tileY - Math.floor(spec.footprintH * 0.5);
+        if (canPlaceBuildingOnGrid(st, bKind, centeredX, centeredY)) {
+          deployX = centeredX;
+          deployY = centeredY;
+          valid = true;
+        }
+      }
+      hoverTileRef.current = { tileX: deployX, tileY: deployY };
+      if (!valid) {
+        useRtsGameStore.setState({
+          evaBannerText:
+            "EVA : ZONE INVALIDE — TOUCHEZ UN EMPLACEMENT VERT PRÈS DE LA BASE",
+        });
+        return;
+      }
+      globalAudioMixer.playUiClick();
+      sendMessage({
+        type: "COMMAND_PLACE_BUILDING",
+        lobbyId,
+        playerId,
+        category: st.placementBuilding.category,
+        buildingKind: bKind,
+        tileX: deployX,
+        tileY: deployY,
+      });
+      setPlacementBuilding(null);
+      return;
+    }
+
+    if (action === "SELL_BUILDING" && tappedOwnBuildingId) {
+      globalAudioMixer.playUiClick();
+      sendMessage({
+        type: "COMMAND_SELL_BUILDING",
+        lobbyId,
+        playerId,
+        buildingEntityId: tappedOwnBuildingId,
+      });
+      return;
+    }
+
+    if (action === "SELECT_ENTITY") {
+      const targetId = tappedOwnUnitId ?? tappedOwnBuildingId;
+      if (targetId) {
+        globalAudioMixer.playUiClick();
+        setSelectedEntities(new Set([targetId]));
+      }
+      return;
+    }
+
+    if (action === "ATTACK_ENEMY" && tappedEnemyEntityId) {
+      const selectedUnits = Array.from(st.selectedEntityIds);
+      if (selectedUnits.length > 0) {
+        globalAudioMixer.playUiClick();
+        sendMessage({
+          type: "COMMAND_ATTACK",
+          lobbyId,
+          playerId,
+          entityIds: selectedUnits,
+          targetEntityId: tappedEnemyEntityId,
+        });
+      }
+      return;
+    }
+
+    if (action === "MOVE_UNITS") {
+      const selectedUnits = Array.from(st.selectedEntityIds);
+      if (selectedUnits.length > 0) {
+        globalAudioMixer.playUiClick();
+        sendMessage({
+          type: "COMMAND_MOVE",
+          lobbyId,
+          playerId,
+          entityIds: selectedUnits,
+          targetTileX: tileX,
+          targetTileY: tileY,
+        });
+      }
+      return;
+    }
+
+    if (action === "CLEAR_SELECTION") {
+      setSelectedEntities(new Set());
+    }
+  }
+
   // Screen 1: Asynchronous Batched OffscreenCanvas Sprite Atlas Rasterization Progress
   if (!atlas) {
     return (
@@ -602,9 +1021,9 @@ export default function GameMatchPage() {
   // Screen 2: Lobby Waiting Room / Single Active Match Mutex FIFO Queue
   if (lobby && (lobby.status === "WAITING" || lobby.status === "QUEUED")) {
     return (
-      <div className="min-h-screen bg-obsidian p-6 font-mono text-slate-100">
-        <div className="mx-auto max-w-4xl space-y-6">
-          <Card className="p-6 space-y-5">
+      <div className="min-h-dvh bg-obsidian p-3 sm:p-6 font-mono text-slate-100">
+        <div className="mx-auto max-w-4xl space-y-4 sm:space-y-6">
+          <Card className="p-4 sm:p-6 space-y-4 sm:space-y-5">
             <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
               <div>
                 <div className="flex items-center gap-2">
@@ -762,88 +1181,261 @@ export default function GameMatchPage() {
 
   // Screen 3: Active Tactical RTS Battlefield (1 World Canvas + Classic C&C Sidebar HUD with 1 Radar Canvas)
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-obsidian font-mono text-slate-100">
-      {/* Main Tactical Viewport */}
-      <div className="relative flex flex-1 flex-col overflow-hidden">
-        {/* Top EVA Tactical Status Strip */}
-        <div className="flex h-10 shrink-0 items-center justify-between border-b border-slate-800 bg-slate-950 px-4 text-xs">
-          <div className="flex items-center gap-2 text-amber-300">
-            <AlertTriangle className="h-4 w-4 text-amber-400" />
-            <span className="font-bold tracking-wider">{evaBannerText}</span>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <span className="hidden xl:inline text-[11px] text-slate-400">
-              Clic Gauche : Sélection/Poser • Clic Droit : Ordre/Annuler • WASD : Caméra
-            </span>
-            <Button
-              variant="tactical"
-              size="sm"
-              onClick={handleCycleZoom}
-            >
-              <ZoomIn className="h-3.5 w-3.5" />
-              Zoom {zoomLevel}x
-            </Button>
-            <div className="flex items-center gap-1 rounded border border-slate-800 bg-slate-900 p-0.5">
-              {ZOOM_LEVELS.map((z) => (
-                <button
-                  key={z}
-                  type="button"
-                  onClick={() => handleSelectZoom(z)}
-                  className={
-                    Math.abs(zoomLevel - z) < 0.01
-                      ? "rounded border border-amber-400/60 bg-amber-500/25 px-1.5 py-0.5 text-[10px] font-bold text-amber-300"
-                      : "rounded px-1.5 py-0.5 text-[10px] text-slate-400 hover:bg-slate-800 hover:text-slate-200"
-                  }
-                >
-                  {z}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Single World Canvas Element */}
-        <div className="relative flex-1 overflow-hidden">
-          <canvas
-            ref={worldCanvasRef}
-            onMouseDown={handleCanvasMouseDown}
-            onMouseMove={handleCanvasMouseMove}
-            onMouseUp={handleCanvasMouseUp}
-            onMouseLeave={handleCanvasMouseLeave}
-            onContextMenu={(e) => e.preventDefault()}
-            className="h-full w-full cursor-crosshair block"
-          />
-
-          {/* Victory / Defeat End-of-Match Overlay */}
-          {winnerPlayerId && (
-            <div className="absolute inset-0 flex items-center justify-center bg-slate-950/80 p-6">
-              <Card className="max-w-md p-6 text-center space-y-4">
-                <Trophy className="mx-auto h-10 w-10 text-amber-400" />
-                <h2 className="text-xl font-bold uppercase tracking-widest text-amber-400">
-                  {winnerPlayerId === playerId ? "VICTOIRE TOTALE !" : "FIN DE L'OPÉRATION"}
-                </h2>
-                <p className="text-xs text-slate-300">
-                  Le verrou de salon unique a été libéré proprement et les statistiques du commandant ont été enregistrées.
-                </p>
-                <Button variant="tactical" onClick={handleLeave} className="w-full">
-                  Retourner au Portail des Salons
-                </Button>
-              </Card>
-            </div>
-          )}
+    <div className="flex h-dvh w-dvw flex-col overflow-hidden bg-obsidian font-mono text-slate-100 select-none">
+      {/* Mobile Portrait Orientation Advisory Banner (automatically hidden in Landscape & Desktop) */}
+      <div className="flex sm:hidden portrait:flex landscape:hidden shrink-0 items-center justify-between border-b border-amber-500/40 bg-amber-950/90 px-3 py-1 text-[10px] text-amber-200">
+        <div className="flex items-center gap-1.5">
+          <Smartphone className="h-3.5 w-3.5 rotate-90 text-amber-400 shrink-0" />
+          <span>Mode Paysage (Landscape) recommandé pour le commandement tactique mobile</span>
         </div>
       </div>
 
-      {/* Classic Westwood C&C Right Sidebar HUD */}
-      <ClassicSidebarHud
-        minimapCanvasRef={minimapCanvasRef}
-        onMinimapClickTile={(tx, ty) => cameraRef.current.centerOnTile(tx, ty)}
-        onLeaveMatch={handleLeave}
-        zoomLevel={zoomLevel}
-        onCycleZoom={handleCycleZoom}
-        onSelectZoom={handleSelectZoom}
-      />
+      <div className="flex flex-1 overflow-hidden">
+        {/* Main Tactical Viewport */}
+        <div className="relative flex flex-1 flex-col overflow-hidden">
+          {/* Top EVA Tactical Status Strip (Compact in Mobile Landscape) */}
+          <div className="flex h-8 lg:h-10 shrink-0 items-center justify-between gap-2 border-b border-slate-800 bg-slate-950 px-2 lg:px-4 text-[11px] lg:text-xs">
+            <div className="flex min-w-0 items-center gap-1.5 text-amber-300">
+              <AlertTriangle className="h-3.5 w-3.5 lg:h-4 lg:w-4 shrink-0 text-amber-400" />
+              <span className="truncate font-bold tracking-wider">{evaBannerText}</span>
+            </div>
+
+            <div className="flex shrink-0 items-center gap-1.5">
+              <span className="hidden xl:inline text-[11px] text-slate-400">
+                Gauche/Tap : Sélection/Poser • Droite/Tap : Ordre • Glisser/WASD : Caméra
+              </span>
+              <Button
+                variant="tactical"
+                size="sm"
+                onClick={handleCycleZoom}
+                className="px-2 py-0.5 text-[10px] lg:text-xs"
+              >
+                <ZoomIn className="h-3 w-3 lg:h-3.5 lg:w-3.5" />
+                {zoomLevel}x
+              </Button>
+              <div className="hidden sm:flex items-center gap-0.5 rounded border border-slate-800 bg-slate-900 p-0.5">
+                {ZOOM_LEVELS.map((z) => (
+                  <button
+                    key={z}
+                    type="button"
+                    onClick={() => handleSelectZoom(z)}
+                    className={
+                      Math.abs(zoomLevel - z) < 0.01
+                        ? "rounded border border-amber-400/60 bg-amber-500/25 px-1.5 py-0.5 text-[10px] font-bold text-amber-300"
+                        : "rounded px-1.5 py-0.5 text-[10px] text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+                    }
+                  >
+                    {z}
+                  </button>
+                ))}
+              </div>
+              <Button
+                variant={sidebarOpen ? "default" : "tactical"}
+                size="sm"
+                onClick={() => {
+                  globalAudioMixer.playUiClick();
+                  setSidebarOpen(!sidebarOpen);
+                }}
+                className="px-2 py-0.5 text-[10px] lg:text-xs"
+              >
+                {sidebarOpen ? (
+                  <PanelRightClose className="h-3.5 w-3.5" />
+                ) : (
+                  <PanelRightOpen className="h-3.5 w-3.5" />
+                )}
+                <span>{sidebarOpen ? "Carte 100%" : "Menu C&C"}</span>
+              </Button>
+            </div>
+          </div>
+
+          {/* Single World Canvas Element + Floating Mobile Landscape Controls */}
+          <div className="relative flex-1 overflow-hidden">
+            <canvas
+              ref={worldCanvasRef}
+              onMouseDown={handleCanvasMouseDown}
+              onMouseMove={handleCanvasMouseMove}
+              onMouseUp={handleCanvasMouseUp}
+              onMouseLeave={handleCanvasMouseLeave}
+              onTouchStart={handleCanvasTouchStart}
+              onTouchMove={handleCanvasTouchMove}
+              onTouchEnd={handleCanvasTouchEnd}
+              onTouchCancel={handleCanvasTouchEnd}
+              onContextMenu={(e) => e.preventDefault()}
+              className="h-full w-full cursor-crosshair block touch-none"
+            />
+
+            {/* Bottom-Left Tactical Camera D-Pad & Base Centering (Mobile & Desktop) */}
+            <div className="absolute bottom-2 left-2 z-10 flex items-end gap-1.5 rounded border border-slate-800/90 bg-slate-950/85 p-1 backdrop-blur-sm">
+              <div className="grid grid-cols-3 gap-0.5">
+                <div />
+                <button
+                  type="button"
+                  aria-label="Caméra Haut"
+                  onPointerDown={() => startHoldPanKey("arrowup", 0, -64)}
+                  onPointerUp={() => stopHoldPanKey("arrowup")}
+                  onPointerLeave={() => stopHoldPanKey("arrowup")}
+                  onPointerCancel={() => stopHoldPanKey("arrowup")}
+                  className="flex h-7 w-7 items-center justify-center rounded border border-slate-700 bg-slate-900 text-slate-200 active:border-amber-400 active:bg-amber-500/20 active:text-amber-300"
+                >
+                  <ArrowUp className="h-3.5 w-3.5" />
+                </button>
+                <div />
+                <button
+                  type="button"
+                  aria-label="Caméra Gauche"
+                  onPointerDown={() => startHoldPanKey("arrowleft", -64, 0)}
+                  onPointerUp={() => stopHoldPanKey("arrowleft")}
+                  onPointerLeave={() => stopHoldPanKey("arrowleft")}
+                  onPointerCancel={() => stopHoldPanKey("arrowleft")}
+                  className="flex h-7 w-7 items-center justify-center rounded border border-slate-700 bg-slate-900 text-slate-200 active:border-amber-400 active:bg-amber-500/20 active:text-amber-300"
+                >
+                  <ArrowLeft className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  aria-label="Centrer Base"
+                  onClick={handleCenterOnBase}
+                  className="flex h-7 w-7 items-center justify-center rounded border border-amber-500/50 bg-amber-500/20 text-amber-300 active:bg-amber-500/40"
+                  title="Centrer sur la Base"
+                >
+                  <Home className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  aria-label="Caméra Droite"
+                  onPointerDown={() => startHoldPanKey("arrowright", 64, 0)}
+                  onPointerUp={() => stopHoldPanKey("arrowright")}
+                  onPointerLeave={() => stopHoldPanKey("arrowright")}
+                  onPointerCancel={() => stopHoldPanKey("arrowright")}
+                  className="flex h-7 w-7 items-center justify-center rounded border border-slate-700 bg-slate-900 text-slate-200 active:border-amber-400 active:bg-amber-500/20 active:text-amber-300"
+                >
+                  <ArrowRight className="h-3.5 w-3.5" />
+                </button>
+                <div />
+                <button
+                  type="button"
+                  aria-label="Caméra Bas"
+                  onPointerDown={() => startHoldPanKey("arrowdown", 0, 64)}
+                  onPointerUp={() => stopHoldPanKey("arrowdown")}
+                  onPointerLeave={() => stopHoldPanKey("arrowdown")}
+                  onPointerCancel={() => stopHoldPanKey("arrowdown")}
+                  className="flex h-7 w-7 items-center justify-center rounded border border-slate-700 bg-slate-900 text-slate-200 active:border-amber-400 active:bg-amber-500/20 active:text-amber-300"
+                >
+                  <ArrowDown className="h-3.5 w-3.5" />
+                </button>
+                <div />
+              </div>
+            </div>
+
+            {/* Bottom-Right Mobile Touch Command & Unit Selection Bar */}
+            <div className="absolute bottom-2 right-2 z-10 flex flex-wrap items-center gap-1 rounded border border-slate-800/90 bg-slate-950/90 p-1 backdrop-blur-sm">
+              {(
+                [
+                  { id: "AUTO", label: "Auto", icon: MousePointerClick },
+                  { id: "PAN", label: "Carte", icon: Hand },
+                  { id: "SELECT", label: "Cadre", icon: SquareDashedMousePointer },
+                  { id: "COMMAND", label: "Ordre", icon: Crosshair },
+                ] as const
+              ).map((m) => {
+                const Icon = m.icon;
+                const active = touchMode === m.id;
+                return (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => {
+                      globalAudioMixer.playUiClick();
+                      setTouchMode(m.id);
+                    }}
+                    className={
+                      active
+                        ? "flex items-center gap-1 rounded border border-amber-400/70 bg-amber-500/25 px-2 py-1 text-[10px] font-bold text-amber-300"
+                        : "flex items-center gap-1 rounded border border-slate-800 bg-slate-900 px-2 py-1 text-[10px] text-slate-300 hover:bg-slate-800"
+                    }
+                  >
+                    <Icon className="h-3 w-3" />
+                    <span>{m.label}</span>
+                  </button>
+                );
+              })}
+
+              <button
+                type="button"
+                onClick={handleSelectAllCombatUnits}
+                className="flex items-center gap-1 rounded border border-emerald-500/50 bg-emerald-500/20 px-2 py-1 text-[10px] font-bold text-emerald-300 active:bg-emerald-500/35"
+                title="Sélectionner toutes les unités de combat"
+              >
+                <Swords className="h-3 w-3" />
+                <span>Armée</span>
+                {selectedUnitCount > 0 && (
+                  <span className="rounded bg-emerald-400/30 px-1 text-[9px] text-emerald-100">
+                    {selectedUnitCount}
+                  </span>
+                )}
+              </button>
+
+              {selectedUnitCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    globalAudioMixer.playUiClick();
+                    setSelectedEntities(new Set());
+                  }}
+                  className="flex items-center gap-0.5 rounded border border-slate-700 bg-slate-900 px-1.5 py-1 text-[10px] text-slate-300 hover:text-red-300"
+                  title="Désélectionner"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+
+              {hasPlacementBuilding && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    globalAudioMixer.playUiClick();
+                    setPlacementBuilding(null);
+                  }}
+                  className="flex items-center gap-1 rounded border border-red-500/60 bg-red-500/20 px-2 py-1 text-[10px] font-bold text-red-300"
+                >
+                  <X className="h-3 w-3" />
+                  <span>Annuler Pose</span>
+                </button>
+              )}
+            </div>
+
+            {/* Victory / Defeat End-of-Match Overlay */}
+            {winnerPlayerId && (
+              <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-950/80 p-4 sm:p-6">
+                <Card className="max-w-md p-5 sm:p-6 text-center space-y-4">
+                  <Trophy className="mx-auto h-10 w-10 text-amber-400" />
+                  <h2 className="text-xl font-bold uppercase tracking-widest text-amber-400">
+                    {winnerPlayerId === playerId ? "VICTOIRE TOTALE !" : "FIN DE L'OPÉRATION"}
+                  </h2>
+                  <p className="text-xs text-slate-300">
+                    Le verrou de salon unique a été libéré proprement et les statistiques du commandant ont été enregistrées.
+                  </p>
+                  <Button variant="tactical" onClick={handleLeave} className="w-full">
+                    Retourner au Portail des Salons
+                  </Button>
+                </Card>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Classic Westwood C&C Right Sidebar HUD (Collapsible in Mobile Landscape) */}
+        {sidebarOpen && (
+          <ClassicSidebarHud
+            minimapCanvasRef={minimapCanvasRef}
+            onMinimapClickTile={(tx, ty) => cameraRef.current.centerOnTile(tx, ty)}
+            onLeaveMatch={handleLeave}
+            zoomLevel={zoomLevel}
+            onCycleZoom={handleCycleZoom}
+            onSelectZoom={handleSelectZoom}
+            onCloseMobile={() => setSidebarOpen(false)}
+          />
+        )}
+      </div>
     </div>
   );
 }
