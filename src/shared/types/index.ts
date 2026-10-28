@@ -27,6 +27,9 @@ export type {
 export type {
   FactionId,
   ProductionCategory,
+  ProductionSubcategory,
+  SubcategorySpec,
+  ConstructionCatalogEntry,
   BuildingKind,
   UnitKind,
   FactionSpec,

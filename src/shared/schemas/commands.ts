@@ -113,6 +113,7 @@ export const ClientLobbyActionSchema = z.discriminatedUnion("type", [
     faction: FactionIdSchema,
     lobbyName: z.string().min(1).max(40),
     withAiBot: z.boolean().default(true),
+    autoStart: z.boolean().optional().default(false),
   }),
   z.object({
     type: z.literal("LOBBY_JOIN"),

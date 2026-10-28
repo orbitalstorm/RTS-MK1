@@ -1,5 +1,99 @@
 export type FactionId = "GDI" | "NOD" | "ORDOS";
 export type ProductionCategory = "BUILDING" | "DEFENSE" | "INFANTRY" | "VEHICLE";
+export type ProductionSubcategory =
+  | "COMMAND_POWER"
+  | "ECONOMY"
+  | "MILITARY_TECH"
+  | "FORTIFICATION"
+  | "TURRET"
+  | "ASSAULT_INFANTRY"
+  | "SPECIALIST_INFANTRY"
+  | "LOGISTICS_ENGINEERING"
+  | "COMBAT_ARMOR"
+  | "HEAVY_SIEGE";
+
+export interface SubcategorySpec {
+  id: ProductionSubcategory;
+  category: ProductionCategory;
+  label: string;
+  shortLabel: string;
+  description: string;
+}
+
+export const CONSTRUCTION_GRID_COLUMNS = 3;
+
+export const CONSTRUCTION_SUBCATEGORIES: ReadonlyArray<SubcategorySpec> = [
+  {
+    id: "COMMAND_POWER",
+    category: "BUILDING",
+    label: "QG, Énergie & Fondations",
+    shortLabel: "Énergie",
+    description: "Commandement central, réseau électrique et dalles de fondation en béton.",
+  },
+  {
+    id: "ECONOMY",
+    category: "BUILDING",
+    label: "Économie & Extraction",
+    shortLabel: "Économie",
+    description: "Raffinage du minerai, silos de stockage et mines d'argent.",
+  },
+  {
+    id: "MILITARY_TECH",
+    category: "BUILDING",
+    label: "Usines & Technologie",
+    shortLabel: "Tech",
+    description: "Infrastructures de production militaire, détection radar et recherche avancée.",
+  },
+  {
+    id: "FORTIFICATION",
+    category: "DEFENSE",
+    label: "Murs & Fortifications",
+    shortLabel: "Murs",
+    description: "Barricades passives en sacs de sable et remparts continus en ferro-béton.",
+  },
+  {
+    id: "TURRET",
+    category: "DEFENSE",
+    label: "Tourelles de Défense",
+    shortLabel: "Tourelles",
+    description: "Systèmes de tir automatisés à pré-activation radar et obélisques laser.",
+  },
+  {
+    id: "ASSAULT_INFANTRY",
+    category: "INFANTRY",
+    label: "Escouades d'Assaut",
+    shortLabel: "Assaut",
+    description: "Infanterie de ligne polyvalente et escouades antichars lance-roquettes.",
+  },
+  {
+    id: "SPECIALIST_INFANTRY",
+    category: "INFANTRY",
+    label: "Génie & Opérations Spéciales",
+    shortLabel: "Génie",
+    description: "Ingénieurs de combat spécialisés dans la démolition de structures.",
+  },
+  {
+    id: "LOGISTICS_ENGINEERING",
+    category: "VEHICLE",
+    label: "Logistique & Construction",
+    shortLabel: "Logistique",
+    description: "Robots constructeurs, moissonneuses de minerai et véhicules de commandement.",
+  },
+  {
+    id: "COMBAT_ARMOR",
+    category: "VEHICLE",
+    label: "Blindés & Reconnaissance",
+    shortLabel: "Blindés",
+    description: "Véhicules rapides d'éclairage et chars de combat principaux.",
+  },
+  {
+    id: "HEAVY_SIEGE",
+    category: "VEHICLE",
+    label: "Artillerie & Chars Lourds",
+    shortLabel: "Lourds",
+    description: "Lance-missiles de siège à longue portée et chars super-lourds Mammouth.",
+  },
+];
 
 export type BuildingKind =
   | "CONSTRUCTION_YARD"
@@ -60,7 +154,9 @@ export interface FactionSpec {
 export interface BuildingSpec {
   kind: BuildingKind;
   name: string;
+  shortName: string;
   category: "BUILDING" | "DEFENSE";
+  subcategory: ProductionSubcategory;
   cost: number;
   buildTimeTicks: number;
   maxHp: number;
@@ -80,7 +176,9 @@ export interface BuildingSpec {
 export interface UnitSpec {
   kind: UnitKind;
   name: string;
+  shortName: string;
   category: "INFANTRY" | "VEHICLE";
+  subcategory: ProductionSubcategory;
   cost: number;
   buildTimeTicks: number;
   maxHp: number;
@@ -95,7 +193,7 @@ export interface UnitSpec {
   description: string;
 }
 
-export const APP_VERSION = "1.8.1";
+export const APP_VERSION = "1.9.0";
 export const SIM_TICK_RATE_HZ = 20;
 export const SIM_TICK_MS = 50;
 export const MAP_WIDTH_TILES = 72;
@@ -578,7 +676,9 @@ export const BUILDINGS: Record<BuildingKind, BuildingSpec> = {
   CONSTRUCTION_YARD: {
     kind: "CONSTRUCTION_YARD",
     name: "Chantier de Construction",
+    shortName: "Chantier QG",
     category: "BUILDING",
+    subcategory: "COMMAND_POWER",
     cost: 2000,
     buildTimeTicks: 100,
     maxHp: 1500,
@@ -597,7 +697,9 @@ export const BUILDINGS: Record<BuildingKind, BuildingSpec> = {
   POWER_PLANT: {
     kind: "POWER_PLANT",
     name: "Centrale Électrique",
+    shortName: "Centrale",
     category: "BUILDING",
+    subcategory: "COMMAND_POWER",
     cost: 300,
     buildTimeTicks: 50,
     maxHp: 600,
@@ -616,7 +718,9 @@ export const BUILDINGS: Record<BuildingKind, BuildingSpec> = {
   REFINERY: {
     kind: "REFINERY",
     name: "Raffinerie de Minerai",
+    shortName: "Raffinerie",
     category: "BUILDING",
+    subcategory: "ECONOMY",
     cost: 1200,
     buildTimeTicks: 90,
     maxHp: 1000,
@@ -635,7 +739,9 @@ export const BUILDINGS: Record<BuildingKind, BuildingSpec> = {
   SILO: {
     kind: "SILO",
     name: "Silo de Stockage",
+    shortName: "Silo",
     category: "BUILDING",
+    subcategory: "ECONOMY",
     cost: 150,
     buildTimeTicks: 35,
     maxHp: 400,
@@ -654,7 +760,9 @@ export const BUILDINGS: Record<BuildingKind, BuildingSpec> = {
   BARRACKS: {
     kind: "BARRACKS",
     name: "Caserne d'Infanterie",
+    shortName: "Caserne",
     category: "BUILDING",
+    subcategory: "MILITARY_TECH",
     cost: 400,
     buildTimeTicks: 60,
     maxHp: 750,
@@ -673,7 +781,9 @@ export const BUILDINGS: Record<BuildingKind, BuildingSpec> = {
   WAR_FACTORY: {
     kind: "WAR_FACTORY",
     name: "Usine d'Armement",
+    shortName: "Usine Blindés",
     category: "BUILDING",
+    subcategory: "MILITARY_TECH",
     cost: 1400,
     buildTimeTicks: 100,
     maxHp: 1250,
@@ -692,7 +802,9 @@ export const BUILDINGS: Record<BuildingKind, BuildingSpec> = {
   RADAR_DOME: {
     kind: "RADAR_DOME",
     name: "Dôme Radar Tactique",
+    shortName: "Dôme Radar",
     category: "BUILDING",
+    subcategory: "MILITARY_TECH",
     cost: 900,
     buildTimeTicks: 80,
     maxHp: 850,
@@ -711,7 +823,9 @@ export const BUILDINGS: Record<BuildingKind, BuildingSpec> = {
   TECH_CENTER: {
     kind: "TECH_CENTER",
     name: "Centre Technologique",
+    shortName: "Centre Tech",
     category: "BUILDING",
+    subcategory: "MILITARY_TECH",
     cost: 1600,
     buildTimeTicks: 110,
     maxHp: 1000,
@@ -730,7 +844,9 @@ export const BUILDINGS: Record<BuildingKind, BuildingSpec> = {
   SILVER_MINE: {
     kind: "SILVER_MINE",
     name: "Mine d'Argent",
+    shortName: "Mine d'Argent",
     category: "BUILDING",
+    subcategory: "ECONOMY",
     cost: 800,
     buildTimeTicks: 70,
     maxHp: 950,
@@ -749,7 +865,9 @@ export const BUILDINGS: Record<BuildingKind, BuildingSpec> = {
   CONCRETE_SLAB: {
     kind: "CONCRETE_SLAB",
     name: "Dalle de Béton",
+    shortName: "Dalle Béton",
     category: "BUILDING",
+    subcategory: "COMMAND_POWER",
     cost: 25,
     buildTimeTicks: 16,
     maxHp: 300,
@@ -768,7 +886,9 @@ export const BUILDINGS: Record<BuildingKind, BuildingSpec> = {
   SANDBAG_WALL: {
     kind: "SANDBAG_WALL",
     name: "Sacs de Sable",
+    shortName: "Sacs Sable",
     category: "DEFENSE",
+    subcategory: "FORTIFICATION",
     cost: 40,
     buildTimeTicks: 20,
     maxHp: 350,
@@ -787,7 +907,9 @@ export const BUILDINGS: Record<BuildingKind, BuildingSpec> = {
   CONCRETE_WALL: {
     kind: "CONCRETE_WALL",
     name: "Mur d'Enceinte Blindé",
+    shortName: "Mur Blindé",
     category: "DEFENSE",
+    subcategory: "FORTIFICATION",
     cost: 80,
     buildTimeTicks: 28,
     maxHp: 850,
@@ -806,7 +928,9 @@ export const BUILDINGS: Record<BuildingKind, BuildingSpec> = {
   GUARD_TOWER: {
     kind: "GUARD_TOWER",
     name: "Tourelle Vulcain",
+    shortName: "Tourelle",
     category: "DEFENSE",
+    subcategory: "TURRET",
     cost: 450,
     buildTimeTicks: 50,
     maxHp: 550,
@@ -825,7 +949,9 @@ export const BUILDINGS: Record<BuildingKind, BuildingSpec> = {
   SAM_SITE: {
     kind: "SAM_SITE",
     name: "Batterie Lance-Missiles",
+    shortName: "Batterie SAM",
     category: "DEFENSE",
+    subcategory: "TURRET",
     cost: 700,
     buildTimeTicks: 65,
     maxHp: 700,
@@ -844,7 +970,9 @@ export const BUILDINGS: Record<BuildingKind, BuildingSpec> = {
   OBELISK: {
     kind: "OBELISK",
     name: "Obélisque de Lumière",
+    shortName: "Obélisque",
     category: "DEFENSE",
+    subcategory: "TURRET",
     cost: 1350,
     buildTimeTicks: 95,
     maxHp: 900,
@@ -866,7 +994,9 @@ export const UNITS: Record<UnitKind, UnitSpec> = {
   RIFLE_INFANTRY: {
     kind: "RIFLE_INFANTRY",
     name: "Escouade d'Infanterie",
+    shortName: "Fusiliers",
     category: "INFANTRY",
+    subcategory: "ASSAULT_INFANTRY",
     cost: 100,
     buildTimeTicks: 25,
     maxHp: 110,
@@ -883,7 +1013,9 @@ export const UNITS: Record<UnitKind, UnitSpec> = {
   ROCKET_SOLDIER: {
     kind: "ROCKET_SOLDIER",
     name: "Soldat Lance-Roquettes",
+    shortName: "Roquettes",
     category: "INFANTRY",
+    subcategory: "ASSAULT_INFANTRY",
     cost: 280,
     buildTimeTicks: 40,
     maxHp: 130,
@@ -900,7 +1032,9 @@ export const UNITS: Record<UnitKind, UnitSpec> = {
   ENGINEER: {
     kind: "ENGINEER",
     name: "Ingénieur de Combat",
+    shortName: "Ingénieur",
     category: "INFANTRY",
+    subcategory: "SPECIALIST_INFANTRY",
     cost: 450,
     buildTimeTicks: 50,
     maxHp: 100,
@@ -917,7 +1051,9 @@ export const UNITS: Record<UnitKind, UnitSpec> = {
   CONSTRUCTOR_BOT: {
     kind: "CONSTRUCTOR_BOT",
     name: "Robot Constructeur",
+    shortName: "Robot Constr.",
     category: "VEHICLE",
+    subcategory: "LOGISTICS_ENGINEERING",
     cost: 220,
     buildTimeTicks: 30,
     maxHp: 320,
@@ -934,7 +1070,9 @@ export const UNITS: Record<UnitKind, UnitSpec> = {
   HARVESTER: {
     kind: "HARVESTER",
     name: "Moissonneuse Lourde",
+    shortName: "Moissonneuse",
     category: "VEHICLE",
+    subcategory: "LOGISTICS_ENGINEERING",
     cost: 950,
     buildTimeTicks: 75,
     maxHp: 850,
@@ -951,7 +1089,9 @@ export const UNITS: Record<UnitKind, UnitSpec> = {
   RECON_BUGGY: {
     kind: "RECON_BUGGY",
     name: "Buggy de Reconnaissance",
+    shortName: "Buggy Recon",
     category: "VEHICLE",
+    subcategory: "COMBAT_ARMOR",
     cost: 420,
     buildTimeTicks: 45,
     maxHp: 280,
@@ -968,7 +1108,9 @@ export const UNITS: Record<UnitKind, UnitSpec> = {
   MEDIUM_TANK: {
     kind: "MEDIUM_TANK",
     name: "Char de Combat MK1",
+    shortName: "Char MK1",
     category: "VEHICLE",
+    subcategory: "COMBAT_ARMOR",
     cost: 750,
     buildTimeTicks: 65,
     maxHp: 560,
@@ -985,7 +1127,9 @@ export const UNITS: Record<UnitKind, UnitSpec> = {
   ARTILLERY: {
     kind: "ARTILLERY",
     name: "Lance-Missiles Mobile",
+    shortName: "Artillerie",
     category: "VEHICLE",
+    subcategory: "HEAVY_SIEGE",
     cost: 900,
     buildTimeTicks: 75,
     maxHp: 340,
@@ -1002,7 +1146,9 @@ export const UNITS: Record<UnitKind, UnitSpec> = {
   MAMMOTH_TANK: {
     kind: "MAMMOTH_TANK",
     name: "Char Lourd Mammouth",
+    shortName: "Mammouth",
     category: "VEHICLE",
+    subcategory: "HEAVY_SIEGE",
     cost: 1500,
     buildTimeTicks: 105,
     maxHp: 1150,
@@ -1019,7 +1165,9 @@ export const UNITS: Record<UnitKind, UnitSpec> = {
   MCV: {
     kind: "MCV",
     name: "VCM (Véhicule de Construction)",
+    shortName: "VCM",
     category: "VEHICLE",
+    subcategory: "LOGISTICS_ENGINEERING",
     cost: 1800,
     buildTimeTicks: 110,
     maxHp: 1000,
@@ -1037,3 +1185,130 @@ export const UNITS: Record<UnitKind, UnitSpec> = {
 
 export const BUILDING_LIST: BuildingSpec[] = Object.values(BUILDINGS);
 export const UNIT_LIST: UnitSpec[] = Object.values(UNITS);
+
+export interface ConstructionCatalogEntry {
+  kind: BuildingKind | UnitKind;
+  itemType: "BUILDING" | "UNIT";
+  name: string;
+  shortName: string;
+  category: ProductionCategory;
+  subcategory: ProductionSubcategory;
+  cost: number;
+  buildTimeTicks: number;
+  maxHp: number;
+  sightRadius: number;
+  detectionRange: number;
+  attackRange: number;
+  attackDamage: number;
+  powerDelta: number;
+  footprintW: number;
+  footprintH: number;
+  prerequisites: BuildingKind[];
+  description: string;
+  isRepeatable: boolean;
+  isDirectBlueprint: boolean;
+}
+
+/**
+ * Returns the hierarchical subcategories belonging to a top-level production category.
+ */
+export function getSubcategoriesForCategory(
+  category: ProductionCategory
+): ReadonlyArray<SubcategorySpec> {
+  return CONSTRUCTION_SUBCATEGORIES.filter((sub) => sub.category === category);
+}
+
+function buildingToCatalogEntry(spec: BuildingSpec): ConstructionCatalogEntry {
+  return {
+    kind: spec.kind,
+    itemType: "BUILDING",
+    name: spec.name,
+    shortName: spec.shortName,
+    category: spec.category,
+    subcategory: spec.subcategory,
+    cost: spec.cost,
+    buildTimeTicks: getTimedConstructionTicks(spec.kind),
+    maxHp: spec.maxHp,
+    sightRadius: spec.sightRadius,
+    detectionRange: spec.detectionRange,
+    attackRange: spec.attackRange,
+    attackDamage: spec.attackDamage,
+    powerDelta: spec.powerDelta,
+    footprintW: spec.footprintW,
+    footprintH: spec.footprintH,
+    prerequisites: spec.prerequisites,
+    description: spec.description,
+    isRepeatable: isRepeatableBuildingKind(spec.kind),
+    isDirectBlueprint: true,
+  };
+}
+
+function unitToCatalogEntry(
+  spec: UnitSpec,
+  overrideCategory?: ProductionCategory,
+  overrideSubcategory?: ProductionSubcategory
+): ConstructionCatalogEntry {
+  return {
+    kind: spec.kind,
+    itemType: "UNIT",
+    name: spec.name,
+    shortName: spec.shortName,
+    category: overrideCategory ?? spec.category,
+    subcategory: overrideSubcategory ?? spec.subcategory,
+    cost: spec.cost,
+    buildTimeTicks: spec.buildTimeTicks,
+    maxHp: spec.maxHp,
+    sightRadius: spec.sightRadius,
+    detectionRange: spec.detectionRange,
+    attackRange: spec.attackRange,
+    attackDamage: spec.attackDamage,
+    powerDelta: 0,
+    footprintW: 1,
+    footprintH: 1,
+    prerequisites: spec.prerequisites,
+    description: spec.description,
+    isRepeatable: false,
+    isDirectBlueprint: false,
+  };
+}
+
+/**
+ * Returns all construction/production catalog entries for `category` and optional `subcategory`.
+ * Dynamically derived from `BUILDINGS` and `UNITS` so newly added buildings or units
+ * automatically appear in the right category and subcategory grid.
+ */
+export function getConstructionCatalogItems(
+  category: ProductionCategory,
+  subcategory: ProductionSubcategory | "ALL" = "ALL"
+): ReadonlyArray<ConstructionCatalogEntry> {
+  let entries: ConstructionCatalogEntry[];
+  if (category === "BUILDING") {
+    entries = [
+      unitToCatalogEntry(UNITS.CONSTRUCTOR_BOT, "BUILDING", "COMMAND_POWER"),
+      ...BUILDING_LIST.filter((b) => b.category === "BUILDING").map(buildingToCatalogEntry),
+    ];
+  } else if (category === "DEFENSE") {
+    entries = BUILDING_LIST.filter((b) => b.category === "DEFENSE").map(buildingToCatalogEntry);
+  } else {
+    entries = UNIT_LIST.filter((u) => u.category === category).map((u) => unitToCatalogEntry(u));
+  }
+
+  if (subcategory === "ALL") {
+    return entries;
+  }
+  return entries.filter((item) => item.subcategory === subcategory);
+}
+
+/**
+ * Computes a balanced grid slot count (always a multiple of `columns`, with at least `minRows * columns` cells)
+ * so the construction grid remains visually balanced and ready to host future units and structures.
+ */
+export function getBalancedGridSlotCount(
+  itemCount: number,
+  minRows = 2,
+  columns = CONSTRUCTION_GRID_COLUMNS
+): number {
+  const minSlots = Math.max(1, minRows) * Math.max(1, columns);
+  const effectiveCount = Math.max(minSlots, itemCount);
+  return Math.ceil(effectiveCount / columns) * columns;
+}

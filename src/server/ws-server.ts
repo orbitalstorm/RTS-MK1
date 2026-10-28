@@ -167,11 +167,34 @@ export function createRtsRealtimeServer(customPort?: number) {
           withAiBot: msg.withAiBot,
         });
         session.lobbyId = lobby.lobbyId;
+        if (msg.autoStart) {
+          // If an abandoned match with zero live socket sessions is still holding the mutex, release it immediately
+          const currentActiveId = lobbyManager.getActiveLobbyId();
+          if (currentActiveId && currentActiveId !== lobby.lobbyId) {
+            let hasLiveSession = false;
+            for (const s of sessions) {
+              if (s.lobbyId === currentActiveId && s.ws.readyState === WebSocket.OPEN) {
+                hasLiveSession = true;
+                break;
+              }
+            }
+            if (!hasLiveSession) {
+              lobbyManager.finishAndReleaseMutex(currentActiveId, "ABANDONED");
+            }
+          }
+          lobbyManager.requestStartMatch(lobby.lobbyId, msg.playerId);
+        }
         sendToSocket(session.ws, {
           type: "LOBBY_JOINED",
           lobbyId: lobby.lobbyId,
           overview: lobbyManager.getOverview(),
         });
+        if (msg.autoStart) {
+          const snapshot = lobbyManager.getActiveSnapshot(lobby.lobbyId);
+          if (snapshot) {
+            sendToSocket(session.ws, snapshot);
+          }
+        }
         broadcastOverview();
         return;
       }

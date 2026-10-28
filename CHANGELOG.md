@@ -2,6 +2,24 @@
 
 All notable changes to **RTS-MK1** (`https://rts-mk1.orbital8.cloud`) follow strict non-reusable `v1.x.y` versioning.
 
+## [v1.9.0] — 2026-10-28
+
+### Added & Changed
+- **Categorized & Subcategorized 3-Column Construction Grid with Hover Inspector & Direct-Click Action (`src/shared/constants/index.ts`, `src/shared/types/index.ts`, `src/components/hud/classic-sidebar-hud.tsx`)**:
+  - Replaced the long scrollable list of full-text building/unit cards with a balanced 3-column tactical icon grid (`CONSTRUCTION_GRID_COLUMNS = 3`, `getBalancedGridSlotCount`) padded with uniform rack slots so new structures and units integrate seamlessly as they are added.
+  - Added a 2-level hierarchical construction catalog (`ProductionSubcategory`, `CONSTRUCTION_SUBCATEGORIES`, `getSubcategoriesForCategory`, `getConstructionCatalogItems`):
+    - `BUILDING` (*Base*): `COMMAND_POWER` (*Énergie*), `ECONOMY` (*Économie*), `MILITARY_TECH` (*Tech*).
+    - `DEFENSE` (*Déf.*): `FORTIFICATION` (*Murs*), `TURRET` (*Tourelles*).
+    - `INFANTRY` (*Inf.*): `ASSAULT_INFANTRY` (*Assaut*), `SPECIALIST_INFANTRY` (*Génie*).
+    - `VEHICLE` (*Blindés*): `LOGISTICS_ENGINEERING` (*Logistique*), `COMBAT_ARMOR` (*Blindés*), `HEAVY_SIEGE` (*Lourds*).
+  - Clicking directly on any grid tile immediately activates blueprint placement mode (`Poser le Patron` / `Pose Continue`) for buildings/defenses or starts factory production for units.
+  - Hovering over any grid tile displays a floating tactical hover card (`construction-hover-menu`) with the full name, cost, build time, description, HP, sight/attack/detection ranges, footprint size, power delta, and prerequisite status without obscuring the grid.
+- **Pictogram Action Toolbar for Repair (`Wrench`) & Sell (`DollarSign`) (`src/components/hud/classic-sidebar-hud.tsx`)**:
+  - Replaced the text-heavy *"Réparer"* and *"Vendre (50%)"* buttons with compact pictogram icon buttons (**Clé à molette** `Wrench` for repair mode, **Dollar** `DollarSign` for 50% structure sell mode, and **Cible** `Crosshair` for ground force-fire) with dedicated hover tooltips.
+- **Simplified Fast-Launch Home Screen (`Mode Réduit Rapide : Sélection du Clan -> Lancer la Partie`) (`src/components/lobby/portal-command-center.tsx`, `src/shared/schemas/commands.ts`, `src/server/ws-server.ts`, `src/app/game/[lobbyId]/page.tsx`)**:
+  - Streamlined `PortalCommandCenter` by removing the matchmaking lobby browser, commander leaderboard, and match history panels from the home screen.
+  - Launching the game now opens directly onto the 3-clan selection grid (`GDI`, `NOD`, `ORDOS`) and a single primary **"Lancer la Partie"** button (`autoStart: true` on `LOBBY_CREATE`), which creates and starts the tactical skirmish match immediately without stopping in an intermediate waiting room.
+
 ## [v1.8.1] — 2026-10-28
 
 ### Fixed & Changed

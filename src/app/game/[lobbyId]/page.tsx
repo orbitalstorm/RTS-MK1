@@ -266,6 +266,17 @@ export default function GameMatchPage() {
     return () => clearTimeout(timer);
   }, [connectWebSocket, sendMessage, lobbyId, playerId, commanderName, faction]);
 
+  // Auto-start match in fast-launch mode if lobby is still in WAITING state
+  useEffect(() => {
+    if (lobby && lobby.status === "WAITING") {
+      sendMessage({
+        type: "LOBBY_START_MATCH",
+        lobbyId: lobby.lobbyId,
+        playerId,
+      });
+    }
+  }, [lobby, playerId, sendMessage]);
+
   // 2. Generate Hybrid Vector/Bitmap OffscreenCanvas -> ImageBitmap Sprite Atlas in async chunks
   useEffect(() => {
     let cancelled = false;
@@ -1791,7 +1802,7 @@ export default function GameMatchPage() {
                     Le verrou de salon unique a été libéré proprement et les statistiques du commandant ont été enregistrées.
                   </p>
                   <Button variant="tactical" onClick={handleLeave} className="w-full">
-                    Retourner au Portail des Salons
+                    Retourner à la Sélection du Clan
                   </Button>
                 </Card>
               </div>

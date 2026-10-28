@@ -21,6 +21,7 @@ import {
 import {
   AI_ATTACK_GRACE_PERIOD_TICKS,
   APP_VERSION,
+  BUILDING_LIST,
   BUILDINGS,
   CAMERA_SHAKE_MAX_OFFSET_PX,
   canPlaceBuildingOnTerrainTile,
@@ -28,9 +29,14 @@ import {
   computeDistanceAttenuatedShakeTrauma,
   computeEdgeScrollVelocity,
   computeTerrainNeighborMask,
+  CONSTRUCTION_GRID_COLUMNS,
+  CONSTRUCTION_SUBCATEGORIES,
   degradeTerrainLayer,
   EDGE_SCROLL_MARGIN_PX,
   EDGE_SCROLL_MAX_SPEED_PX,
+  getBalancedGridSlotCount,
+  getConstructionCatalogItems,
+  getSubcategoriesForCategory,
   getTimedConstructionTicks,
   HARVESTER_MAX_LOAD,
   HARVESTER_UNLOAD_PER_TICK,
@@ -48,6 +54,7 @@ import {
   TERRAIN_KIND,
   TOUCH_INTERACTION_MODES,
   TREES,
+  UNIT_LIST,
   UNITS,
   UNIT_SPAWN_PROTECTION_TICKS,
   WATCHDOG_DISCONNECT_TIMEOUT_MS,
@@ -295,7 +302,7 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
   });
 
   it("v1.2.0 — supports Game Juice camera shake, shortest-arc 16-angle interpolation, and 2x Hi-DPI sprite scale", () => {
-    expect(APP_VERSION).toBe("1.8.1");
+    expect(APP_VERSION).toBe("1.9.0");
     expect(SPRITE_ATLAS_SCALE).toBe(2);
 
     // Zero trauma produces zero offset
@@ -1277,5 +1284,81 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
     expect(sim.issuePlaceBuilding("p1", "BUILDING", "POWER_PLANT", 11, 5)).toBe(true);
     useRtsGameStore.getState().setPlacementBuilding(null);
     expect(useRtsGameStore.getState().placementBuilding).toBeNull();
+  });
+
+  it("v1.9.0 — provides hierarchical category/subcategory construction grid, balanced 3-column slot padding, wrench/dollar pictograms, hover menu, and fast-launch clan selection", () => {
+    // 1. Balanced 3-column grid calculations
+    expect(CONSTRUCTION_GRID_COLUMNS).toBe(3);
+    expect(getBalancedGridSlotCount(1, 2, 3)).toBe(6);
+    expect(getBalancedGridSlotCount(4, 2, 3)).toBe(6);
+    expect(getBalancedGridSlotCount(6, 2, 3)).toBe(6);
+    expect(getBalancedGridSlotCount(7, 2, 3)).toBe(9);
+    expect(getBalancedGridSlotCount(11, 2, 3)).toBe(12);
+
+    // 2. Every building and unit has a valid shortName and hierarchical subcategory
+    const validSubIds = new Set(CONSTRUCTION_SUBCATEGORIES.map((s) => s.id));
+    for (const b of BUILDING_LIST) {
+      expect(b.shortName.length).toBeGreaterThan(0);
+      expect(validSubIds.has(b.subcategory)).toBe(true);
+    }
+    for (const u of UNIT_LIST) {
+      expect(u.shortName.length).toBeGreaterThan(0);
+      expect(validSubIds.has(u.subcategory)).toBe(true);
+    }
+
+    // 3. Hierarchical filtering across all 4 categories and their subcategories
+    for (const category of ["BUILDING", "DEFENSE", "INFANTRY", "VEHICLE"] as const) {
+      const subs = getSubcategoriesForCategory(category);
+      expect(subs.length).toBeGreaterThanOrEqual(2);
+      const allInCat = getConstructionCatalogItems(category, "ALL");
+      expect(allInCat.length).toBeGreaterThan(0);
+
+      let sumSubItems = 0;
+      for (const sub of subs) {
+        const subItems = getConstructionCatalogItems(category, sub.id);
+        expect(subItems.length).toBeGreaterThan(0);
+        for (const item of subItems) {
+          expect(item.subcategory).toBe(sub.id);
+        }
+        sumSubItems += subItems.length;
+      }
+      expect(sumSubItems).toBe(allInCat.length);
+    }
+
+    // 4. LOBBY_CREATE schema supports autoStart for direct clan-selection -> match launch
+    const parsedQuickLaunch = ClientLobbyActionSchema.safeParse({
+      type: "LOBBY_CREATE",
+      playerId: "cmd_fast",
+      commanderName: "Solomon",
+      faction: "GDI",
+      lobbyName: "Escarmouche Tactique (GDI)",
+      withAiBot: true,
+      autoStart: true,
+    });
+    expect(parsedQuickLaunch.success).toBe(true);
+    if (parsedQuickLaunch.success && parsedQuickLaunch.data.type === "LOBBY_CREATE") {
+      expect(parsedQuickLaunch.data.autoStart).toBe(true);
+    }
+
+    // 5. Verify HUD and Portal source structure for grid, hover menu, pictograms, and fast clan screen
+    const hudSource = fs.readFileSync(
+      path.resolve(__dirname, "../src/components/hud/classic-sidebar-hud.tsx"),
+      "utf-8"
+    );
+    expect(hudSource).toContain('data-testid="construction-grid"');
+    expect(hudSource).toContain("grid-cols-3");
+    expect(hudSource).toContain('data-testid="construction-hover-menu"');
+    expect(hudSource).toContain('aria-label="Réparer"');
+    expect(hudSource).toContain('aria-label="Vendre"');
+
+    const portalSource = fs.readFileSync(
+      path.resolve(__dirname, "../src/components/lobby/portal-command-center.tsx"),
+      "utf-8"
+    );
+    expect(portalSource).toContain('data-testid="clan-selection-grid"');
+    expect(portalSource).toContain('data-testid="quick-launch-button"');
+    expect(portalSource).not.toContain("Classement des Commandants");
+    expect(portalSource).not.toContain("Journal des Opérations Récentes");
+    expect(portalSource).not.toContain("Navigateur de Salons");
   });
 });
