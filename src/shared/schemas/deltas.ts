@@ -20,7 +20,9 @@ export const EntityStateSchema = z.object({
   turretAngleIndex: z.number().int().min(0).max(15),
   cargoOre: z.number().min(0).default(0),
   spawnProtectionTicks: z.number().int().min(0).default(0),
-  stateLabel: z.enum(["IDLE", "MOVING", "HARVESTING", "RETURNING", "ATTACKING"]).default("IDLE"),
+  stateLabel: z
+    .enum(["IDLE", "MOVING", "HARVESTING", "RETURNING", "ALERT", "ATTACKING"])
+    .default("IDLE"),
 });
 
 export const OreTileDeltaSchema = z.object({

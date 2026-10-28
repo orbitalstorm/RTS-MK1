@@ -2,6 +2,27 @@
 
 All notable changes to **RTS-MK1** (`https://rts-mk1.orbital8.cloud`) follow strict non-reusable `v1.x.y` versioning.
 
+## [v1.4.1] — 2026-10-28
+
+### Added & Changed
+- **Defense Turret Pre-Range Detection, Early Activation (`ALERT`) & Extended Firing Range (`src/shared/constants/index.ts`, `src/shared/schemas/deltas.ts`, `src/engine/ecs/types.ts`, `src/engine/simulation.ts`, `src/renderer/world-renderer.ts`)**:
+  - Added `detectionRange` to `BuildingSpec`, `UnitSpec`, and `CombatComponent`, and added the `"ALERT"` pre-activation state to `EntityStateSchema.shape.stateLabel`.
+  - Defense turrets (`GUARD_TOWER`, `SAM_SITE`, `OBELISK`) now detect and lock onto approaching enemies **2.5 to 3.0 tiles before they enter firing range** (`attackRange < dist <= detectionRange`), transitioning from `"IDLE"` to `"ALERT"`, swiveling their weapon mount (`turretAngleIndex`) to track the target, and pre-charging their weapon (`cooldownRemaining = 0`) so they fire on the exact tick the target crosses `attackRange`:
+    - `GUARD_TOWER` ("Tourelle Vulcain"): `attackRange: 7.5` (up from `5.5`), `detectionRange: 10.0`, `sightRadius: 10`.
+    - `SAM_SITE` ("Batterie Lance-Missiles"): `attackRange: 9.5` (up from `7.5`), `detectionRange: 12.5`, `sightRadius: 13`.
+    - `OBELISK` ("Obélisque de Lumière"): `attackRange: 11.0` (up from `8.5`), `detectionRange: 14.0`, `sightRadius: 14`.
+  - Added visual turret activation feedback in `renderTacticalWorld` (`drawDefenseTurretActivationOverlay`, `drawTacticalRangeCircles`): rotating turret barrels/launchers, pulsing amber/red perimeter sensor rings, directional target-lock laser vectors, Obelisk ruby crystal pre-charge glow, and concentric firing (`attackRange`) + pre-activation (`detectionRange`) circles on selection and placement preview.
+- **Full Tactical Range Diversification Across All Units & Structures (`src/shared/constants/index.ts`, `src/engine/simulation.ts`, `src/components/hud/classic-sidebar-hud.tsx`)**:
+  - Rebalanced all combat units and structures so every combat entity occupies a distinct tactical range echelon (`1.4` -> `3.2` -> `4.2` -> `5.4` -> `6.4` -> `7.0` -> `7.5` -> `9.5` -> `9.8` -> `11.0` tiles):
+    - `ENGINEER`: `attackRange: 1.4`, `detectionRange: 4.5`, `sightRadius: 5` (contact sabotage).
+    - `RIFLE_INFANTRY`: `attackRange: 3.2`, `detectionRange: 5.5`, `sightRadius: 6` (close-quarters squad).
+    - `RECON_BUGGY`: `attackRange: 4.2`, `detectionRange: 7.5`, `sightRadius: 9` (long-sight forward scout & spotter).
+    - `MEDIUM_TANK`: `attackRange: 5.4`, `detectionRange: 7.5`, `sightRadius: 6` (armored line brawler).
+    - `ROCKET_SOLDIER`: `attackRange: 6.4`, `detectionRange: 8.5`, `sightRadius: 7` (standoff anti-tank missile infantry outranging `MEDIUM_TANK`).
+    - `MAMMOTH_TANK`: `attackRange: 7.0`, `detectionRange: 9.0`, `sightRadius: 8` (heavy breakthrough tank, outranged by perimeter defense turrets).
+    - `ARTILLERY`: `attackRange: 9.8`, `detectionRange: 11.5`, `sightRadius: 8` (long-range siege launcher capable of outranging `GUARD_TOWER` and `SAM_SITE` when paired with forward spotters, while remaining outranged by `OBELISK` at `11.0`).
+  - Displayed compact `Tir Xt`, `Détect. Xt`, and `Vision Xt` badges on every production card in `ClassicSidebarHud`, and upgraded the AI build controller to deploy perimeter defense turrets (`GUARD_TOWER`, `SAM_SITE`) and combined-arms unit mixes.
+
 ## [v1.4.0] — 2026-10-28
 
 ### Added

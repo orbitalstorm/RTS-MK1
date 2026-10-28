@@ -30,6 +30,7 @@ import {
   SPRITE_ATLAS_SCALE,
   TERRAIN_KIND,
   TOUCH_INTERACTION_MODES,
+  UNITS,
   UNIT_SPAWN_PROTECTION_TICKS,
   WATCHDOG_DISCONNECT_TIMEOUT_MS,
   ZOOM_LEVELS,
@@ -275,7 +276,7 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
   });
 
   it("v1.2.0 — supports Game Juice camera shake, shortest-arc 16-angle interpolation, and 2x Hi-DPI sprite scale", () => {
-    expect(APP_VERSION).toBe("1.4.0");
+    expect(APP_VERSION).toBe("1.4.1");
     expect(SPRITE_ATLAS_SCALE).toBe(2);
 
     // Zero trauma produces zero offset
@@ -576,5 +577,73 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
       .getAllEntities()
       .filter((e) => e.ownerId === "p2" && e.entityType === "UNIT" && e.stateLabel === "ATTACKING");
     expect(attackingAiUnits.length).toBe(0);
+  });
+
+  it("v1.4.1 — enforces diverse tactical combat ranges and pre-range defense turret activation (IDLE -> ALERT -> ATTACKING)", () => {
+    // 1. Verify full tactical range diversity (strictly distinct firing ranges across all 10 combat entities)
+    const orderedRanges = [
+      UNITS.ENGINEER.attackRange, // 1.4
+      UNITS.RIFLE_INFANTRY.attackRange, // 3.2
+      UNITS.RECON_BUGGY.attackRange, // 4.2
+      UNITS.MEDIUM_TANK.attackRange, // 5.4
+      UNITS.ROCKET_SOLDIER.attackRange, // 6.4
+      UNITS.MAMMOTH_TANK.attackRange, // 7.0
+      BUILDINGS.GUARD_TOWER.attackRange, // 7.5
+      BUILDINGS.SAM_SITE.attackRange, // 9.5
+      UNITS.ARTILLERY.attackRange, // 9.8
+      BUILDINGS.OBELISK.attackRange, // 11.0
+    ];
+    for (let i = 1; i < orderedRanges.length; i++) {
+      expect(orderedRanges[i]!).toBeGreaterThan(orderedRanges[i - 1]!);
+    }
+
+    // 2. Verify all defense turrets have extended firing range AND early pre-activation detectionRange > attackRange
+    for (const kind of ["GUARD_TOWER", "SAM_SITE", "OBELISK"] as const) {
+      const spec = BUILDINGS[kind];
+      expect(spec.detectionRange).toBeGreaterThan(spec.attackRange);
+      expect(spec.sightRadius).toBeGreaterThanOrEqual(Math.floor(spec.detectionRange));
+    }
+
+    // 3. Verify defense turret pre-activation ("ALERT") before an approaching enemy enters firing range
+    const sim = new RtsSimulation("test_turret_preactivation_v141", [
+      { playerId: "p1", commanderName: "Alpha", faction: "GDI", isAi: false },
+      { playerId: "p2", commanderName: "Beta", faction: "NOD", isAi: false },
+    ]);
+
+    // Place a GDI Guard Tower at (20, 20): attackRange = 7.5, detectionRange = 10.0
+    const tower = sim.createBuildingEntity("p1", "GDI", "GUARD_TOWER", 20, 20);
+    expect(tower.stateLabel).toBe("IDLE");
+    expect(tower.transform.turretAngleIndex).toBe(0);
+
+    // Spawn an enemy tank at (29, 20) -> distance = 9.0 tiles (inside detectionRange 10.0, outside attackRange 7.5)
+    const enemyTank = sim.createUnitEntity("p2", "NOD", "MEDIUM_TANK", 29, 20);
+    enemyTank.spawnProtectionTicks = 0;
+
+    const alertDelta = sim.stepTick();
+    const updatedTowerAlert = sim.getEntity(tower.id)!;
+    // Turret MUST activate ("ALERT"), lock target, and swivel East (angleIndex 4) BEFORE enemy is in firing range
+    expect(updatedTowerAlert.stateLabel).toBe("ALERT");
+    expect(updatedTowerAlert.combat?.targetEntityId).toBe(enemyTank.id);
+    expect(updatedTowerAlert.transform.turretAngleIndex).toBe(4);
+    // Must not fire a projectile yet while dist (9.0) > attackRange (7.5)
+    expect(alertDelta.projectiles.some((prj) => prj.fromX === 20 && prj.fromY === 20)).toBe(false);
+
+    // Move enemy tank to (27, 20) -> distance = 7.0 tiles (now inside attackRange 7.5)
+    enemyTank.transform.x = 27;
+    enemyTank.transform.y = 20;
+
+    const fireDelta = sim.stepTick();
+    const updatedTowerFire = sim.getEntity(tower.id)!;
+    expect(updatedTowerFire.stateLabel).toBe("ATTACKING");
+    expect(fireDelta.projectiles.some((prj) => prj.fromX === 20 && prj.fromY === 20)).toBe(true);
+
+    // Move enemy tank far away to (35, 20) -> distance = 15.0 tiles (outside detectionRange 10.0)
+    enemyTank.transform.x = 35;
+    enemyTank.transform.y = 20;
+
+    sim.stepTick();
+    const updatedTowerIdle = sim.getEntity(tower.id)!;
+    expect(updatedTowerIdle.stateLabel).toBe("IDLE");
+    expect(updatedTowerIdle.combat?.targetEntityId).toBeNull();
   });
 });

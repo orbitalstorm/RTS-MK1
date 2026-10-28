@@ -318,6 +318,7 @@ export class RtsSimulation {
       combat:
         spec.attackDamage > 0
           ? {
+              detectionRange: spec.detectionRange,
               attackRange: spec.attackRange,
               attackDamage: spec.attackDamage,
               attackCooldownTicks: spec.attackCooldownTicks,
@@ -383,6 +384,7 @@ export class RtsSimulation {
       combat:
         spec.attackDamage > 0
           ? {
+              detectionRange: spec.detectionRange,
               attackRange: spec.attackRange,
               attackDamage: spec.attackDamage,
               attackCooldownTicks: spec.attackCooldownTicks,
@@ -1255,7 +1257,14 @@ export class RtsSimulation {
       // Obelisk requires positive power balance
       if (ent.entityType === "BUILDING" && ent.kind === "OBELISK") {
         const owner = this.players.get(ent.ownerId);
-        if (owner?.lowPower) continue;
+        if (owner?.lowPower) {
+          if (ent.stateLabel !== "IDLE" || combat.targetEntityId !== null) {
+            combat.targetEntityId = null;
+            ent.stateLabel = "IDLE";
+            ent.dirty = true;
+          }
+          continue;
+        }
       }
 
       let target = combat.targetEntityId ? this.entities.get(combat.targetEntityId) : undefined;
@@ -1265,12 +1274,27 @@ export class RtsSimulation {
         (target.entityType === "UNIT" && target.spawnProtectionTicks > 0)
       ) {
         combat.targetEntityId = null;
-        target = this.findNearestEnemyInRange(ent, combat.attackRange);
+        const acquireRange =
+          ent.entityType === "BUILDING" || ent.stateLabel !== "MOVING"
+            ? combat.detectionRange
+            : combat.attackRange;
+        target = this.findNearestEnemyInRange(ent, acquireRange);
         if (target) {
           combat.targetEntityId = target.id;
         }
       }
-      if (!target) continue;
+      if (!target) {
+        if (ent.stateLabel === "ATTACKING" || ent.stateLabel === "ALERT") {
+          ent.stateLabel =
+            ent.entityType === "UNIT" &&
+            ent.navigation &&
+            ent.navigation.pathIndex < ent.navigation.path.length
+              ? "MOVING"
+              : "IDLE";
+          ent.dirty = true;
+        }
+        continue;
+      }
 
       let tx =
         target.entityType === "BUILDING" && target.building
@@ -1302,6 +1326,53 @@ export class RtsSimulation {
       }
 
       if (dist > combat.attackRange) {
+        if (ent.entityType === "BUILDING") {
+          // Stationary defense turret: if current target left detectionRange, look for another inside detectionRange
+          if (dist > combat.detectionRange) {
+            const detectedThreat = this.findNearestEnemyInRange(ent, combat.detectionRange);
+            if (!detectedThreat) {
+              combat.targetEntityId = null;
+              if (ent.stateLabel !== "IDLE") {
+                ent.stateLabel = "IDLE";
+                ent.dirty = true;
+              }
+              continue;
+            }
+            target = detectedThreat;
+            combat.targetEntityId = detectedThreat.id;
+            tx =
+              target.entityType === "BUILDING" && target.building
+                ? target.transform.x + (target.building.footprintW - 1) * 0.5
+                : target.transform.x;
+            ty =
+              target.entityType === "BUILDING" && target.building
+                ? target.transform.y + (target.building.footprintH - 1) * 0.5
+                : target.transform.y;
+          }
+
+          // Pre-range turret activation: lock on, swivel turret toward threat, enter ALERT state & pre-charge weapon
+          const aimAngle = vectorToAngleIndex16(tx - ent.transform.x, ty - ent.transform.y);
+          combat.cooldownRemaining = 0;
+          if (ent.transform.turretAngleIndex !== aimAngle || ent.stateLabel !== "ALERT") {
+            ent.transform.turretAngleIndex = aimAngle;
+            ent.stateLabel = "ALERT";
+            ent.dirty = true;
+          }
+          continue;
+        }
+
+        // Mobile combat unit: track enemy with turret when inside detectionRange and advance to attackRange
+        if (dist <= combat.detectionRange) {
+          const aimAngle = vectorToAngleIndex16(tx - ent.transform.x, ty - ent.transform.y);
+          if (ent.transform.turretAngleIndex !== aimAngle || ent.stateLabel === "IDLE") {
+            ent.transform.turretAngleIndex = aimAngle;
+            if (ent.stateLabel === "IDLE") {
+              ent.stateLabel = "ALERT";
+            }
+            ent.dirty = true;
+          }
+        }
+
         if (ent.entityType === "UNIT" && ent.navigation && ent.navigation.pathIndex >= ent.navigation.path.length) {
           if (ent.navigation.waitTicks > 0) {
             ent.navigation.waitTicks--;
@@ -1474,13 +1545,30 @@ export class RtsSimulation {
         this.issueStartProduction(p.playerId, "BUILDING", "RADAR_DOME");
       }
 
+      // Build base perimeter defense turrets so attacking the AI base requires range management
+      if (!p.lowPower) {
+        if (!ownedKinds.has("GUARD_TOWER") && ownedKinds.has("BARRACKS") && p.credits >= 550) {
+          this.issueStartProduction(p.playerId, "DEFENSE", "GUARD_TOWER");
+        } else if (!ownedKinds.has("SAM_SITE") && ownedKinds.has("RADAR_DOME") && p.credits >= 850) {
+          this.issueStartProduction(p.playerId, "DEFENSE", "SAM_SITE");
+        }
+      }
+
       // During the 2-minute opening grace period, cap AI defensive garrison so it does not amass an overwhelming deathball
       if (!inGracePeriod || idleCombatUnits.length < 4) {
         if (ownedKinds.has("BARRACKS") && p.credits >= 400) {
-          this.issueStartProduction(p.playerId, "INFANTRY", "ROCKET_SOLDIER");
+          const infChoice: UnitKind =
+            this.tickCounter % 60 === 0 ? "RIFLE_INFANTRY" : "ROCKET_SOLDIER";
+          this.issueStartProduction(p.playerId, "INFANTRY", infChoice);
         }
         if (ownedKinds.has("WAR_FACTORY") && p.credits >= 800) {
-          this.issueStartProduction(p.playerId, "VEHICLE", "MEDIUM_TANK");
+          const vehChoice: UnitKind =
+            !inGracePeriod && ownedKinds.has("RADAR_DOME") && this.tickCounter % 90 === 0
+              ? "ARTILLERY"
+              : this.tickCounter % 120 === 0
+                ? "RECON_BUGGY"
+                : "MEDIUM_TANK";
+          this.issueStartProduction(p.playerId, "VEHICLE", vehChoice);
         }
       }
 

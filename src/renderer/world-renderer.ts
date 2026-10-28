@@ -7,10 +7,12 @@ import {
   normalizeBaseTerrainKind,
   TERRAIN_KIND,
   TILE_PIXEL_SIZE,
+  UNITS,
   UNIT_SPAWN_PROTECTION_TICKS,
   interpolateAngleIndex16,
   type BuildingKind,
   type FactionId,
+  type UnitKind,
 } from "../shared/constants";
 import type { EntityState, ProjectileVisual } from "../shared/schemas/deltas";
 import type { TacticalCamera } from "./camera";
@@ -524,6 +526,23 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
       if (bmp) {
         ctx.drawImage(bmp, px, py, bw, bh);
       }
+
+      if (spec.category === "DEFENSE") {
+        const turretAngle = prev
+          ? interpolateAngleIndex16(prev.turretAngleIndex, ent.turretAngleIndex, alpha)
+          : ent.turretAngleIndex;
+        drawDefenseTurretActivationOverlay(
+          ctx,
+          ent,
+          px,
+          py,
+          bw,
+          bh,
+          turretAngle,
+          frameNowMs
+        );
+      }
+
       if (ent.hp < ent.maxHp * 0.55) {
         vfxManager?.renderDamageSmoke(ctx, px, py, bw, bh, ent.hp, ent.maxHp, frameNowMs);
       }
@@ -531,8 +550,19 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
 
       if (selectedIds.has(ent.id)) {
         drawSelectionBracket(ctx, px, py, bw, bh, FACTIONS[ent.faction].primaryColor);
+        if (spec.attackRange > 0) {
+          drawTacticalRangeCircles(
+            ctx,
+            px + bw * 0.5,
+            py + bh * 0.5,
+            spec.attackRange * s,
+            spec.detectionRange * s,
+            FACTIONS[ent.faction].primaryColor
+          );
+        }
       }
     } else {
+      const unitSpec = UNITS[ent.kind as UnitKind];
       const bodyAngle = prev
         ? interpolateAngleIndex16(prev.angleIndex, ent.angleIndex, alpha)
         : ent.angleIndex;
@@ -590,6 +620,16 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
 
       if (selectedIds.has(ent.id)) {
         drawSelectionBracket(ctx, px + 1, py + 1, s - 2, s - 2, "#22c55e");
+        if (unitSpec && unitSpec.attackRange > 0) {
+          drawTacticalRangeCircles(
+            ctx,
+            px + s * 0.5,
+            py + s * 0.5,
+            unitSpec.attackRange * s,
+            unitSpec.detectionRange * s,
+            "#22c55e"
+          );
+        }
       }
     }
   }
@@ -665,6 +705,16 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
         ctx.lineWidth = 1.5;
         ctx.strokeRect(tx * s + 1, ty * s + 1, s - 2, s - 2);
       }
+    }
+    if (spec.attackRange > 0) {
+      drawTacticalRangeCircles(
+        ctx,
+        (placementPreview.tileX + spec.footprintW * 0.5) * s,
+        (placementPreview.tileY + spec.footprintH * 0.5) * s,
+        spec.attackRange * s,
+        spec.detectionRange * s,
+        placementPreview.valid ? "#22c55e" : "#ef4444"
+      );
     }
   }
 
@@ -761,4 +811,124 @@ function drawSelectionBracket(
   ctx.lineTo(x, y + h);
   ctx.lineTo(x, y + h - len);
   ctx.stroke();
+}
+
+/**
+ * Renders pre-range activation ("ALERT") & active firing ("ATTACKING") sensor rings,
+ * rotating barrel/launcher orientation, and Obelisk crystal pre-charge on defense turrets.
+ */
+function drawDefenseTurretActivationOverlay(
+  ctx: CanvasRenderingContext2D,
+  ent: EntityState,
+  px: number,
+  py: number,
+  bw: number,
+  bh: number,
+  turretAngleIndex: number,
+  frameNowMs: number
+): void {
+  const isAlert = ent.stateLabel === "ALERT";
+  const isAttacking = ent.stateLabel === "ATTACKING";
+  const cx = px + bw * 0.5;
+  const cy = py + bh * 0.5;
+  const radians = (turretAngleIndex / 16) * Math.PI * 2;
+  const pulse = 0.5 + 0.5 * Math.sin(frameNowMs * 0.012);
+
+  ctx.save();
+
+  // 1. Pre-activation ("ALERT") or active firing ("ATTACKING") perimeter sensor ring & target-lock vector
+  if (isAlert || isAttacking) {
+    const ringRadius = Math.min(bw, bh) * (0.48 + pulse * 0.06);
+    ctx.beginPath();
+    ctx.arc(cx, cy, ringRadius, 0, Math.PI * 2);
+    ctx.strokeStyle = isAttacking ? "rgba(239, 68, 68, 0.85)" : "rgba(245, 158, 11, 0.8)";
+    ctx.lineWidth = isAttacking ? 2.0 : 1.6;
+    ctx.stroke();
+
+    // Directional target-acquisition laser / sensor lock cone along turretAngleIndex
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(radians);
+    ctx.beginPath();
+    ctx.moveTo(0, -4);
+    ctx.lineTo(0, -bw * 0.72);
+    ctx.strokeStyle = isAttacking ? "rgba(248, 113, 113, 0.75)" : "rgba(56, 189, 248, 0.65)";
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // 2. Rotating turret weapon mount / Obelisk apex pre-charge
+  if (ent.kind === "OBELISK") {
+    if (isAlert || isAttacking) {
+      const crystalY = py + bh * 0.16;
+      const chargeR = (isAttacking ? 9 : 6.5) + pulse * 3.5;
+      const grad = ctx.createRadialGradient(cx, crystalY, 1, cx, crystalY, chargeR);
+      grad.addColorStop(0, "#ffffff");
+      grad.addColorStop(0.4, isAttacking ? "#ef4444" : "#f59e0b");
+      grad.addColorStop(1, "rgba(239, 68, 68, 0)");
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(cx, crystalY, chargeR, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } else {
+    ctx.translate(cx, cy);
+    ctx.rotate(radians);
+    if (ent.kind === "GUARD_TOWER") {
+      // Rotating Twin Vulcan Barrels & Active Sensor Pod
+      ctx.fillStyle = "#e2e8f0";
+      ctx.fillRect(-3.2, -bh * 0.42, 2.0, bh * 0.36);
+      ctx.fillRect(1.2, -bh * 0.42, 2.0, bh * 0.36);
+      ctx.beginPath();
+      ctx.arc(0, 0, 3.2, 0, Math.PI * 2);
+      ctx.fillStyle = isAttacking ? "#ef4444" : isAlert ? "#f59e0b" : "#38bdf8";
+      ctx.fill();
+    } else if (ent.kind === "SAM_SITE") {
+      // Rotating Missile Launcher Pod Orientation Indicator
+      ctx.fillStyle = "#94a3b8";
+      ctx.fillRect(-4.5, -bh * 0.34, 9.0, bh * 0.28);
+      ctx.beginPath();
+      ctx.arc(0, -bh * 0.34, 2.4, 0, Math.PI * 2);
+      ctx.fillStyle = isAttacking ? "#ef4444" : isAlert ? "#f59e0b" : "#38bdf8";
+      ctx.fill();
+    }
+  }
+
+  ctx.restore();
+}
+
+/**
+ * Draws concentric tactical range circles when a combat unit or defense turret is selected or placed:
+ * - Inner dashed circle: weapon firing range (`attackRangePx`)
+ * - Outer dotted circle: pre-activation / threat detection range (`detectionRangePx`)
+ */
+function drawTacticalRangeCircles(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  attackRangePx: number,
+  detectionRangePx: number,
+  primaryColor: string
+): void {
+  ctx.save();
+
+  if (detectionRangePx > attackRangePx + 4) {
+    ctx.beginPath();
+    ctx.setLineDash([3, 5]);
+    ctx.arc(cx, cy, detectionRangePx, 0, Math.PI * 2);
+    ctx.strokeStyle = "rgba(56, 189, 248, 0.45)";
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+  }
+
+  ctx.beginPath();
+  ctx.setLineDash([6, 4]);
+  ctx.arc(cx, cy, attackRangePx, 0, Math.PI * 2);
+  ctx.strokeStyle = primaryColor;
+  ctx.globalAlpha = 0.62;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  ctx.restore();
 }

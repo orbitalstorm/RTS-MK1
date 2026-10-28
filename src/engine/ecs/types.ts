@@ -27,6 +27,7 @@ export interface NavigationComponent {
 }
 
 export interface CombatComponent {
+  detectionRange: number;
   attackRange: number;
   attackDamage: number;
   attackCooldownTicks: number;
@@ -57,7 +58,7 @@ export interface EcsEntity {
   kind: BuildingKind | UnitKind;
   sightRadius: number;
   spawnProtectionTicks: number;
-  stateLabel: "IDLE" | "MOVING" | "HARVESTING" | "RETURNING" | "ATTACKING";
+  stateLabel: "IDLE" | "MOVING" | "HARVESTING" | "RETURNING" | "ALERT" | "ATTACKING";
   transform: TransformComponent;
   health: HealthComponent;
   navigation: NavigationComponent | null;

@@ -401,6 +401,21 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
                     </Badge>
                   </div>
                   <p className="text-[11px] leading-snug text-slate-400">{item.description}</p>
+                  <div className="flex flex-wrap items-center gap-1 pt-0.5 text-[10px]">
+                    {item.attackRange > 0 && (
+                      <span className="rounded border border-red-500/40 bg-red-500/10 px-1.5 py-0.5 text-red-300">
+                        Tir {item.attackRange}t
+                      </span>
+                    )}
+                    {item.detectionRange > item.attackRange && (
+                      <span className="rounded border border-cyan-500/40 bg-cyan-500/10 px-1.5 py-0.5 text-cyan-300">
+                        Détect. {item.detectionRange}t
+                      </span>
+                    )}
+                    <span className="rounded border border-slate-700 bg-slate-950 px-1.5 py-0.5 text-slate-300">
+                      Vision {item.sightRadius}t
+                    </span>
+                  </div>
                 </div>
               </div>
 
