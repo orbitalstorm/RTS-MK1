@@ -21,6 +21,7 @@ export type UnitKind =
   | "RIFLE_INFANTRY"
   | "ROCKET_SOLDIER"
   | "ENGINEER"
+  | "CONSTRUCTOR_BOT"
   | "HARVESTER"
   | "RECON_BUGGY"
   | "MEDIUM_TANK"
@@ -79,7 +80,7 @@ export interface UnitSpec {
   description: string;
 }
 
-export const APP_VERSION = "1.5.1";
+export const APP_VERSION = "1.6.0";
 export const SIM_TICK_RATE_HZ = 20;
 export const SIM_TICK_MS = 50;
 export const MAP_WIDTH_TILES = 48;
@@ -99,6 +100,33 @@ export function isRepeatableBuildingKind(kind: BuildingKind): boolean {
     kind === "SANDBAG_WALL" ||
     kind === "CONCRETE_WALL"
   );
+}
+
+/**
+ * Returns the number of simulation ticks required for a Constructor Bot to assemble
+ * a floor slab or defensive wall/sandbag on site.
+ */
+export function getTimedConstructionTicks(kind: BuildingKind): number {
+  if (kind === "CONCRETE_SLAB") return 16; // 0.8s per slab
+  if (kind === "SANDBAG_WALL") return 20; // 1.0s per sandbag
+  if (kind === "CONCRETE_WALL") return 28; // 1.4s per heavy wall
+  return 0;
+}
+
+/**
+ * Returns true if the building requires a solid Stone or Concrete Slab foundation
+ * on every tile under its footprint.
+ * Standard buildings and defensive turrets require Stone/Concrete; slabs and walls can be placed on Dirt/Grass/Stone/Concrete.
+ */
+export function requiresStoneOrConcreteFoundation(kind: BuildingKind): boolean {
+  return !isRepeatableBuildingKind(kind);
+}
+
+/**
+ * Returns true if `rawKind` is a valid load-bearing foundation (Stone or Concrete Slab).
+ */
+export function isFoundationTerrainKind(rawKind: number): boolean {
+  return rawKind === TERRAIN_KIND.STONE || rawKind === TERRAIN_KIND.CONCRETE_SLAB;
 }
 
 export const TERRAIN_KIND = {
@@ -660,7 +688,7 @@ export const BUILDINGS: Record<BuildingKind, BuildingSpec> = {
     name: "Dalle de Béton",
     category: "BUILDING",
     cost: 25,
-    buildTimeTicks: 10,
+    buildTimeTicks: 16,
     maxHp: 300,
     powerDelta: 0,
     sightRadius: 2,
@@ -672,14 +700,14 @@ export const BUILDINGS: Record<BuildingKind, BuildingSpec> = {
     attackDamage: 0,
     attackCooldownTicks: 0,
     prerequisites: ["CONSTRUCTION_YARD"],
-    description: "Pave le sol en continu avec une dalle de béton armé (1×1) unifiée et résistante aux impacts.",
+    description: "Fondation en béton armé (1×1) assemblée par un Robot Constructeur pour accueillir les bâtiments.",
   },
   SANDBAG_WALL: {
     kind: "SANDBAG_WALL",
     name: "Sacs de Sable",
     category: "DEFENSE",
     cost: 40,
-    buildTimeTicks: 10,
+    buildTimeTicks: 20,
     maxHp: 350,
     powerDelta: 0,
     sightRadius: 2,
@@ -691,14 +719,14 @@ export const BUILDINGS: Record<BuildingKind, BuildingSpec> = {
     attackDamage: 0,
     attackCooldownTicks: 0,
     prerequisites: ["CONSTRUCTION_YARD"],
-    description: "Barricade tactique 1×1 économique posable à la chaîne pour canaliser l'infanterie et les véhicules légers.",
+    description: "Barricade continue érigée sur place par un Robot Constructeur pour canaliser l'ennemi.",
   },
   CONCRETE_WALL: {
     kind: "CONCRETE_WALL",
     name: "Mur d'Enceinte Blindé",
     category: "DEFENSE",
     cost: 80,
-    buildTimeTicks: 16,
+    buildTimeTicks: 28,
     maxHp: 850,
     powerDelta: 0,
     sightRadius: 2,
@@ -710,7 +738,7 @@ export const BUILDINGS: Record<BuildingKind, BuildingSpec> = {
     attackDamage: 0,
     attackCooldownTicks: 0,
     prerequisites: ["CONSTRUCTION_YARD"],
-    description: "Rempart lourd en ferro-béton 1×1 à haute résistance (850 PV) pour fortifier la base et protéger les tourelles.",
+    description: "Rempart continu en ferro-béton (850 PV) érigé par un Robot Constructeur pour fortifier la base.",
   },
   GUARD_TOWER: {
     kind: "GUARD_TOWER",
@@ -823,9 +851,26 @@ export const UNITS: Record<UnitKind, UnitSpec> = {
     prerequisites: ["BARRACKS"],
     description: "Sapeur spécialisé capable de saboter lourdement les structures au contact (1.4t).",
   },
+  CONSTRUCTOR_BOT: {
+    kind: "CONSTRUCTOR_BOT",
+    name: "Robot Constructeur",
+    category: "VEHICLE",
+    cost: 220,
+    buildTimeTicks: 30,
+    maxHp: 320,
+    speedTilesPerTick: 0.16,
+    sightRadius: 6,
+    detectionRange: 0,
+    attackRange: 0,
+    attackDamage: 0,
+    attackCooldownTicks: 0,
+    harvestCapacity: 0,
+    prerequisites: ["CONSTRUCTION_YARD"],
+    description: "Unité robotisée produite au Chantier : indispensable pour assembler les dalles de béton, murs et sacs de sable.",
+  },
   HARVESTER: {
     kind: "HARVESTER",
-    name: "Moissonneuse Blindée",
+    name: "Moissonneuse Lourde",
     category: "VEHICLE",
     cost: 950,
     buildTimeTicks: 75,
@@ -838,7 +883,7 @@ export const UNITS: Record<UnitKind, UnitSpec> = {
     attackCooldownTicks: 0,
     harvestCapacity: HARVESTER_MAX_LOAD,
     prerequisites: ["WAR_FACTORY", "REFINERY"],
-    description: "Récolte automatiquement le minerai et le décharge à la Raffinerie la plus proche.",
+    description: "Convoi minier massif à benne articulée et citernes pressurisées récoltant le minerai actif.",
   },
   RECON_BUGGY: {
     kind: "RECON_BUGGY",

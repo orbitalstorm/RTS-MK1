@@ -8,11 +8,14 @@ import {
   degradeTerrainLayer,
   FACTIONS,
   getTerrainLayerThickness,
+  getTimedConstructionTicks,
   HARVESTER_LOAD_PER_TICK,
   HARVESTER_MAX_LOAD,
+  isFoundationTerrainKind,
   isRepeatableBuildingKind,
   MAP_HEIGHT_TILES,
   MAP_WIDTH_TILES,
+  requiresStoneOrConcreteFoundation,
   STARTING_CREDITS,
   TERRAIN_KIND,
   UNIT_SPAWN_PROTECTION_TICKS,
@@ -210,12 +213,15 @@ export class RtsSimulation {
           terrainGrid[idx] = TERRAIN_KIND.DIRT;
         }
 
-        // Organic rounded stone plateaus around base command areas
+        // Organic rounded stone plateaus around base command areas (all 4 corners)
         const distNW = Math.hypot(x - 7.5, y - 7.5);
         const distSE = Math.hypot(x - (this.width - 8.5), y - (this.height - 8.5));
-        if (distNW <= 6.2 || distSE <= 6.2) {
+        const distNE = Math.hypot(x - (this.width - 8.5), y - 7.5);
+        const distSW = Math.hypot(x - 7.5, y - (this.height - 8.5));
+        const minCornerDist = Math.min(distNW, distSE, distNE, distSW);
+        if (minCornerDist <= 7.2) {
           terrainGrid[idx] = TERRAIN_KIND.STONE;
-        } else if (distNW <= 8.5 || distSE <= 8.5) {
+        } else if (minCornerDist <= 9.5) {
           terrainGrid[idx] = TERRAIN_KIND.DIRT;
         }
 
@@ -251,6 +257,11 @@ export class RtsSimulation {
           if (tx >= 1 && ty >= 1 && tx < this.width - 1 && ty < this.height - 1) {
             const idx = ty * this.width + tx;
             if (terrainGrid[idx] === TERRAIN_KIND.CLIFF) continue;
+            const distNW = Math.hypot(tx - 7.5, ty - 7.5);
+            const distSE = Math.hypot(tx - (this.width - 8.5), ty - (this.height - 8.5));
+            const distNE = Math.hypot(tx - (this.width - 8.5), ty - 7.5);
+            const distSW = Math.hypot(tx - 7.5, ty - (this.height - 8.5));
+            if (Math.min(distNW, distSE, distNE, distSW) <= 5.4) continue;
             if (d2 <= patch.radius * patch.radius) {
               terrainGrid[idx] = TERRAIN_KIND.ORE;
               oreGrid[idx] = patch.amount;
@@ -281,6 +292,7 @@ export class RtsSimulation {
     if (harvester.harvester) {
       harvester.harvester.homeRefineryId = refinery.id;
     }
+    this.createUnitEntity(playerId, faction, "CONSTRUCTOR_BOT", baseX + 3, baseY + 2);
     this.createUnitEntity(playerId, faction, "RIFLE_INFANTRY", baseX + 4, baseY + 3);
     this.createUnitEntity(playerId, faction, "RECON_BUGGY", baseX + 5, baseY + 3);
     this.createUnitEntity(playerId, faction, "MEDIUM_TANK", baseX + 5, baseY + 4);
@@ -291,11 +303,16 @@ export class RtsSimulation {
     faction: FactionId,
     kind: BuildingKind,
     tileX: number,
-    tileY: number
+    tileY: number,
+    constructionOpts?: { buildProgress: number; buildTicksRequired: number }
   ): EcsEntity {
     const spec = BUILDINGS[kind];
     const fSpec = FACTIONS[faction];
     const maxHp = Math.round(spec.maxHp * fSpec.armorBonus);
+    const buildProgress = constructionOpts ? constructionOpts.buildProgress : 1;
+    const buildTicksRequired = constructionOpts ? constructionOpts.buildTicksRequired : 0;
+    const initialHp =
+      buildProgress < 1 ? Math.max(1, Math.round(maxHp * buildProgress)) : maxHp;
     const id = `bld_${this.nextEntitySeq++}`;
 
     const entity: EcsEntity = {
@@ -306,7 +323,7 @@ export class RtsSimulation {
       kind,
       sightRadius: spec.sightRadius,
       spawnProtectionTicks: 0,
-      stateLabel: "IDLE",
+      stateLabel: buildProgress < 1 ? "BUILDING" : "IDLE",
       transform: {
         x: tileX,
         y: tileY,
@@ -314,7 +331,7 @@ export class RtsSimulation {
         turretAngleIndex: 0,
       },
       health: {
-        hp: maxHp,
+        hp: initialHp,
         maxHp,
       },
       navigation: null,
@@ -337,13 +354,17 @@ export class RtsSimulation {
         powerDelta: spec.powerDelta,
         storageCapacity: spec.storageCapacity,
         isRepairing: false,
+        buildProgress,
+        buildTicksRequired,
       },
       dirty: false,
     };
 
     this.entities.set(id, entity);
     this.createdThisTick.push(id);
-    this.reservationGrid.markBuildingFootprint(tileX, tileY, spec.footprintW, spec.footprintH);
+    if (kind !== "CONCRETE_SLAB") {
+      this.reservationGrid.markBuildingFootprint(tileX, tileY, spec.footprintW, spec.footprintH);
+    }
     return entity;
   }
 
@@ -506,6 +527,15 @@ export class RtsSimulation {
     }
   }
 
+  public hasLivingConstructorBot(playerId: string): boolean {
+    for (const ent of this.entities.values()) {
+      if (ent.ownerId === playerId && ent.entityType === "UNIT" && ent.kind === "CONSTRUCTOR_BOT") {
+        return true;
+      }
+    }
+    return false;
+  }
+
   public issueStartProduction(
     playerId: string,
     category: ProductionCategory,
@@ -516,11 +546,16 @@ export class RtsSimulation {
     const slot = player.queues[category];
     if (slot.activeItem !== null) return false;
 
-    const isBuilding = category === "BUILDING" || category === "DEFENSE";
-    const spec = isBuilding
-      ? BUILDINGS[itemKind as BuildingKind]
-      : UNITS[itemKind as UnitKind];
-    if (!spec || spec.category !== category) return false;
+    const isUnitItem = Object.prototype.hasOwnProperty.call(UNITS, itemKind);
+    const spec = isUnitItem
+      ? UNITS[itemKind as UnitKind]
+      : BUILDINGS[itemKind as BuildingKind];
+    if (!spec) return false;
+
+    const validCategory =
+      spec.category === category ||
+      (itemKind === "CONSTRUCTOR_BOT" && (category === "BUILDING" || category === "VEHICLE"));
+    if (!validCategory) return false;
 
     if (!this.hasPrerequisites(playerId, spec.prerequisites)) return false;
     if (player.credits < spec.cost) return false;
@@ -545,13 +580,18 @@ export class RtsSimulation {
     const spec = BUILDINGS[buildingKind];
     if (!spec || spec.category !== category) return false;
 
+    const isRepeatable = isRepeatableBuildingKind(buildingKind);
+    if (isRepeatable && !this.hasLivingConstructorBot(playerId)) {
+      return false;
+    }
+
     const slot = player.queues[category];
     const paidViaQueue =
       slot.activeItem === buildingKind &&
-      (slot.readyToPlace || isRepeatableBuildingKind(buildingKind));
+      (slot.readyToPlace || isRepeatable);
     const canChainRepeat =
       !paidViaQueue &&
-      isRepeatableBuildingKind(buildingKind) &&
+      isRepeatable &&
       this.hasPrerequisites(playerId, spec.prerequisites) &&
       player.credits >= spec.cost;
 
@@ -563,7 +603,7 @@ export class RtsSimulation {
       return false;
     }
 
-    // Concrete Slab (DALLE_BETON) paves the terrain tile directly without blocking unit navigation or future building construction
+    // Concrete Slab (DALLE_BETON) creates a timed construction site assembled on-site by a Constructor Bot
     if (buildingKind === "CONCRETE_SLAB") {
       if (!this.reservationGrid.inBounds(tileX, tileY)) return false;
       const idx = tileY * this.width + tileX;
@@ -575,6 +615,19 @@ export class RtsSimulation {
       }
       for (const ent of this.entities.values()) {
         if (
+          ent.entityType === "BUILDING" &&
+          ent.building &&
+          (ent.kind === "CONCRETE_SLAB" || ent.ownerId !== playerId)
+        ) {
+          if (
+            tileX >= ent.transform.x &&
+            tileX < ent.transform.x + ent.building.footprintW &&
+            tileY >= ent.transform.y &&
+            tileY < ent.transform.y + ent.building.footprintH
+          ) {
+            return false;
+          }
+        } else if (
           ent.entityType === "UNIT" &&
           ent.ownerId !== playerId &&
           Math.round(ent.transform.x) === tileX &&
@@ -588,20 +641,9 @@ export class RtsSimulation {
         player.credits -= spec.cost;
       }
 
-      this.terrainGrid[idx] = TERRAIN_KIND.CONCRETE_SLAB;
-      this.terrainDamageGrid[idx] = 0;
-      if ((this.oreGrid[idx] ?? 0) > 0) {
-        this.oreGrid[idx] = 0;
-        this.oreUpdatesThisTick.set(idx, {
-          tileX,
-          tileY,
-          oreAmount: 0,
-        });
-      }
-      this.terrainUpdatesThisTick.set(idx, {
-        tileX,
-        tileY,
-        terrainKind: TERRAIN_KIND.CONCRETE_SLAB,
+      this.createBuildingEntity(playerId, player.faction, "CONCRETE_SLAB", tileX, tileY, {
+        buildProgress: 0.05,
+        buildTicksRequired: getTimedConstructionTicks("CONCRETE_SLAB"),
       });
 
       if (paidViaQueue) {
@@ -610,18 +652,23 @@ export class RtsSimulation {
         slot.ticksRequired = 0;
         slot.readyToPlace = false;
       }
-      this.pushAcoustic("EVA_BUILDING_DEPLOYED", tileX, tileY, playerId);
       return true;
     }
 
-    // Check terrain & static buildings first; relocate any friendly mobile units standing on the footprint
+    const needsFoundation = requiresStoneOrConcreteFoundation(buildingKind);
+
+    // Check terrain, foundation requirement & static buildings first; relocate any friendly mobile units standing on the footprint
     for (let dy = 0; dy < spec.footprintH; dy++) {
       for (let dx = 0; dx < spec.footprintW; dx++) {
         const cx = tileX + dx;
         const cy = tileY + dy;
         if (!this.reservationGrid.inBounds(cx, cy)) return false;
         const idx = cy * this.width + cx;
-        if (this.terrainGrid[idx] === 2) return false;
+        const cellTerrain = this.terrainGrid[idx] ?? TERRAIN_KIND.DIRT;
+        if (cellTerrain === TERRAIN_KIND.CLIFF) return false;
+        if (needsFoundation && !isFoundationTerrainKind(cellTerrain)) {
+          return false;
+        }
         // Check if any building or enemy unit occupies (cx, cy)
         for (const ent of this.entities.values()) {
           if (ent.entityType === "BUILDING" && ent.building) {
@@ -665,7 +712,15 @@ export class RtsSimulation {
       }
     }
 
-    const created = this.createBuildingEntity(playerId, player.faction, buildingKind, tileX, tileY);
+    const timedTicks = getTimedConstructionTicks(buildingKind);
+    const created = this.createBuildingEntity(
+      playerId,
+      player.faction,
+      buildingKind,
+      tileX,
+      tileY,
+      timedTicks > 0 ? { buildProgress: 0.05, buildTicksRequired: timedTicks } : undefined
+    );
 
     for (const ent of this.entities.values()) {
       if (ent.entityType === "UNIT" && ent.ownerId === playerId) {
@@ -808,6 +863,7 @@ export class RtsSimulation {
 
     this.stepProductionQueues();
     this.stepBuildingRepairs();
+    this.stepConstructorBots();
     this.stepHarvesters();
     this.stepUnitMovement();
     this.stepCombat();
@@ -892,7 +948,7 @@ export class RtsSimulation {
   private rebuildSpatialReservations(): void {
     this.reservationGrid.clearDynamic();
     for (const ent of this.entities.values()) {
-      if (ent.entityType === "BUILDING" && ent.building) {
+      if (ent.entityType === "BUILDING" && ent.building && ent.kind !== "CONCRETE_SLAB") {
         this.reservationGrid.markBuildingFootprint(
           ent.transform.x,
           ent.transform.y,
@@ -960,7 +1016,8 @@ export class RtsSimulation {
         slot.ticksElapsed += speedFactor;
         if (slot.ticksElapsed >= slot.ticksRequired) {
           slot.ticksElapsed = slot.ticksRequired;
-          if (category === "BUILDING" || category === "DEFENSE") {
+          const isUnitItem = Object.prototype.hasOwnProperty.call(UNITS, slot.activeItem);
+          if (!isUnitItem && (category === "BUILDING" || category === "DEFENSE")) {
             slot.readyToPlace = true;
             this.pushAcoustic("EVA_CONSTRUCTION_COMPLETE", 0, 0, p.playerId);
           } else {
@@ -983,24 +1040,185 @@ export class RtsSimulation {
     faction: FactionId,
     unitKind: UnitKind
   ): EcsEntity | null {
-    const producerKind: BuildingKind =
-      UNITS[unitKind].category === "INFANTRY" ? "BARRACKS" : "WAR_FACTORY";
-    for (const ent of this.entities.values()) {
-      if (ent.ownerId === playerId && ent.entityType === "BUILDING" && ent.kind === producerKind && ent.building) {
-        const dock = this.reservationGrid.findNearestFreeDockTile(
-          ent.transform.x,
-          ent.transform.y,
-          ent.building.footprintW,
-          ent.building.footprintH,
-          ent.transform.x + ent.building.footprintW,
-          ent.transform.y + ent.building.footprintH
-        );
-        if (dock) {
-          return this.createUnitEntity(playerId, faction, unitKind, dock.x, dock.y);
+    const candidateProducers: BuildingKind[] =
+      unitKind === "CONSTRUCTOR_BOT"
+        ? ["CONSTRUCTION_YARD", "WAR_FACTORY"]
+        : UNITS[unitKind].category === "INFANTRY"
+          ? ["BARRACKS"]
+          : ["WAR_FACTORY"];
+
+    for (const producerKind of candidateProducers) {
+      for (const ent of this.entities.values()) {
+        if (
+          ent.ownerId === playerId &&
+          ent.entityType === "BUILDING" &&
+          ent.kind === producerKind &&
+          ent.building
+        ) {
+          const dock = this.reservationGrid.findNearestFreeDockTile(
+            ent.transform.x,
+            ent.transform.y,
+            ent.building.footprintW,
+            ent.building.footprintH,
+            ent.transform.x + ent.building.footprintW,
+            ent.transform.y + ent.building.footprintH
+          );
+          if (dock) {
+            return this.createUnitEntity(playerId, faction, unitKind, dock.x, dock.y);
+          }
         }
       }
     }
     return null;
+  }
+
+  private stepConstructorBots(): void {
+    for (const bot of this.entities.values()) {
+      if (bot.entityType !== "UNIT" || bot.kind !== "CONSTRUCTOR_BOT" || !bot.navigation) {
+        continue;
+      }
+      const nav = bot.navigation;
+
+      // Find nearest incomplete construction site owned by the same commander
+      let bestSite: EcsEntity | null = null;
+      let bestDist = Infinity;
+      for (const ent of this.entities.values()) {
+        if (
+          ent.ownerId === bot.ownerId &&
+          ent.entityType === "BUILDING" &&
+          ent.building &&
+          ent.building.buildProgress < 1
+        ) {
+          const d = Math.hypot(
+            ent.transform.x - bot.transform.x,
+            ent.transform.y - bot.transform.y
+          );
+          if (d < bestDist) {
+            bestDist = d;
+            bestSite = ent;
+          }
+        }
+      }
+
+      if (!bestSite || !bestSite.building) {
+        if (bot.stateLabel === "BUILDING") {
+          bot.stateLabel = "IDLE";
+          bot.dirty = true;
+        }
+        continue;
+      }
+
+      if (bestDist <= 1.85) {
+        if (nav.path.length > 0) {
+          nav.path = [];
+          nav.pathIndex = 0;
+        }
+        const aimAngle = vectorToAngleIndex16(
+          bestSite.transform.x - bot.transform.x,
+          bestSite.transform.y - bot.transform.y
+        );
+        bot.transform.angleIndex = aimAngle;
+        bot.transform.turretAngleIndex = aimAngle;
+        bot.stateLabel = "BUILDING";
+        bot.dirty = true;
+
+        bestSite.stateLabel = "BUILDING";
+        const stepDelta = 1 / Math.max(1, bestSite.building.buildTicksRequired);
+        bestSite.building.buildProgress = Number(
+          Math.min(1, bestSite.building.buildProgress + stepDelta).toFixed(4)
+        );
+        bestSite.health.hp = Math.max(
+          1,
+          Math.round(bestSite.health.maxHp * bestSite.building.buildProgress)
+        );
+        bestSite.dirty = true;
+
+        if (this.tickCounter % 4 === 0) {
+          this.pushVisualEffect(
+            "HARVEST_SPARKS",
+            bestSite.transform.x,
+            bestSite.transform.y,
+            0.48,
+            0,
+            bot.faction
+          );
+        }
+
+        if (bestSite.building.buildProgress >= 1) {
+          bestSite.building.buildProgress = 1;
+          bestSite.health.hp = bestSite.health.maxHp;
+          bestSite.stateLabel = "IDLE";
+          this.pushAcoustic(
+            "EVA_BUILDING_DEPLOYED",
+            bestSite.transform.x,
+            bestSite.transform.y,
+            bot.ownerId
+          );
+
+          if (bestSite.kind === "CONCRETE_SLAB") {
+            const tx = bestSite.transform.x;
+            const ty = bestSite.transform.y;
+            const idx = ty * this.width + tx;
+            this.terrainGrid[idx] = TERRAIN_KIND.CONCRETE_SLAB;
+            this.terrainDamageGrid[idx] = 0;
+            if ((this.oreGrid[idx] ?? 0) > 0) {
+              this.oreGrid[idx] = 0;
+              this.oreUpdatesThisTick.set(idx, {
+                tileX: tx,
+                tileY: ty,
+                oreAmount: 0,
+              });
+            }
+            this.terrainUpdatesThisTick.set(idx, {
+              tileX: tx,
+              tileY: ty,
+              terrainKind: TERRAIN_KIND.CONCRETE_SLAB,
+            });
+            this.destroyEntity(bestSite.id);
+          }
+        }
+      } else if (nav.pathIndex >= nav.path.length) {
+        if (nav.waitTicks > 0) {
+          nav.waitTicks--;
+          continue;
+        }
+        const dock =
+          bestSite.kind === "CONCRETE_SLAB" &&
+          this.reservationGrid.isTilePassable(
+            bestSite.transform.x,
+            bestSite.transform.y,
+            bot.id,
+            false
+          )
+            ? { x: bestSite.transform.x, y: bestSite.transform.y }
+            : this.reservationGrid.findNearestFreeDockTile(
+                bestSite.transform.x,
+                bestSite.transform.y,
+                bestSite.building.footprintW,
+                bestSite.building.footprintH,
+                bot.transform.x,
+                bot.transform.y,
+                bot.id
+              );
+        if (dock) {
+          nav.path = this.pathfinder.findPath(
+            bot.transform.x,
+            bot.transform.y,
+            dock.x,
+            dock.y,
+            this.reservationGrid,
+            bot.id,
+            true
+          );
+          nav.pathIndex = 0;
+          nav.waitTicks = nav.path.length === 0 ? 6 : 0;
+          bot.stateLabel = nav.path.length > 0 ? "MOVING" : "IDLE";
+          bot.dirty = true;
+        } else {
+          nav.waitTicks = 6;
+        }
+      }
+    }
   }
 
   private stepHarvesters(): void {
@@ -1813,6 +2031,7 @@ export class RtsSimulation {
           if (
             ent.entityType === "UNIT" &&
             ent.kind !== "HARVESTER" &&
+            ent.kind !== "CONSTRUCTOR_BOT" &&
             ent.kind !== "MCV" &&
             ent.stateLabel === "IDLE" &&
             (!ent.combat || ent.combat.targetEntityId === null)
@@ -1949,6 +2168,7 @@ export class RtsSimulation {
     kind: BuildingKind
   ): { x: number; y: number } | null {
     const spec = BUILDINGS[kind];
+    const needsFoundation = requiresStoneOrConcreteFoundation(kind);
     for (const ent of this.entities.values()) {
       if (ent.ownerId === playerId && ent.kind === "CONSTRUCTION_YARD") {
         for (let dy = -7; dy <= 7; dy++) {
@@ -1956,11 +2176,25 @@ export class RtsSimulation {
             const tx = ent.transform.x + dx;
             const ty = ent.transform.y + dy;
             if (
-              this.reservationGrid.isFootprintBuildable(tx, ty, spec.footprintW, spec.footprintH) &&
-              this.isWithinBaseBuildRadius(playerId, tx, ty, spec.footprintW, spec.footprintH)
+              !this.reservationGrid.isFootprintBuildable(tx, ty, spec.footprintW, spec.footprintH) ||
+              !this.isWithinBaseBuildRadius(playerId, tx, ty, spec.footprintW, spec.footprintH)
             ) {
-              return { x: tx, y: ty };
+              continue;
             }
+            if (needsFoundation) {
+              let validFoundation = true;
+              for (let fy = 0; fy < spec.footprintH && validFoundation; fy++) {
+                for (let fx = 0; fx < spec.footprintW; fx++) {
+                  const idx = (ty + fy) * this.width + (tx + fx);
+                  if (!isFoundationTerrainKind(this.terrainGrid[idx] ?? 0)) {
+                    validFoundation = false;
+                    break;
+                  }
+                }
+              }
+              if (!validFoundation) continue;
+            }
+            return { x: tx, y: ty };
           }
         }
       }
@@ -2166,6 +2400,7 @@ export class RtsSimulation {
       cargoOre: ent.harvester ? ent.harvester.cargoOre : 0,
       spawnProtectionTicks: ent.spawnProtectionTicks,
       isRepairing: ent.building ? ent.building.isRepairing : false,
+      buildProgress: ent.building ? ent.building.buildProgress : 1,
       stateLabel: ent.stateLabel,
     };
   }

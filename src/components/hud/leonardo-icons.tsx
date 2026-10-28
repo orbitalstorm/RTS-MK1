@@ -323,12 +323,23 @@ export const ProductionItemVectorIcon = React.memo(function ProductionItemVector
           </>
         )}
 
+        {itemKind === "CONSTRUCTOR_BOT" && (
+          <>
+            <rect x="14" y="18" width="5" height="28" fill="#18181b" />
+            <rect x="45" y="18" width="5" height="28" fill="#18181b" />
+            <rect x="19" y="18" width="26" height="28" rx="4" fill={sColor} stroke={pColor} strokeWidth="1.8" />
+            <circle cx="32" cy="30" r="8" fill={`url(#${hullGradId})`} stroke="#0f172a" strokeWidth="1.5" />
+          </>
+        )}
+
         {itemKind === "HARVESTER" && (
           <>
-            <rect x="13" y="14" width="5" height="36" fill="#18181b" />
-            <rect x="46" y="14" width="5" height="36" fill="#18181b" />
-            <rect x="17" y="14" width="30" height="38" rx="4" fill={sColor} stroke={pColor} strokeWidth="1.8" />
-            <rect x="20" y="16" width="24" height="14" rx="2" fill={`url(#${hullGradId})`} />
+            <rect x="9" y="12" width="6" height="40" fill="#18181b" />
+            <rect x="49" y="12" width="6" height="40" fill="#18181b" />
+            <rect x="14" y="12" width="36" height="42" rx="4" fill={sColor} stroke={pColor} strokeWidth="2" />
+            <rect x="13" y="22" width="5" height="26" rx="2" fill="#475569" stroke="#cbd5e1" strokeWidth="1.2" />
+            <rect x="46" y="22" width="5" height="26" rx="2" fill="#475569" stroke="#cbd5e1" strokeWidth="1.2" />
+            <rect x="19" y="13" width="26" height="11" rx="2" fill={`url(#${hullGradId})`} />
           </>
         )}
 
@@ -524,12 +535,23 @@ export const ProductionItemVectorIcon = React.memo(function ProductionItemVector
           </>
         )}
 
+        {itemKind === "CONSTRUCTOR_BOT" && (
+          <>
+            <polyline points="22,22 20,11 26,8" fill="none" stroke="#eab308" strokeWidth="2.8" strokeLinecap="round" />
+            <polyline points="42,22 44,11 38,8" fill="none" stroke="#eab308" strokeWidth="2.8" strokeLinecap="round" />
+            <circle cx="26" cy="8" r="2.6" fill="#38bdf8" />
+            <circle cx="38" cy="8" r="2.6" fill="#38bdf8" />
+            <rect x="27" y="25" width="10" height="3" fill="#38bdf8" />
+          </>
+        )}
+
         {itemKind === "HARVESTER" && (
           <>
-            <polygon points="20,14 24,8 28,14" fill="#cbd5e1" />
-            <polygon points="36,14 40,8 44,14" fill="#cbd5e1" />
-            <rect x="22" y="32" width="20" height="14" fill="#10b981" stroke="#064e3b" strokeWidth="1.2" />
-            <circle cx="32" cy="11" r="3.5" fill="#22c55e" />
+            <rect x="17" y="7" width="30" height="5" rx="1" fill="#334155" stroke="#94a3b8" strokeWidth="1.2" />
+            <rect x="19" y="25" width="26" height="25" rx="2" fill="#064e3b" stroke={pColor} strokeWidth="1.4" />
+            <ellipse cx="32" cy="38" rx="10" ry="9" fill="#10b981" />
+            <ellipse cx="30" cy="36" rx="5.5" ry="5" fill="#6ee7b7" />
+            <circle cx="32" cy="9" r="3.5" fill="#22c55e" />
           </>
         )}
 

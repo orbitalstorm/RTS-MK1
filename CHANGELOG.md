@@ -2,6 +2,27 @@
 
 All notable changes to **RTS-MK1** (`https://rts-mk1.orbital8.cloud`) follow strict non-reusable `v1.x.y` versioning.
 
+## [v1.6.0] — 2026-10-28
+
+### Added & Changed
+- **Unified Continuous Wall Structures (`CONCRETE_WALL`, `SANDBAG_WALL`) & Selection-Only Wall Health Bars (`src/renderer/world-renderer.ts`)**:
+  - Replaced isolated 1×1 wall sprites with procedural neighbor-aware (`N`, `E`, `S`, `W`) continuous wall geometry (`drawConnectedWallEntity`): contiguous `CONCRETE_WALL` and `SANDBAG_WALL` segments merge seamlessly into a single uninterrupted fortification structure with continuous parapet armor plates, expansion joints, and interwoven sandbag courses.
+  - Hidden default floating health bars above `CONCRETE_WALL` and `SANDBAG_WALL` segments to keep perimeter fortifications visually clean; wall HP (`bar + hp/maxHp badge`) is now displayed exclusively when a wall segment is clicked/selected (`selectedIds.has(ent.id)`).
+- **Smooth Diagonal Transitions for Multi-Layer Terrain, Fog of War & Unexplored Shroud (`src/renderer/world-renderer.ts`)**:
+  - Upgraded `drawUnifiedOrganicTerrainCell` to use full half-tile (`r = s * 0.5`) quadratic corner curves plus diagonal inner-corner bevel wedges (`!sameNW`, `!sameNE`, `!sameSE`, `!sameSW`), eliminating the tile-aligned staircase effect between `Herbe`, `Terre`, `Pierre`, and `Dalle de Béton`.
+  - Replaced rectangular span-fill Fog of War and Unexplored Shroud overlays with `renderSmoothFogAndShroud`, drawing 45° diagonal corner chamfers along visibility and exploration boundaries to completely eliminate the pixelated staircase edge.
+- **Timed Construction of Floors & Walls by the New "Robot Constructeur" (`CONSTRUCTOR_BOT`) (`src/shared/constants/index.ts`, `src/shared/schemas/commands.ts`, `src/shared/schemas/deltas.ts`, `src/engine/ecs/types.ts`, `src/engine/simulation.ts`, `src/renderer/generator/leonardo-vector-art.ts`, `src/components/hud/leonardo-icons.tsx`, `src/components/hud/classic-sidebar-hud.tsx`)**:
+  - Added the `CONSTRUCTOR_BOT` ("Robot Constructeur", `220 cr`, `320 HP`, `buildTimeTicks: 30`, `prerequisites: ["CONSTRUCTION_YARD"]`) buildable directly from the Construction Yard (`Chantier de Construction`) in the `"Base"` (`BUILDING`) and `"Blindés"` (`VEHICLE`) tabs, with 1 initial `CONSTRUCTOR_BOT` deployed alongside each starting base.
+  - Floors (`CONCRETE_SLAB`, `16 ticks`), Sandbags (`SANDBAG_WALL`, `20 ticks`), and Concrete Walls (`CONCRETE_WALL`, `28 ticks`) are no longer built instantaneously: they require a living `CONSTRUCTOR_BOT` to place, spawn as a `"BUILDING"` construction site (`buildProgress < 1`) with scaffold/progress-bar and laser-welding VFX (`drawConstructionProgressOverlay`), and are progressively assembled on-site by the player's `CONSTRUCTOR_BOT` units (`stepConstructorBots`).
+- **Mandatory Stone or Concrete Foundations for Buildings (`requiresStoneOrConcreteFoundation`, `isFoundationTerrainKind`) (`src/shared/constants/index.ts`, `src/engine/simulation.ts`, `src/app/game/[lobbyId]/page.tsx`, `src/components/hud/classic-sidebar-hud.tsx`)**:
+  - Enforced that all structures (`POWER_PLANT`, `REFINERY`, `SILO`, `BARRACKS`, `WAR_FACTORY`, `RADAR_DOME`, `TECH_CENTER`, `GUARD_TOWER`, `SAM_SITE`, `OBELISK`) can **only** be constructed on Stone (`TERRAIN_KIND.STONE`) or Concrete Slab (`TERRAIN_KIND.CONCRETE_SLAB`) foundations, both on the authoritative server (`issuePlaceBuilding`, `findValidAiBuildSpot`) and in the client placement preview (`canPlaceBuildingOnGrid`).
+- **Imposing Heavy Harvester (`HARVESTER`) with Dump-Bed (`Benne`) & Dual Cisterns (`Citernes`) + Glowing Ore Nugget Trail (`src/renderer/generator/leonardo-vector-art.ts`, `src/components/hud/leonardo-icons.tsx`, `src/renderer/vfx-manager.ts`, `src/renderer/world-renderer.ts`)**:
+  - Redesigned `HARVESTER` with a `1.24×` heavy industrial chassis, a massive rear open-top dump-bed (`benne`) that visibly fills with glowing mineral ore according to `cargoOre`, twin pressurized side cisterns (`citernes`) with sight-glass gauges, and a wider 5-roller front rotary excavator drum.
+  - Added `maybeSpawnHarvesterOreTrail` and `renderOreNuggets` (`ORE_NUGGET_LIFETIME_MS = 5,500 ms`): loaded Harvesters periodically drop small luminescent ore nuggets along their tracks that pulse and smoothly fade out over time.
+- **Diverse Procedural Ore Morphologies with Active Luminescent Glow & Fill-Dependent Refinery/Silo Glow (`src/renderer/world-renderer.ts`)**:
+  - Replaced uniform ore markers with `drawActiveOreFormation`, rendering 4 deterministic random mineral morphologies per tile (crystalline prism clusters, erupting mineral veins, bubbling fissure pools, and asymmetric geode formations) with an active pulsing emerald radial glow scaled by ore density.
+  - Updated `drawBuildingLiveAnimation` so `REFINERY` and `SILO` emit a dynamic emerald/amber storage glow, sight-glass fill column, and smelter core luminescence directly proportional to the player's current storage fill ratio (`credits / maxStorage`).
+
 ## [v1.5.1] — 2026-10-28
 
 ### Fixed & Changed

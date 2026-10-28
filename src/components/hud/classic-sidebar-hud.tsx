@@ -24,6 +24,7 @@ import {
   BUILDING_LIST,
   FACTIONS,
   isRepeatableBuildingKind,
+  UNITS,
   UNIT_LIST,
   ZOOM_LEVELS,
   type BuildingKind,
@@ -405,13 +406,19 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
 
       {/* Production Icons Grid */}
       <div className="flex-1 p-2.5 lg:p-3 space-y-2">
-        {(activeTab === "BUILDING" || activeTab === "DEFENSE"
-          ? BUILDING_LIST.filter((b) => b.category === activeTab)
-          : UNIT_LIST.filter((u) => u.category === activeTab)
+        {(activeTab === "BUILDING"
+          ? [
+              UNITS.CONSTRUCTOR_BOT,
+              ...BUILDING_LIST.filter((b) => b.category === "BUILDING"),
+            ]
+          : activeTab === "DEFENSE"
+            ? BUILDING_LIST.filter((b) => b.category === "DEFENSE")
+            : UNIT_LIST.filter((u) => u.category === activeTab)
         ).map((item) => {
           const unlocked = item.prerequisites.every((req) => ownedBuildingKinds.has(req));
           const isBuildingThis = activeSlot.activeItem === item.kind;
           const canAfford = credits >= item.cost;
+          const isRepeatable = isRepeatableBuildingKind(item.kind as BuildingKind);
 
           return (
             <div
@@ -469,15 +476,14 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
                   }
                   disabled={
                     !unlocked ||
-                    (!isRepeatableBuildingKind(item.kind as BuildingKind) &&
-                      activeSlot.activeItem !== null) ||
+                    (!isRepeatable && activeSlot.activeItem !== null) ||
                     (!canAfford && placementBuilding?.kind !== item.kind)
                   }
                   onClick={() => {
                     globalAudioMixer.playUiClick();
                     if (
                       (activeTab === "BUILDING" || activeTab === "DEFENSE") &&
-                      isRepeatableBuildingKind(item.kind as BuildingKind)
+                      isRepeatable
                     ) {
                       if (placementBuilding?.kind === item.kind) {
                         setPlacementBuilding(null);
@@ -500,7 +506,7 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
                     ? "Pose Continue Active"
                     : isBuildingThis
                       ? "En cours"
-                      : isRepeatableBuildingKind(item.kind as BuildingKind)
+                      : isRepeatable
                         ? "Poser en Continu"
                         : "Produire"}
                 </Button>

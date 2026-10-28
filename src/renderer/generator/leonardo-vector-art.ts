@@ -1182,67 +1182,151 @@ export function drawLeonardoUnitBody(
     return;
   }
 
-  if (kind === "HARVESTER") {
-    // Heavy Ore Harvester: 4 articulated tracks, front mechanical claw scoop + green crystals, glass ore bin
-    ctx.fillStyle = "rgba(0, 0, 0, 0.52)";
-    traceChamferedRect(ctx, -18 * u, -22 * u, 38 * u, 46 * u, 5 * u);
+  if (kind === "CONSTRUCTOR_BOT") {
+    // Robotic Construction Unit: compact tracked chassis, hazard chevrons, dual articulated welding arms + cyan plasma arc
+    ctx.fillStyle = "rgba(0, 0, 0, 0.48)";
+    traceChamferedRect(ctx, -13 * u, -15 * u, 28 * u, 32 * u, 4 * u);
     ctx.fill();
 
-    // 4 Articulated Tracks
-    drawDetailedTrack(ctx, -20 * u, -20 * u, 5 * u, 16 * u, 5);
-    drawDetailedTrack(ctx, 15 * u, -20 * u, 5 * u, 16 * u, 5);
-    drawDetailedTrack(ctx, -20 * u, 4 * u, 5 * u, 16 * u, 5);
-    drawDetailedTrack(ctx, 15 * u, 4 * u, 5 * u, 16 * u, 5);
+    // Twin Heavy Servo Tracks
+    drawDetailedTrack(ctx, -15 * u, -13 * u, 4.5 * u, 26 * u, 7);
+    drawDetailedTrack(ctx, 10.5 * u, -13 * u, 4.5 * u, 26 * u, 7);
 
-    // Front Mechanical Harvesting Scoop / Drill Claws (-Y)
-    ctx.fillStyle = "#475569";
+    // Articulated Front Robotic Welding & Paving Arms (-Y)
+    ctx.strokeStyle = "#eab308";
+    ctx.lineWidth = 2.8 * u;
     ctx.beginPath();
-    ctx.moveTo(-13 * u, -19 * u);
-    ctx.lineTo(-9 * u, -27 * u);
-    ctx.lineTo(-5 * u, -21 * u);
-    ctx.closePath();
+    ctx.moveTo(-8 * u, -10 * u);
+    ctx.lineTo(-10 * u, -20 * u);
+    ctx.lineTo(-5 * u, -24 * u);
+    ctx.moveTo(8 * u, -10 * u);
+    ctx.lineTo(10 * u, -20 * u);
+    ctx.lineTo(5 * u, -24 * u);
+    ctx.stroke();
+
+    // Plasma Welding Torches at Arm Tips
+    ctx.fillStyle = "#38bdf8";
+    ctx.beginPath();
+    ctx.arc(-5 * u, -24 * u, 2.4 * u, 0, Math.PI * 2);
+    ctx.arc(5 * u, -24 * u, 2.4 * u, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.beginPath();
-    ctx.moveTo(13 * u, -19 * u);
-    ctx.lineTo(9 * u, -27 * u);
-    ctx.lineTo(5 * u, -21 * u);
-    ctx.closePath();
-    ctx.fill();
-
-    // Glowing Tiberium/Spice crystals in front jaw
-    ctx.fillStyle = "#22c55e";
-    ctx.beginPath();
-    ctx.arc(0, -23 * u, 4 * u, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "#86efac";
-    ctx.beginPath();
-    ctx.arc(-1 * u, -24 * u, 2 * u, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Main Armored Hull
-    traceChamferedRect(ctx, -16 * u, -20 * u, 32 * u, 42 * u, 5 * u);
+    // Main Robotic Hull
+    traceChamferedRect(ctx, -11 * u, -12 * u, 22 * u, 25 * u, 4 * u);
     ctx.fillStyle = fSpec.secondaryColor;
     ctx.fill();
     ctx.strokeStyle = "#0f172a";
     ctx.lineWidth = 1.6 * u;
     ctx.stroke();
 
-    // Sloped Front Cab
-    traceChamferedRect(ctx, -13 * u, -18 * u, 26 * u, 14 * u, 4 * u);
+    // Industrial Hazard Chevrons on Rear Deck
+    drawHazardStripes(ctx, -8.5 * u, 4 * u, 17 * u, 6.5 * u, 3 * u);
+
+    // Central Rotating Servo Dome & Optical Sensor
+    ctx.beginPath();
+    ctx.arc(0, -2 * u, 7.5 * u, 0, Math.PI * 2);
     ctx.fillStyle = fSpec.primaryColor;
     ctx.fill();
+    ctx.strokeStyle = "#0f172a";
+    ctx.lineWidth = 1.5 * u;
+    ctx.stroke();
 
-    // Reinforced Glazed Ore Bin showing green Tiberium inside
-    ctx.fillStyle = "#091526";
-    ctx.fillRect(-11 * u, -2 * u, 22 * u, 16 * u);
+    ctx.fillStyle = "#38bdf8";
+    ctx.fillRect(-4.5 * u, -6.5 * u, 9 * u, 2.6 * u);
+    return;
+  }
+
+  if (kind === "HARVESTER") {
+    // Super-Heavy Ore Harvester: massive articulated dump bed (benne), twin side cisterns, front rotary crusher drum
+    ctx.fillStyle = "rgba(0, 0, 0, 0.58)";
+    traceChamferedRect(ctx, -23 * u, -26 * u, 48 * u, 54 * u, 6 * u);
+    ctx.fill();
+
+    // 4 Wide Articulated Heavy Tracks
+    drawDetailedTrack(ctx, -25 * u, -22 * u, 6 * u, 19 * u, 6);
+    drawDetailedTrack(ctx, 19 * u, -22 * u, 6 * u, 19 * u, 6);
+    drawDetailedTrack(ctx, -25 * u, 3 * u, 6 * u, 21 * u, 6);
+    drawDetailedTrack(ctx, 19 * u, 3 * u, 6 * u, 21 * u, 6);
+
+    // Heavy Front Rotary Crusher Drum & Mandibles (-Y)
+    ctx.fillStyle = "#334155";
+    ctx.fillRect(-16 * u, -28 * u, 32 * u, 6 * u);
+    drawHazardStripes(ctx, -15 * u, -24 * u, 30 * u, 3.5 * u, 3.5 * u);
+
+    ctx.fillStyle = "#64748b";
+    for (let tx = -14 * u; tx <= 14 * u; tx += 5.5 * u) {
+      ctx.beginPath();
+      ctx.moveTo(tx - 2 * u, -26 * u);
+      ctx.lineTo(tx, -31 * u);
+      ctx.lineTo(tx + 2 * u, -26 * u);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // Glowing active Tiberium/Spice crystals in front intake
     ctx.fillStyle = "#10b981";
-    ctx.fillRect(-9 * u, 0, 18 * u, 12 * u);
-    ctx.fillStyle = "#86efac";
-    ctx.fillRect(-5 * u, 2 * u, 10 * u, 6 * u);
+    ctx.beginPath();
+    ctx.arc(-5 * u, -27 * u, 3.2 * u, 0, Math.PI * 2);
+    ctx.arc(5 * u, -27 * u, 3.2 * u, 0, Math.PI * 2);
+    ctx.arc(0, -28 * u, 4 * u, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#a7f3d0";
+    ctx.beginPath();
+    ctx.arc(0, -28.5 * u, 2 * u, 0, Math.PI * 2);
+    ctx.fill();
 
-    // Rear Radiator Grille
-    drawVentLouvers(ctx, -9 * u, 16 * u, 18 * u, 4 * u, 3);
+    // Main Heavy Chassis Frame
+    traceChamferedRect(ctx, -19 * u, -22 * u, 38 * u, 48 * u, 5 * u);
+    ctx.fillStyle = fSpec.secondaryColor;
+    ctx.fill();
+    ctx.strokeStyle = "#0f172a";
+    ctx.lineWidth = 1.8 * u;
+    ctx.stroke();
+
+    // Twin Pressurized Cylindrical Side Cisterns (Left & Right Flanks)
+    for (const cxOff of [-15.5 * u, 15.5 * u]) {
+      traceChamferedRect(ctx, cxOff - 3.2 * u, -8 * u, 6.4 * u, 28 * u, 2.5 * u);
+      ctx.fillStyle = "#475569";
+      ctx.fill();
+      ctx.strokeStyle = "#cbd5e1";
+      ctx.lineWidth = 1.2 * u;
+      ctx.stroke();
+      // Luminescent green ore level sight-glass on each cistern
+      ctx.fillStyle = "#22c55e";
+      ctx.fillRect(cxOff - 1.2 * u, -4 * u, 2.4 * u, 20 * u);
+    }
+
+    // Sloped Armored Forward Command Cab
+    traceChamferedRect(ctx, -14 * u, -20 * u, 28 * u, 12 * u, 4 * u);
+    ctx.fillStyle = fSpec.primaryColor;
+    ctx.fill();
+    ctx.fillStyle = "#38bdf8";
+    ctx.fillRect(-10 * u, -18 * u, 20 * u, 3.2 * u);
+
+    // Massive Rear Dump-Bed / Benne Industrielle (-6*u to +24*u)
+    traceChamferedRect(ctx, -13 * u, -6 * u, 26 * u, 29 * u, 3.5 * u);
+    ctx.fillStyle = "#091526";
+    ctx.fill();
+    ctx.strokeStyle = fSpec.primaryColor;
+    ctx.lineWidth = 2 * u;
+    ctx.stroke();
+
+    // Structural Dump-Bed Ribs & Glowing Ore Mound Inside Benne
+    ctx.fillStyle = "#059669";
+    ctx.fillRect(-10.5 * u, -3.5 * u, 21 * u, 24 * u);
+    ctx.fillStyle = "#10b981";
+    ctx.beginPath();
+    ctx.ellipse(0, 8 * u, 9.5 * u, 10.5 * u, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#6ee7b7";
+    ctx.beginPath();
+    ctx.ellipse(-2 * u, 5 * u, 5.5 * u, 6 * u, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Transverse Hydraulic Cross-Bars over the Dump Bed
+    ctx.fillStyle = "#64748b";
+    ctx.fillRect(-12 * u, 2 * u, 24 * u, 2.2 * u);
+    ctx.fillRect(-12 * u, 12 * u, 24 * u, 2.2 * u);
     return;
   }
 

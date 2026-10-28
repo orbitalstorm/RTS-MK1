@@ -32,9 +32,11 @@ import {
   BUILDINGS,
   computeEdgeScrollVelocity,
   FACTIONS,
+  isFoundationTerrainKind,
   isRepeatableBuildingKind,
   MAP_HEIGHT_TILES,
   MAP_WIDTH_TILES,
+  requiresStoneOrConcreteFoundation,
   resolveTouchTapAction,
   TILE_PIXEL_SIZE,
   TOUCH_TAP_MAX_DISTANCE_PX,
@@ -82,26 +84,45 @@ function canPlaceBuildingOnGrid(
     return false;
   }
 
+  const isRepeatable = isRepeatableBuildingKind(buildingKind);
+  const needsFoundation = requiresStoneOrConcreteFoundation(buildingKind);
+
+  if (isRepeatable) {
+    let hasConstructorBot = false;
+    for (const ent of st.currEntities.values()) {
+      if (
+        ent.ownerId === st.playerId &&
+        ent.entityType === "UNIT" &&
+        ent.kind === "CONSTRUCTOR_BOT"
+      ) {
+        hasConstructorBot = true;
+        break;
+      }
+    }
+    if (!hasConstructorBot) {
+      return false;
+    }
+  }
+
   for (let dy = 0; dy < spec.footprintH; dy++) {
     for (let dx = 0; dx < spec.footprintW; dx++) {
       const tx = tileX + dx;
       const ty = tileY + dy;
       const idx = ty * MAP_WIDTH_TILES + tx;
-      if (st.terrainGrid[idx] === 2) {
+      const cellTerrain = st.terrainGrid[idx] ?? 0;
+      if (cellTerrain === 2) {
         return false;
       }
-      if (buildingKind === "CONCRETE_SLAB" && st.terrainGrid[idx] === 5) {
+      if (buildingKind === "CONCRETE_SLAB" && cellTerrain === 5) {
+        return false;
+      }
+      if (needsFoundation && !isFoundationTerrainKind(cellTerrain)) {
         return false;
       }
       if (pendingPlacements) {
         const pending = pendingPlacements.get(`${tx},${ty}`);
         if (pending && nowMs < pending.expiresAtMs) {
-          if (buildingKind === "CONCRETE_SLAB" && pending.kind === "CONCRETE_SLAB") {
-            return false;
-          }
-          if (buildingKind !== "CONCRETE_SLAB" && pending.kind !== "CONCRETE_SLAB") {
-            return false;
-          }
+          return false;
         }
       }
     }
@@ -116,7 +137,7 @@ function canPlaceBuildingOnGrid(
       const bSpec = BUILDINGS[ent.kind as BuildingKind];
       const overlapsX = tileX < ent.x + bSpec.footprintW && tileX + spec.footprintW > ent.x;
       const overlapsY = tileY < ent.y + bSpec.footprintH && tileY + spec.footprintH > ent.y;
-      if (buildingKind !== "CONCRETE_SLAB" && overlapsX && overlapsY) {
+      if (overlapsX && overlapsY) {
         return false;
       }
       if (ent.ownerId === st.playerId) {
@@ -441,6 +462,7 @@ export default function GameMatchPage() {
             oreGrid: st.oreGrid,
             prevEntities: st.prevEntities,
             currEntities: st.currEntities,
+            playersEconomy: st.playersEconomy,
             interpolationAlpha: alpha,
             selectedIds: st.selectedEntityIds,
             exploredCells: explored,

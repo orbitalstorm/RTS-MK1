@@ -21,8 +21,9 @@ export const EntityStateSchema = z.object({
   cargoOre: z.number().min(0).default(0),
   spawnProtectionTicks: z.number().int().min(0).default(0),
   isRepairing: z.boolean().default(false),
+  buildProgress: z.number().min(0).max(1).default(1),
   stateLabel: z
-    .enum(["IDLE", "MOVING", "HARVESTING", "RETURNING", "ALERT", "ATTACKING"])
+    .enum(["IDLE", "MOVING", "HARVESTING", "RETURNING", "ALERT", "ATTACKING", "BUILDING"])
     .default("IDLE"),
 });
 

@@ -15,6 +15,7 @@ import {
   BattlefieldVfxManager,
   computeCraterFadeAlpha,
   CRATER_LIFETIME_MS,
+  ORE_NUGGET_LIFETIME_MS,
 } from "../src/renderer/vfx-manager";
 import {
   AI_ATTACK_GRACE_PERIOD_TICKS,
@@ -28,8 +29,11 @@ import {
   degradeTerrainLayer,
   EDGE_SCROLL_MARGIN_PX,
   EDGE_SCROLL_MAX_SPEED_PX,
+  getTimedConstructionTicks,
   interpolateAngleIndex16,
   interpolateEntityPose,
+  isFoundationTerrainKind,
+  requiresStoneOrConcreteFoundation,
   resolveTouchTapAction,
   SPRITE_ATLAS_SCALE,
   TERRAIN_KIND,
@@ -280,7 +284,7 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
   });
 
   it("v1.2.0 — supports Game Juice camera shake, shortest-arc 16-angle interpolation, and 2x Hi-DPI sprite scale", () => {
-    expect(APP_VERSION).toBe("1.5.1");
+    expect(APP_VERSION).toBe("1.6.0");
     expect(SPRITE_ATLAS_SCALE).toBe(2);
 
     // Zero trauma produces zero offset
@@ -557,15 +561,18 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
     sim.issueAttackCommand("p2", [enemyTank.id], freshUnit.id);
     expect(enemyTank.combat?.targetEntityId).toBe(freshUnit.id);
 
-    // 5. Concrete Slab (Dalle de Béton) production and terrain paving
+    // 5. Concrete Slab (Dalle de Béton) production and terrain paving (assembled by Constructor Bot)
     expect(BUILDINGS.CONCRETE_SLAB).toBeDefined();
     expect(BUILDINGS.CONCRETE_SLAB.category).toBe("BUILDING");
     expect(sim.issueStartProduction("p1", "BUILDING", "CONCRETE_SLAB")).toBe(true);
-    for (let t = 0; t < 12; t++) {
+    for (let t = 0; t < BUILDINGS.CONCRETE_SLAB.buildTimeTicks; t++) {
       sim.stepTick();
     }
     expect(sim.getPlayerState("p1")?.queues.BUILDING.readyToPlace).toBe(true);
     expect(sim.issuePlaceBuilding("p1", "BUILDING", "CONCRETE_SLAB", 9, 5)).toBe(true);
+    for (let t = 0; t < 40; t++) {
+      sim.stepTick();
+    }
     expect(sim.terrainGrid[5 * 48 + 9]).toBe(TERRAIN_KIND.CONCRETE_SLAB);
 
     // 6. 2-Minute AI Attack Grace Period (2400 ticks = 120s)
@@ -722,6 +729,9 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
     expect(sim.issuePlaceBuilding("p1", "BUILDING", "CONCRETE_SLAB", 8, 5)).toBe(true);
     expect(sim.issuePlaceBuilding("p1", "BUILDING", "CONCRETE_SLAB", 9, 5)).toBe(true);
     expect(sim.issuePlaceBuilding("p1", "BUILDING", "CONCRETE_SLAB", 10, 5)).toBe(true);
+    for (let t = 0; t < 90; t++) {
+      sim.stepTick();
+    }
     expect(sim.terrainGrid[5 * 48 + 8]).toBe(TERRAIN_KIND.CONCRETE_SLAB);
     expect(sim.terrainGrid[5 * 48 + 9]).toBe(TERRAIN_KIND.CONCRETE_SLAB);
     expect(sim.terrainGrid[5 * 48 + 10]).toBe(TERRAIN_KIND.CONCRETE_SLAB);
@@ -799,6 +809,11 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
       4 * BUILDINGS.CONCRETE_SLAB.cost;
     expect(sim.getPlayerState("p1")!.credits).toBe(initialCredits - expectedSpent);
 
+    // Allow Constructor Bot to finish assembling the walls, sandbags, and concrete slabs
+    for (let t = 0; t < 320; t++) {
+      sim.stepTick();
+    }
+
     for (let dx = 0; dx < 4; dx++) {
       expect(sim.terrainGrid[13 * 48 + (8 + dx)]).toBe(TERRAIN_KIND.CONCRETE_SLAB);
     }
@@ -827,5 +842,132 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
     }
     // Dirt remains Dirt permanently (never reverts to Grass)
     expect(sim.terrainGrid[impactTileIdx]).toBe(TERRAIN_KIND.DIRT);
+  });
+
+  it("v1.6.0 — enforces Constructor Bot timed assembly for Concrete Slabs/Walls/Sandbags, Stone/Concrete building foundations, and Harvester glowing ore nugget trail", () => {
+    const sim = new RtsSimulation("test_v160_constructor_and_foundations", [
+      { playerId: "p1", commanderName: "Alpha", faction: "GDI", isAi: false },
+      { playerId: "p2", commanderName: "Beta", faction: "NOD", isAi: false },
+    ]);
+
+    // 1. Verify Constructor Bot (Robot Constructeur) exists in initial base & can be built at Construction Yard
+    expect(UNITS.CONSTRUCTOR_BOT).toBeDefined();
+    expect(UNITS.CONSTRUCTOR_BOT.prerequisites).toEqual(["CONSTRUCTION_YARD"]);
+    const initialBots = sim
+      .getAllEntities()
+      .filter((e) => e.ownerId === "p1" && e.entityType === "UNIT" && e.kind === "CONSTRUCTOR_BOT");
+    expect(initialBots.length).toBe(1);
+
+    // Produce a 2nd Constructor Bot directly from the Construction Yard ("BUILDING" queue)
+    expect(sim.issueStartProduction("p1", "BUILDING", "CONSTRUCTOR_BOT")).toBe(true);
+    for (let t = 0; t < UNITS.CONSTRUCTOR_BOT.buildTimeTicks + 2; t++) {
+      sim.stepTick();
+    }
+    const botsAfterProd = sim
+      .getAllEntities()
+      .filter((e) => e.ownerId === "p1" && e.entityType === "UNIT" && e.kind === "CONSTRUCTOR_BOT");
+    expect(botsAfterProd.length).toBe(2);
+
+    // 2. Timed construction of CONCRETE_SLAB, SANDBAG_WALL, and CONCRETE_WALL by Constructor Bot
+    expect(getTimedConstructionTicks("CONCRETE_SLAB")).toBeGreaterThan(0);
+    expect(getTimedConstructionTicks("SANDBAG_WALL")).toBeGreaterThan(0);
+    expect(getTimedConstructionTicks("CONCRETE_WALL")).toBeGreaterThan(0);
+
+    // Place a Concrete Wall at (10, 8) and a Concrete Slab at (10, 9): they are NOT built instantaneously
+    const slabIdx = 9 * 48 + 10;
+    sim.terrainGrid[slabIdx] = TERRAIN_KIND.DIRT;
+    expect(sim.issuePlaceBuilding("p1", "DEFENSE", "CONCRETE_WALL", 10, 8)).toBe(true);
+    expect(sim.issuePlaceBuilding("p1", "BUILDING", "CONCRETE_SLAB", 10, 9)).toBe(true);
+
+    const wallSite = sim
+      .getAllEntities()
+      .find((e) => e.ownerId === "p1" && e.kind === "CONCRETE_WALL" && e.transform.x === 10 && e.transform.y === 8)!;
+    const slabSite = sim
+      .getAllEntities()
+      .find((e) => e.ownerId === "p1" && e.kind === "CONCRETE_SLAB" && e.transform.x === 10 && e.transform.y === 9)!;
+    expect(wallSite).toBeDefined();
+    expect(slabSite).toBeDefined();
+    expect(wallSite.building!.buildProgress).toBeLessThan(1);
+    expect(slabSite.building!.buildProgress).toBeLessThan(1);
+    expect(sim.terrainGrid[slabIdx]).toBe(TERRAIN_KIND.DIRT);
+
+    // Step ticks so Constructor Bots travel to the sites and complete assembly
+    for (let t = 0; t < 45; t++) {
+      sim.stepTick();
+    }
+    expect(sim.getEntity(wallSite.id)?.building?.buildProgress).toBe(1);
+    expect(sim.getEntity(wallSite.id)?.health.hp).toBe(wallSite.health.maxHp);
+    expect(sim.terrainGrid[slabIdx]).toBe(TERRAIN_KIND.CONCRETE_SLAB);
+
+    // 3. Buildings can ONLY be constructed on Stone (TERRAIN_KIND.STONE) or Concrete (TERRAIN_KIND.CONCRETE_SLAB) foundations
+    expect(requiresStoneOrConcreteFoundation("POWER_PLANT")).toBe(true);
+    expect(requiresStoneOrConcreteFoundation("BARRACKS")).toBe(true);
+    expect(requiresStoneOrConcreteFoundation("GUARD_TOWER")).toBe(true);
+    expect(requiresStoneOrConcreteFoundation("CONCRETE_SLAB")).toBe(false);
+    expect(requiresStoneOrConcreteFoundation("CONCRETE_WALL")).toBe(false);
+    expect(requiresStoneOrConcreteFoundation("SANDBAG_WALL")).toBe(false);
+    expect(isFoundationTerrainKind(TERRAIN_KIND.STONE)).toBe(true);
+    expect(isFoundationTerrainKind(TERRAIN_KIND.CONCRETE_SLAB)).toBe(true);
+    expect(isFoundationTerrainKind(TERRAIN_KIND.GRASS)).toBe(false);
+    expect(isFoundationTerrainKind(TERRAIN_KIND.DIRT)).toBe(false);
+
+    // Queue a Power Plant
+    expect(sim.issueStartProduction("p1", "BUILDING", "POWER_PLANT")).toBe(true);
+    for (let t = 0; t < BUILDINGS.POWER_PLANT.buildTimeTicks + 2; t++) {
+      sim.stepTick();
+    }
+    expect(sim.getPlayerState("p1")?.queues.BUILDING.readyToPlace).toBe(true);
+
+    // Set footprint (11..12, 10..11) to GRASS / DIRT -> placement MUST be rejected
+    for (let dy = 0; dy < 2; dy++) {
+      for (let dx = 0; dx < 2; dx++) {
+        sim.terrainGrid[(10 + dy) * 48 + (11 + dx)] = dy === 0 ? TERRAIN_KIND.GRASS : TERRAIN_KIND.DIRT;
+      }
+    }
+    expect(sim.issuePlaceBuilding("p1", "BUILDING", "POWER_PLANT", 11, 10)).toBe(false);
+
+    // Pave (11..12, 10..11) with Concrete Slabs and let Constructor Bots complete them
+    for (let dy = 0; dy < 2; dy++) {
+      for (let dx = 0; dx < 2; dx++) {
+        expect(sim.issuePlaceBuilding("p1", "BUILDING", "CONCRETE_SLAB", 11 + dx, 10 + dy)).toBe(true);
+      }
+    }
+    for (let t = 0; t < 80; t++) {
+      sim.stepTick();
+    }
+    // Place the ready Power Plant on the newly paved Concrete Slab foundation -> MUST succeed
+    expect(sim.getPlayerState("p1")?.queues.BUILDING.readyToPlace).toBe(true);
+    expect(sim.issuePlaceBuilding("p1", "BUILDING", "POWER_PLANT", 11, 10)).toBe(true);
+
+    // 4. Without a living Constructor Bot, Concrete Slabs and Walls cannot be placed
+    const p2Tank = sim.createUnitEntity("p2", "NOD", "MAMMOTH_TANK", 8, 7);
+    p2Tank.spawnProtectionTicks = 0;
+    for (const bot of sim
+      .getAllEntities()
+      .filter((e) => e.ownerId === "p1" && e.kind === "CONSTRUCTOR_BOT")) {
+      bot.spawnProtectionTicks = 0;
+      bot.transform.x = 8;
+      bot.transform.y = 8;
+      bot.health.hp = 1;
+      if (p2Tank.combat) {
+        p2Tank.combat.cooldownRemaining = 0;
+      }
+      sim.issueAttackCommand("p2", [p2Tank.id], bot.id);
+      sim.stepTick();
+    }
+    expect(sim.hasLivingConstructorBot("p1")).toBe(false);
+    expect(
+      sim.getAllEntities().filter((e) => e.ownerId === "p1" && e.kind === "CONSTRUCTOR_BOT").length
+    ).toBe(0);
+    expect(sim.issuePlaceBuilding("p1", "DEFENSE", "CONCRETE_WALL", 10, 12)).toBe(false);
+    expect(sim.issuePlaceBuilding("p1", "BUILDING", "CONCRETE_SLAB", 10, 13)).toBe(false);
+
+    // 5. Harvester glowing ore nugget trail spawns and disappears over time
+    const vfx = new BattlefieldVfxManager();
+    vfx.maybeSpawnHarvesterOreTrail("harv_1", 12, 12, 4, 350, true, 1000);
+    // Moving at least 0.34 tiles spawns a glowing nugget behind the harvester
+    vfx.maybeSpawnHarvesterOreTrail("harv_1", 12.6, 12, 4, 350, true, 1300);
+    expect(vfx.getActiveCounts().oreNuggets).toBe(1);
+    expect(ORE_NUGGET_LIFETIME_MS).toBeGreaterThan(2000);
   });
 });

@@ -2,6 +2,7 @@ import {
   BUILDINGS,
   computeTerrainNeighborMask,
   FACTIONS,
+  HARVESTER_MAX_LOAD,
   MAP_HEIGHT_TILES,
   MAP_WIDTH_TILES,
   normalizeBaseTerrainKind,
@@ -14,7 +15,11 @@ import {
   type FactionId,
   type UnitKind,
 } from "../shared/constants";
-import type { EntityState, ProjectileVisual } from "../shared/schemas/deltas";
+import type {
+  EntityState,
+  PlayerEconomyDelta,
+  ProjectileVisual,
+} from "../shared/schemas/deltas";
 import type { TacticalCamera } from "./camera";
 import type { ProceduralSpriteAtlas } from "./generator/atlas-generator";
 import type { BattlefieldVfxManager } from "./vfx-manager";
@@ -28,6 +33,7 @@ export interface WorldRenderInput {
   oreGrid: readonly number[];
   prevEntities: ReadonlyMap<string, EntityState>;
   currEntities: ReadonlyMap<string, EntityState>;
+  playersEconomy?: ReadonlyMap<string, PlayerEconomyDelta>;
   interpolationAlpha: number; // 0.0 .. 1.0 between tick N-1 and tick N
   selectedIds: ReadonlySet<string>;
   exploredCells: ReadonlySet<number>;
@@ -76,38 +82,47 @@ const STRATUM_PALETTES: Record<number, StratumPalette> = {
     fill: "#463525",
     lipShadow: "#281c12",
     lipHighlight: "#614a35",
-    cornerRadiusRatio: 0.36,
+    cornerRadiusRatio: 0.5,
     thicknessPx: 2.4,
   },
   [TERRAIN_KIND.STONE]: {
     fill: "#333c48",
     lipShadow: "#1d232b",
     lipHighlight: "#4b5869",
-    cornerRadiusRatio: 0.32,
+    cornerRadiusRatio: 0.5,
     thicknessPx: 1.8,
   },
   [TERRAIN_KIND.CLIFF]: {
     fill: "#1a212b",
     lipShadow: "#090c12",
     lipHighlight: "#64748b",
-    cornerRadiusRatio: 0.3,
+    cornerRadiusRatio: 0.48,
     thicknessPx: 3.5,
   },
   [TERRAIN_KIND.GRASS]: {
     fill: "#2f4f2d",
     lipShadow: "#1b301a",
     lipHighlight: "#467342",
-    cornerRadiusRatio: 0.38,
+    cornerRadiusRatio: 0.5,
     thicknessPx: 3.0,
   },
   [TERRAIN_KIND.CONCRETE_SLAB]: {
     fill: "#525e6e",
     lipShadow: "#28303d",
     lipHighlight: "#8292a8",
-    cornerRadiusRatio: 0.18,
+    cornerRadiusRatio: 0.34,
     thicknessPx: 2.2,
   },
 };
+
+function getTerrainVisualPriority(kind: number): number {
+  const norm = normalizeBaseTerrainKind(kind);
+  if (norm === TERRAIN_KIND.CLIFF) return 5;
+  if (norm === TERRAIN_KIND.CONCRETE_SLAB) return 4;
+  if (norm === TERRAIN_KIND.GRASS) return 3;
+  if (norm === TERRAIN_KIND.DIRT) return 2;
+  return 1; // STONE
+}
 
 function getStratumPalette(kind: number): StratumPalette {
   const norm = normalizeBaseTerrainKind(kind);
@@ -361,43 +376,81 @@ function drawUnifiedOrganicTerrainCell(
     ctx.stroke();
   }
 
-  // Concave inner corner fillets so interior bends of a zone are also smoothly rounded
-  const innerR = Math.max(4, Math.round(r * 0.45));
-  if (mask.concaveTL) {
-    ctx.fillStyle = getStratumPalette(neighborAt(tx - 1, ty - 1)).fill;
+  // Concave inner corner fillets + diagonal inter-layer bridges so layer transitions are diagonal without staircase steps
+  const nKind = neighborAt(tx, ty - 1);
+  const eKind = neighborAt(tx + 1, ty);
+  const sKind = neighborAt(tx, ty + 1);
+  const wKind = neighborAt(tx - 1, ty);
+  const centerPriority = getTerrainVisualPriority(mask.centerKind);
+
+  // Diagonal bridges when two adjacent cardinal neighbors belong to a higher stratum (eliminates 90° staircase)
+  if (nKind === wKind && nKind !== mask.centerKind && getTerrainVisualPriority(nKind) > centerPriority) {
+    const bridgePal = getStratumPalette(nKind);
+    const br = Math.round(s * bridgePal.cornerRadiusRatio);
+    ctx.fillStyle = bridgePal.fill;
     ctx.beginPath();
     ctx.moveTo(px, py);
-    ctx.lineTo(px + innerR, py);
-    ctx.quadraticCurveTo(px, py, px, py + innerR);
+    ctx.lineTo(px + br, py);
+    ctx.quadraticCurveTo(px + br * 0.32, py + br * 0.32, px, py + br);
     ctx.closePath();
     ctx.fill();
+    ctx.strokeStyle = bridgePal.lipShadow;
+    ctx.lineWidth = bridgePal.thicknessPx;
+    ctx.beginPath();
+    ctx.moveTo(px + br, py);
+    ctx.quadraticCurveTo(px + br * 0.32, py + br * 0.32, px, py + br);
+    ctx.stroke();
   }
-  if (mask.concaveTR) {
-    ctx.fillStyle = getStratumPalette(neighborAt(tx + 1, ty - 1)).fill;
+  if (nKind === eKind && nKind !== mask.centerKind && getTerrainVisualPriority(nKind) > centerPriority) {
+    const bridgePal = getStratumPalette(nKind);
+    const br = Math.round(s * bridgePal.cornerRadiusRatio);
+    ctx.fillStyle = bridgePal.fill;
     ctx.beginPath();
     ctx.moveTo(px + s, py);
-    ctx.lineTo(px + s - innerR, py);
-    ctx.quadraticCurveTo(px + s, py, px + s, py + innerR);
+    ctx.lineTo(px + s - br, py);
+    ctx.quadraticCurveTo(px + s - br * 0.32, py + br * 0.32, px + s, py + br);
     ctx.closePath();
     ctx.fill();
+    ctx.strokeStyle = bridgePal.lipShadow;
+    ctx.lineWidth = bridgePal.thicknessPx;
+    ctx.beginPath();
+    ctx.moveTo(px + s - br, py);
+    ctx.quadraticCurveTo(px + s - br * 0.32, py + br * 0.32, px + s, py + br);
+    ctx.stroke();
   }
-  if (mask.concaveBR) {
-    ctx.fillStyle = getStratumPalette(neighborAt(tx + 1, ty + 1)).fill;
+  if (sKind === eKind && sKind !== mask.centerKind && getTerrainVisualPriority(sKind) > centerPriority) {
+    const bridgePal = getStratumPalette(sKind);
+    const br = Math.round(s * bridgePal.cornerRadiusRatio);
+    ctx.fillStyle = bridgePal.fill;
     ctx.beginPath();
     ctx.moveTo(px + s, py + s);
-    ctx.lineTo(px + s - innerR, py + s);
-    ctx.quadraticCurveTo(px + s, py + s, px + s, py + s - innerR);
+    ctx.lineTo(px + s - br, py + s);
+    ctx.quadraticCurveTo(px + s - br * 0.32, py + s - br * 0.32, px + s, py + s - br);
     ctx.closePath();
     ctx.fill();
+    ctx.strokeStyle = bridgePal.lipHighlight;
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(px + s - br, py + s);
+    ctx.quadraticCurveTo(px + s - br * 0.32, py + s - br * 0.32, px + s, py + s - br);
+    ctx.stroke();
   }
-  if (mask.concaveBL) {
-    ctx.fillStyle = getStratumPalette(neighborAt(tx - 1, ty + 1)).fill;
+  if (sKind === wKind && sKind !== mask.centerKind && getTerrainVisualPriority(sKind) > centerPriority) {
+    const bridgePal = getStratumPalette(sKind);
+    const br = Math.round(s * bridgePal.cornerRadiusRatio);
+    ctx.fillStyle = bridgePal.fill;
     ctx.beginPath();
     ctx.moveTo(px, py + s);
-    ctx.lineTo(px + innerR, py + s);
-    ctx.quadraticCurveTo(px, py + s, px, py + s - innerR);
+    ctx.lineTo(px + br, py + s);
+    ctx.quadraticCurveTo(px + br * 0.32, py + s - br * 0.32, px, py + s - br);
     ctx.closePath();
     ctx.fill();
+    ctx.strokeStyle = bridgePal.lipShadow;
+    ctx.lineWidth = bridgePal.thicknessPx;
+    ctx.beginPath();
+    ctx.moveTo(px + br, py + s);
+    ctx.quadraticCurveTo(px + br * 0.32, py + s - br * 0.32, px, py + s - br);
+    ctx.stroke();
   }
 
   ctx.restore();
@@ -509,6 +562,7 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
     oreGrid,
     prevEntities,
     currEntities,
+    playersEconomy,
     interpolationAlpha,
     selectedIds,
     exploredCells,
@@ -554,7 +608,6 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
     ctx.drawImage(staticTerrainCache, srcX, srcY, srcW, srcH, srcX, srcY, srcW, srcH);
   }
 
-  const oreBmp = atlas.terrainTiles.get(3);
   const hasFog = exploredCells.size > 0;
   for (let ty = bounds.minY; ty <= bounds.maxY; ty++) {
     const rowOffset = ty * MAP_WIDTH_TILES;
@@ -566,14 +619,28 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
       if (!staticTerrainCache) {
         drawUnifiedOrganicTerrainCell(ctx, terrainGrid, tx, ty, s);
       }
-      if (oreBmp && (oreGrid[idx] ?? 0) > 0) {
-        ctx.drawImage(oreBmp, tx * s, ty * s, s, s);
+      const oreAmt = oreGrid[idx] ?? 0;
+      if (oreAmt > 0) {
+        drawActiveOreFormation(ctx, tx, ty, tx * s, ty * s, s, oreAmt, frameNowMs);
       }
     }
   }
 
-  // 1b. Persistent ground scorch craters beneath buildings & units
+  // 1b. Persistent ground scorch craters + glowing ore nuggets dropped behind Harvesters
   vfxManager?.renderCraters(ctx, frameNowMs, visibleCells, exploredCells, bounds);
+  vfxManager?.renderOreNuggets(ctx, frameNowMs, visibleCells, exploredCells, bounds);
+
+  // Build spatial lookup of wall tiles so contiguous walls connect seamlessly into a unified structure
+  const wallTileMap = new Map<number, BuildingKind>();
+  for (const ent of currEntities.values()) {
+    if (
+      ent.entityType === "BUILDING" &&
+      (ent.kind === "CONCRETE_WALL" || ent.kind === "SANDBAG_WALL")
+    ) {
+      const wIdx = Math.round(ent.y) * MAP_WIDTH_TILES + Math.round(ent.x);
+      wallTileMap.set(wIdx, ent.kind as BuildingKind);
+    }
+  }
 
   // 2. Draw buildings & units with linear position + shortest-arc angular interpolation & frustum culling
   const alpha = Math.max(0, Math.min(1.12, interpolationAlpha));
@@ -611,14 +678,61 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
       const spec = BUILDINGS[ent.kind as BuildingKind];
       const bw = spec.footprintW * s;
       const bh = spec.footprintH * s;
-      const bmp = atlas.buildings.get(`${ent.faction}:${ent.kind}`);
-      if (bmp) {
-        ctx.drawImage(bmp, px, py, bw, bh);
+      const isWall = ent.kind === "CONCRETE_WALL" || ent.kind === "SANDBAG_WALL";
+      const isSlabSite = ent.kind === "CONCRETE_SLAB";
+      const buildProg = ent.buildProgress ?? 1;
+
+      if (isWall) {
+        const tx = Math.round(ent.x);
+        const ty = Math.round(ent.y);
+        const connN =
+          ty > 0 && wallTileMap.get((ty - 1) * MAP_WIDTH_TILES + tx) === ent.kind;
+        const connE =
+          tx < MAP_WIDTH_TILES - 1 &&
+          wallTileMap.get(ty * MAP_WIDTH_TILES + (tx + 1)) === ent.kind;
+        const connS =
+          ty < MAP_HEIGHT_TILES - 1 &&
+          wallTileMap.get((ty + 1) * MAP_WIDTH_TILES + tx) === ent.kind;
+        const connW =
+          tx > 0 && wallTileMap.get(ty * MAP_WIDTH_TILES + (tx - 1)) === ent.kind;
+
+        drawConnectedWallEntity(
+          ctx,
+          ent,
+          px,
+          py,
+          s,
+          connN,
+          connE,
+          connS,
+          connW,
+          buildProg
+        );
+      } else {
+        const bmp = atlas.buildings.get(`${ent.faction}:${ent.kind}`);
+        if (bmp) {
+          ctx.save();
+          if (buildProg < 1) {
+            ctx.globalAlpha = 0.35 + buildProg * 0.65;
+          }
+          ctx.drawImage(bmp, px, py, bw, bh);
+          ctx.restore();
+        }
       }
 
-      drawBuildingLiveAnimation(ctx, ent, px, py, bw, bh, frameNowMs);
+      if (buildProg < 1) {
+        drawConstructionProgressOverlay(ctx, px, py, bw, bh, buildProg, frameNowMs);
+      }
 
-      if (spec.category === "DEFENSE") {
+      const ownerEcon = playersEconomy?.get(ent.ownerId);
+      const storageFillRatio =
+        ownerEcon && ownerEcon.maxStorage > 0
+          ? Math.max(0, Math.min(1, ownerEcon.credits / ownerEcon.maxStorage))
+          : 0.35;
+
+      drawBuildingLiveAnimation(ctx, ent, px, py, bw, bh, frameNowMs, storageFillRatio);
+
+      if (spec.category === "DEFENSE" && !isWall) {
         const turretAngle = prev
           ? interpolateAngleIndex16(prev.turretAngleIndex, ent.turretAngleIndex, alpha)
           : ent.turretAngleIndex;
@@ -637,9 +751,24 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
       if (ent.hp < ent.maxHp * 0.55) {
         vfxManager?.renderDamageSmoke(ctx, px, py, bw, bh, ent.hp, ent.maxHp, frameNowMs);
       }
-      drawHealthBar(ctx, px + 4, py - 6, bw - 8, 4, ent.hp, ent.maxHp);
 
-      if (selectedIds.has(ent.id)) {
+      const isSelected = selectedIds.has(ent.id);
+      // Do not display health bar for walls or slab sites unless clicked/selected
+      if (!isWall && !isSlabSite) {
+        drawHealthBar(ctx, px + 4, py - 6, bw - 8, 4, ent.hp, ent.maxHp);
+      } else if (isSelected) {
+        drawHealthBar(ctx, px + 2, py - 8, bw - 4, 4, ent.hp, ent.maxHp);
+        ctx.save();
+        ctx.font = "bold 9px monospace";
+        ctx.textAlign = "center";
+        ctx.fillStyle = "rgba(9, 13, 22, 0.88)";
+        ctx.fillRect(px - 4, py - 20, bw + 8, 11);
+        ctx.fillStyle = "#e2e8f0";
+        ctx.fillText(`${Math.ceil(ent.hp)}/${ent.maxHp}`, px + bw * 0.5, py - 12);
+        ctx.restore();
+      }
+
+      if (isSelected) {
         drawSelectionBracket(ctx, px, py, bw, bh, FACTIONS[ent.faction].primaryColor);
         if (spec.attackRange > 0) {
           drawTacticalRangeCircles(
@@ -661,16 +790,38 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
         ? interpolateAngleIndex16(prev.turretAngleIndex, ent.turretAngleIndex, alpha)
         : ent.turretAngleIndex;
 
+      // Imposing Harvester renders at 1.24x tile size so its dump-bed & twin cisterns stand out on the battlefield
+      const renderScale = ent.kind === "HARVESTER" ? 1.24 : 1.0;
+      const drawS = s * renderScale;
+      const drawPx = px - (drawS - s) * 0.5;
+      const drawPy = py - (drawS - s) * 0.5;
+
       const bodyBmp = atlas.unitBodies.get(`${ent.faction}:${ent.kind}:${bodyAngle}`);
       if (bodyBmp) {
-        ctx.drawImage(bodyBmp, px, py, s, s);
+        ctx.drawImage(bodyBmp, drawPx, drawPy, drawS, drawS);
       }
       const turretBmp = atlas.unitTurrets.get(`${ent.faction}:${ent.kind}:${turretAngle}`);
       if (turretBmp) {
-        ctx.drawImage(turretBmp, px, py, s, s);
+        ctx.drawImage(turretBmp, drawPx, drawPy, drawS, drawS);
       }
 
       drawUnitLiveAnimation(ctx, ent, px, py, s, bodyAngle, frameNowMs);
+
+      if (ent.kind === "HARVESTER" && vfxManager) {
+        const isMoving =
+          ent.stateLabel === "MOVING" ||
+          ent.stateLabel === "RETURNING" ||
+          (prev !== undefined && Math.hypot(ent.x - prev.x, ent.y - prev.y) > 0.01);
+        vfxManager.maybeSpawnHarvesterOreTrail(
+          ent.id,
+          interpX,
+          interpY,
+          bodyAngle,
+          ent.cargoOre,
+          isMoving,
+          frameNowMs
+        );
+      }
 
       // Spawn protection cooldown shield effect (1s target-immunity ring on newly created units)
       if ((ent.spawnProtectionTicks ?? 0) > 0) {
@@ -704,7 +855,7 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
 
       // Harvester ore cargo pips
       if (ent.kind === "HARVESTER" && ent.cargoOre > 0) {
-        const pips = Math.min(5, Math.ceil((ent.cargoOre / 500) * 5));
+        const pips = Math.min(5, Math.ceil((ent.cargoOre / HARVESTER_MAX_LOAD) * 5));
         ctx.fillStyle = "#22c55e";
         for (let i = 0; i < pips; i++) {
           ctx.fillRect(px + 4 + i * 5, py + s - 4, 4, 3);
@@ -712,7 +863,7 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
       }
 
       if (selectedIds.has(ent.id)) {
-        drawSelectionBracket(ctx, px + 1, py + 1, s - 2, s - 2, "#22c55e");
+        drawSelectionBracket(ctx, drawPx + 1, drawPy + 1, drawS - 2, drawS - 2, "#22c55e");
         if (unitSpec && unitSpec.attackRange > 0) {
           drawTacticalRangeCircles(
             ctx,
@@ -811,36 +962,9 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
     }
   }
 
-  // 5. Two-layer Fog of War & Shroud overlay using Horizontal Span Batching (Run-Length Encoding)
-  // Batches contiguous horizontal runs of Shroud or Fog into single fillRect calls (~96% fewer draw calls).
+  // 5. Smooth diagonal Fog of War & Unexplored Shroud (eliminates rectangular staircase effect)
   if (hasFog) {
-    for (let ty = bounds.minY; ty <= bounds.maxY; ty++) {
-      const rowOffset = ty * MAP_WIDTH_TILES;
-      let runState = 0; // 0 = clear, 1 = shroud, 2 = fog
-      let runStartX = bounds.minX;
-      let runLen = 0;
-
-      for (let tx = bounds.minX; tx <= bounds.maxX; tx++) {
-        const idx = rowOffset + tx;
-        const cellState = !exploredCells.has(idx) ? 1 : !visibleCells.has(idx) ? 2 : 0;
-        if (cellState === runState) {
-          runLen++;
-        } else {
-          if (runState !== 0 && runLen > 0) {
-            ctx.fillStyle = runState === 1 ? "#040609" : "rgba(7, 10, 18, 0.56)";
-            ctx.fillRect(runStartX * s, ty * s, runLen * s, s);
-          }
-          runState = cellState;
-          runStartX = tx;
-          runLen = 1;
-        }
-      }
-
-      if (runState !== 0 && runLen > 0) {
-        ctx.fillStyle = runState === 1 ? "#040609" : "rgba(7, 10, 18, 0.56)";
-        ctx.fillRect(runStartX * s, ty * s, runLen * s, s);
-      }
-    }
+    renderSmoothFogAndShroud(ctx, bounds, s, exploredCells, visibleCells);
   }
 
   ctx.restore();
@@ -857,6 +981,350 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
     ctx.lineWidth = 1.5;
     ctx.strokeRect(x, y, w, h);
   }
+}
+
+/**
+ * Renders Fog of War and Unexplored Shroud with diagonal/organic corner rounding and inner-corner
+ * diagonal bridges so the boundary of visibility never shows a rectangular staircase effect.
+ */
+function renderSmoothFogAndShroud(
+  ctx: CanvasRenderingContext2D,
+  bounds: { minX: number; maxX: number; minY: number; maxY: number },
+  s: number,
+  exploredCells: ReadonlySet<number>,
+  visibleCells: ReadonlySet<number>
+): void {
+  const r = s * 0.5;
+
+  const renderSmoothMaskPass = (
+    isMasked: (tx: number, ty: number) => boolean,
+    fillStyle: string
+  ): void => {
+    ctx.fillStyle = fillStyle;
+    for (let ty = bounds.minY; ty <= bounds.maxY; ty++) {
+      for (let tx = bounds.minX; tx <= bounds.maxX; tx++) {
+        const px = tx * s;
+        const py = ty * s;
+        const maskedCenter = isMasked(tx, ty);
+        const mN = isMasked(tx, ty - 1);
+        const mE = isMasked(tx + 1, ty);
+        const mS = isMasked(tx, ty + 1);
+        const mW = isMasked(tx - 1, ty);
+
+        if (maskedCenter) {
+          const rTL = !mN && !mW ? r : 0;
+          const rTR = !mN && !mE ? r : 0;
+          const rBR = !mS && !mE ? r : 0;
+          const rBL = !mS && !mW ? r : 0;
+          if (rTL === 0 && rTR === 0 && rBR === 0 && rBL === 0) {
+            ctx.fillRect(px, py, s, s);
+          } else {
+            traceRoundedTilePath(ctx, px, py, s, rTL, rTR, rBR, rBL);
+            ctx.fill();
+          }
+        } else {
+          // Clear tile: fill diagonal inner-corner wedges where two adjacent cardinal neighbors are masked
+          if (mN && mW) {
+            ctx.beginPath();
+            ctx.moveTo(px, py);
+            ctx.lineTo(px + r, py);
+            ctx.quadraticCurveTo(px + r * 0.34, py + r * 0.34, px, py + r);
+            ctx.closePath();
+            ctx.fill();
+          }
+          if (mN && mE) {
+            ctx.beginPath();
+            ctx.moveTo(px + s, py);
+            ctx.lineTo(px + s - r, py);
+            ctx.quadraticCurveTo(px + s - r * 0.34, py + r * 0.34, px + s, py + r);
+            ctx.closePath();
+            ctx.fill();
+          }
+          if (mS && mE) {
+            ctx.beginPath();
+            ctx.moveTo(px + s, py + s);
+            ctx.lineTo(px + s - r, py + s);
+            ctx.quadraticCurveTo(px + s - r * 0.34, py + s - r * 0.34, px + s, py + s - r);
+            ctx.closePath();
+            ctx.fill();
+          }
+          if (mS && mW) {
+            ctx.beginPath();
+            ctx.moveTo(px, py + s);
+            ctx.lineTo(px + r, py + s);
+            ctx.quadraticCurveTo(px + r * 0.34, py + s - r * 0.34, px, py + s - r);
+            ctx.closePath();
+            ctx.fill();
+          }
+        }
+      }
+    }
+  };
+
+  const inBounds = (tx: number, ty: number): boolean =>
+    tx >= 0 && ty >= 0 && tx < MAP_WIDTH_TILES && ty < MAP_HEIGHT_TILES;
+
+  // Pass 1: Fog of War (explored but outside current sight)
+  renderSmoothMaskPass((tx, ty) => {
+    if (!inBounds(tx, ty)) return true;
+    return !visibleCells.has(ty * MAP_WIDTH_TILES + tx);
+  }, "rgba(7, 10, 18, 0.56)");
+
+  // Pass 2: Unexplored Shroud (completely undiscovered map area)
+  renderSmoothMaskPass((tx, ty) => {
+    if (!inBounds(tx, ty)) return true;
+    return !exploredCells.has(ty * MAP_WIDTH_TILES + tx);
+  }, "#040609");
+}
+
+/**
+ * Renders diverse procedural crystalline/vein/geode ore formations with an active luminescent glow.
+ */
+function drawActiveOreFormation(
+  ctx: CanvasRenderingContext2D,
+  tx: number,
+  ty: number,
+  px: number,
+  py: number,
+  s: number,
+  oreAmt: number,
+  frameNowMs: number
+): void {
+  const h = hashTileCoord(tx, ty, 0x27d4eb2d);
+  const archetype = h & 3; // 4 distinct procedural mineral morphologies
+  const richness = Math.max(0.32, Math.min(1, oreAmt / 750));
+  const phase = ((h >>> 4) & 0xff) * 0.04;
+  const pulse = 0.65 + 0.35 * Math.sin(frameNowMs * 0.0048 + phase);
+
+  const cx = px + s * 0.5 + (((h >>> 12) & 0x0f) / 15 - 0.5) * 4;
+  const cy = py + s * 0.5 + (((h >>> 16) & 0x0f) / 15 - 0.5) * 4;
+
+  ctx.save();
+
+  // 1. Active luminescent radial glow showing the energetic nature of the mineral
+  const glowR = s * (0.36 + richness * 0.24) * (0.9 + pulse * 0.14);
+  const glowGrad = ctx.createRadialGradient(cx, cy, 1.5, cx, cy, glowR);
+  glowGrad.addColorStop(0, `rgba(110, 231, 183, ${(0.52 * pulse * richness).toFixed(3)})`);
+  glowGrad.addColorStop(0.5, `rgba(16, 185, 129, ${(0.34 * pulse * richness).toFixed(3)})`);
+  glowGrad.addColorStop(1, "rgba(5, 150, 105, 0)");
+  ctx.fillStyle = glowGrad;
+  ctx.beginPath();
+  ctx.arc(cx, cy, glowR, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 2. Diverse crystal clusters & veins based on tile hash
+  const shardCount = archetype === 0 ? 6 : archetype === 1 ? 5 : archetype === 2 ? 7 : 4;
+  for (let i = 0; i < shardCount; i++) {
+    const sh = hashTileCoord(tx, ty, 0x9e3779b9 + i * 4099);
+    const baseAngle =
+      archetype === 1
+        ? ((h & 1) === 0 ? 0.78 : -0.78) + ((sh & 0x1f) / 31 - 0.5) * 0.55
+        : (i / shardCount) * Math.PI * 2 + ((sh & 0x1f) / 31) * 0.7;
+    const dist =
+      archetype === 2
+        ? (5.5 + ((sh >>> 5) & 7) * 0.6) * richness
+        : (((sh >>> 5) & 0x1f) / 31) * 8.5 * richness;
+    const sx = cx + Math.cos(baseAngle) * dist;
+    const sy = cy + Math.sin(baseAngle) * dist;
+    const len = (4.2 + (((sh >>> 10) & 0x1f) / 31) * 5.2) * richness;
+    const wid = 1.8 + (((sh >>> 15) & 0x0f) / 15) * 1.6;
+    const tipX = sx + Math.cos(baseAngle) * len;
+    const tipY = sy + Math.sin(baseAngle) * len;
+    const perpX = -Math.sin(baseAngle) * wid;
+    const perpY = Math.cos(baseAngle) * wid;
+
+    // Crystal facet body
+    ctx.beginPath();
+    ctx.moveTo(sx + perpX, sy + perpY);
+    ctx.lineTo(tipX, tipY);
+    ctx.lineTo(sx - perpX, sy - perpY);
+    ctx.lineTo(sx - Math.cos(baseAngle) * 1.8, sy - Math.sin(baseAngle) * 1.8);
+    ctx.closePath();
+    ctx.fillStyle = (sh & 3) === 0 ? "#047857" : (sh & 1) === 0 ? "#10b981" : "#34d399";
+    ctx.fill();
+
+    // Glowing crystal tip
+    ctx.beginPath();
+    ctx.arc(tipX, tipY, 1.1 + pulse * 0.6, 0, Math.PI * 2);
+    ctx.fillStyle = "#ecfdf5";
+    ctx.fill();
+  }
+
+  ctx.restore();
+}
+
+/**
+ * Renders contiguous CONCRETE_WALL or SANDBAG_WALL segments that join across shared N/E/S/W edges
+ * into a single continuous structure without gaps.
+ */
+function drawConnectedWallEntity(
+  ctx: CanvasRenderingContext2D,
+  ent: EntityState,
+  px: number,
+  py: number,
+  s: number,
+  connN: boolean,
+  connE: boolean,
+  connS: boolean,
+  connW: boolean,
+  buildProgress: number
+): void {
+  const fSpec = FACTIONS[ent.faction];
+  const cx = px + s * 0.5;
+  const cy = py + s * 0.5;
+
+  ctx.save();
+  if (buildProgress < 1) {
+    ctx.globalAlpha = 0.4 + buildProgress * 0.6;
+  }
+
+  if (ent.kind === "CONCRETE_WALL") {
+    const halfThick = 8; // 16px wide continuous armored ferro-concrete wall beam
+    const x0 = connW ? px : cx - halfThick;
+    const x1 = connE ? px + s : cx + halfThick;
+    const y0 = connN ? py : cy - halfThick;
+    const y1 = connS ? py + s : cy + halfThick;
+
+    // Ground shadow
+    ctx.fillStyle = "rgba(0, 0, 0, 0.45)";
+    ctx.fillRect(x0 + 1, y0 + 2, x1 - x0, y1 - cy + halfThick);
+    ctx.fillRect(cx - halfThick + 1, y0 + 2, halfThick * 2, y1 - y0);
+
+    // Horizontal & vertical continuous ferro-concrete spans
+    ctx.fillStyle = "#475569";
+    ctx.fillRect(x0, cy - halfThick, x1 - x0, halfThick * 2);
+    ctx.fillRect(cx - halfThick, y0, halfThick * 2, y1 - y0);
+
+    // Raised armored parapet ridge along connected axes
+    const innerThick = 4.5;
+    const ix0 = connW ? px : cx - innerThick;
+    const ix1 = connE ? px + s : cx + innerThick;
+    const iy0 = connN ? py : cy - innerThick;
+    const iy1 = connS ? py + s : cy + innerThick;
+
+    ctx.fillStyle = "#94a3b8";
+    ctx.fillRect(ix0, cy - innerThick, ix1 - ix0, innerThick * 2);
+    ctx.fillRect(cx - innerThick, iy0, innerThick * 2, iy1 - iy0);
+
+    // Faction stripe along center line
+    ctx.fillStyle = fSpec.primaryColor;
+    ctx.fillRect(ix0, cy - 1.5, ix1 - ix0, 3);
+    ctx.fillRect(cx - 1.5, iy0, 3, iy1 - iy0);
+
+    // Outer dark steel borders ONLY on non-connected edges so connected walls have zero internal seams
+    ctx.strokeStyle = "#0f172a";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    if (!connN) {
+      ctx.moveTo(x0, cy - halfThick);
+      ctx.lineTo(x1, cy - halfThick);
+    }
+    if (!connS) {
+      ctx.moveTo(x0, cy + halfThick);
+      ctx.lineTo(x1, cy + halfThick);
+    }
+    if (!connW) {
+      ctx.moveTo(cx - halfThick, y0);
+      ctx.lineTo(cx - halfThick, y1);
+    }
+    if (!connE) {
+      ctx.moveTo(cx + halfThick, y0);
+      ctx.lineTo(cx + halfThick, y1);
+    }
+    ctx.stroke();
+  } else {
+    // SANDBAG_WALL: continuous interlocking sandbag parapet extending to connected edges
+    const halfThick = 7.5;
+    const x0 = connW ? px : cx - halfThick;
+    const x1 = connE ? px + s : cx + halfThick;
+    const y0 = connN ? py : cy - halfThick;
+    const y1 = connS ? py + s : cy + halfThick;
+
+    ctx.fillStyle = "rgba(0, 0, 0, 0.38)";
+    ctx.fillRect(x0 + 1, cy - halfThick + 2, x1 - x0, halfThick * 2);
+    ctx.fillRect(cx - halfThick + 1, y0 + 2, halfThick * 2, y1 - y0);
+
+    // Continuous sandbag base course
+    ctx.fillStyle = "#a38348";
+    ctx.fillRect(x0, cy - halfThick, x1 - x0, halfThick * 2);
+    ctx.fillRect(cx - halfThick, y0, halfThick * 2, y1 - y0);
+
+    // Upper course of interlocking sandbags along the connected axes
+    ctx.fillStyle = "#d6b87c";
+    ctx.strokeStyle = "#5c4622";
+    ctx.lineWidth = 1.1;
+
+    const spanW = x1 - x0;
+    const bagCountX = Math.max(2, Math.round(spanW / 8));
+    const bagW = spanW / bagCountX;
+    for (let i = 0; i < bagCountX; i++) {
+      ctx.beginPath();
+      ctx.ellipse(
+        x0 + (i + 0.5) * bagW,
+        cy,
+        bagW * 0.48,
+        halfThick * 0.68,
+        0,
+        0,
+        Math.PI * 2
+      );
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    if (connN || connS) {
+      const spanH = y1 - y0;
+      const bagCountY = Math.max(2, Math.round(spanH / 8));
+      const bagH = spanH / bagCountY;
+      for (let i = 0; i < bagCountY; i++) {
+        ctx.beginPath();
+        ctx.ellipse(
+          cx,
+          y0 + (i + 0.5) * bagH,
+          halfThick * 0.68,
+          bagH * 0.48,
+          0,
+          0,
+          Math.PI * 2
+        );
+        ctx.fill();
+        ctx.stroke();
+      }
+    }
+  }
+
+  ctx.restore();
+}
+
+/**
+ * Renders scaffolding & a cyan assembly progress bar on floor slabs and walls while a Constructor Bot builds them.
+ */
+function drawConstructionProgressOverlay(
+  ctx: CanvasRenderingContext2D,
+  px: number,
+  py: number,
+  bw: number,
+  bh: number,
+  buildProgress: number,
+  frameNowMs: number
+): void {
+  const pulse = 0.5 + 0.5 * Math.sin(frameNowMs * 0.014);
+  ctx.save();
+  ctx.strokeStyle = `rgba(56, 189, 248, ${(0.5 + pulse * 0.4).toFixed(2)})`;
+  ctx.lineWidth = 1.4;
+  ctx.setLineDash([3, 3]);
+  ctx.strokeRect(px + 2, py + 2, bw - 4, bh - 4);
+  ctx.setLineDash([]);
+
+  // Progress bar at bottom of construction site
+  const barW = bw - 6;
+  const barX = px + 3;
+  const barY = py + bh - 6;
+  ctx.fillStyle = "rgba(9, 13, 22, 0.85)";
+  ctx.fillRect(barX - 1, barY - 1, barW + 2, 5);
+  ctx.fillStyle = "#38bdf8";
+  ctx.fillRect(barX, barY, barW * Math.max(0, Math.min(1, buildProgress)), 3);
+  ctx.restore();
 }
 
 function drawHealthBar(
@@ -1042,7 +1510,8 @@ function drawBuildingLiveAnimation(
   py: number,
   bw: number,
   bh: number,
-  frameNowMs: number
+  frameNowMs: number,
+  storageFillRatio = 0.35
 ): void {
   const cx = px + bw * 0.5;
   const cy = py + bh * 0.5;
@@ -1158,6 +1627,20 @@ function drawBuildingLiveAnimation(
       ctx.fill();
     }
 
+    // Fill-level dependent luminescent emerald glow on the Refinery ore hopper & storage vat
+    const fillClamped = Math.max(0.08, Math.min(1, storageFillRatio));
+    const hopperX = px + bw * 0.6;
+    const hopperY = py + bh * 0.5;
+    const glowR = (7 + fillClamped * 16) * (0.9 + pulse * 0.14);
+    const hGrad = ctx.createRadialGradient(hopperX, hopperY, 1.2, hopperX, hopperY, glowR);
+    hGrad.addColorStop(0, `rgba(167, 243, 208, ${(0.35 + fillClamped * 0.55).toFixed(3)})`);
+    hGrad.addColorStop(0.45, `rgba(16, 185, 129, ${(0.22 + fillClamped * 0.45).toFixed(3)})`);
+    hGrad.addColorStop(1, "rgba(5, 150, 105, 0)");
+    ctx.fillStyle = hGrad;
+    ctx.beginPath();
+    ctx.arc(hopperX, hopperY, glowR, 0, Math.PI * 2);
+    ctx.fill();
+
     // Sequential amber guide lights on harvester bay
     const activeLight = Math.floor(frameNowMs / 220) % 3;
     for (let i = 0; i < 3; i++) {
@@ -1166,6 +1649,26 @@ function drawBuildingLiveAnimation(
       ctx.arc(px + bw * 0.88, py + bh * (0.3 + i * 0.2), 2.0, 0, Math.PI * 2);
       ctx.fill();
     }
+  } else if (ent.kind === "SILO") {
+    // Fill-level dependent luminescent emerald glow & level gauge on Silo
+    const fillClamped = Math.max(0.05, Math.min(1, storageFillRatio));
+    const siloGlowR = (6 + fillClamped * 14) * (0.9 + pulse * 0.14);
+    const sGrad = ctx.createRadialGradient(cx, cy, 1, cx, cy, siloGlowR);
+    sGrad.addColorStop(0, `rgba(167, 243, 208, ${(0.32 + fillClamped * 0.6).toFixed(3)})`);
+    sGrad.addColorStop(0.5, `rgba(16, 185, 129, ${(0.2 + fillClamped * 0.48).toFixed(3)})`);
+    sGrad.addColorStop(1, "rgba(5, 150, 105, 0)");
+    ctx.fillStyle = sGrad;
+    ctx.beginPath();
+    ctx.arc(cx, cy, siloGlowR, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Dynamic vertical fill bar inside Silo sight-glass
+    const gaugeH = bh * 0.48;
+    const filledH = gaugeH * fillClamped;
+    ctx.fillStyle = "#091526";
+    ctx.fillRect(cx - 2.5, cy - gaugeH * 0.5, 5, gaugeH);
+    ctx.fillStyle = fillClamped > 0.85 ? "#34d399" : "#10b981";
+    ctx.fillRect(cx - 1.6, cy + gaugeH * 0.5 - filledH, 3.2, filledH);
   } else if (ent.kind === "TECH_CENTER") {
     // Rotating quantum ring & pulsing violet/cyan core
     const qR = minDim * 0.22;
@@ -1227,7 +1730,7 @@ function drawBuildingLiveAnimation(
 }
 
 /**
- * Renders subtle live animations on mobile units (vehicle headlights, Harvester plasma cutter beam, MCV beacon).
+ * Renders subtle live animations on mobile units (vehicle headlights, Harvester cargo glow & plasma cutter, Constructor Bot welding arc, MCV beacon).
  */
 function drawUnitLiveAnimation(
   ctx: CanvasRenderingContext2D,
@@ -1266,20 +1769,51 @@ function drawUnitLiveAnimation(
   ctx.closePath();
   ctx.fill();
 
-  if (ent.kind === "HARVESTER" && ent.stateLabel === "HARVESTING") {
-    // Oscillating emerald plasma harvesting beam at front scoop
-    const sweep = Math.sin(frameNowMs * 0.018) * 4.5;
-    ctx.strokeStyle = "#34d399";
+  if (ent.kind === "HARVESTER") {
+    // Dynamic fill-level glow on the Harvester's dump-bed (benne) & side cisterns
+    if (ent.cargoOre > 0) {
+      const cargoRatio = Math.max(0.15, Math.min(1, ent.cargoOre / HARVESTER_MAX_LOAD));
+      const glowR = (5 + cargoRatio * 8) * (0.9 + pulse * 0.15);
+      const bGrad = ctx.createRadialGradient(0, 4, 1, 0, 4, glowR);
+      bGrad.addColorStop(0, `rgba(167, 243, 208, ${(0.38 + cargoRatio * 0.5).toFixed(3)})`);
+      bGrad.addColorStop(0.55, `rgba(16, 185, 129, ${(0.22 + cargoRatio * 0.4).toFixed(3)})`);
+      bGrad.addColorStop(1, "rgba(5, 150, 105, 0)");
+      ctx.fillStyle = bGrad;
+      ctx.beginPath();
+      ctx.arc(0, 4, glowR, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    if (ent.stateLabel === "HARVESTING") {
+      // Oscillating emerald plasma harvesting beam at front crusher drum
+      const sweep = Math.sin(frameNowMs * 0.018) * 5.5;
+      ctx.strokeStyle = "#34d399";
+      ctx.lineWidth = 2.0;
+      ctx.beginPath();
+      ctx.moveTo(-5.5, -s * 0.38);
+      ctx.lineTo(sweep, -s * 0.58);
+      ctx.lineTo(5.5, -s * 0.38);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.arc(sweep, -s * 0.58, 2.4 + pulse * 1.6, 0, Math.PI * 2);
+      ctx.fillStyle = "#a7f3d0";
+      ctx.fill();
+    }
+  } else if (ent.kind === "CONSTRUCTOR_BOT" && ent.stateLabel === "BUILDING") {
+    // Oscillating cyan/amber robotic welding arc while assembling slabs or walls
+    const arcX = Math.sin(frameNowMs * 0.024) * 3.5;
+    ctx.strokeStyle = "#38bdf8";
     ctx.lineWidth = 1.8;
     ctx.beginPath();
-    ctx.moveTo(-4.5, -s * 0.32);
-    ctx.lineTo(sweep, -s * 0.52);
-    ctx.lineTo(4.5, -s * 0.32);
+    ctx.moveTo(-3.5, -s * 0.32);
+    ctx.lineTo(arcX, -s * 0.48);
+    ctx.lineTo(3.5, -s * 0.32);
     ctx.stroke();
 
     ctx.beginPath();
-    ctx.arc(sweep, -s * 0.52, 2.2 + pulse * 1.4, 0, Math.PI * 2);
-    ctx.fillStyle = "#86efac";
+    ctx.arc(arcX, -s * 0.48, 2.2 + pulse * 1.5, 0, Math.PI * 2);
+    ctx.fillStyle = "#e0f2fe";
     ctx.fill();
   } else if (ent.kind === "MCV") {
     // Blinking amber command beacon on MCV roof

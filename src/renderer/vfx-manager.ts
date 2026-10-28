@@ -21,6 +21,15 @@ export interface ScorchCrater {
   seed: number;
 }
 
+export interface DroppedOreNugget {
+  worldPxX: number;
+  worldPxY: number;
+  tileIdx: number;
+  radiusPx: number;
+  createdAtMs: number;
+  seed: number;
+}
+
 export interface ActiveExplosion {
   worldPxX: number;
   worldPxY: number;
@@ -60,10 +69,12 @@ export interface ActiveProjectile {
 }
 
 const MAX_CRATERS = 160;
+const MAX_ORE_NUGGETS = 140;
 const MAX_EXPLOSIONS = 64;
 const MAX_PARTICLES = 320;
 const MAX_PROJECTILES = 96;
 export const CRATER_LIFETIME_MS = 12_000;
+export const ORE_NUGGET_LIFETIME_MS = 5_500;
 const MAX_SEEN_IDS = 256;
 
 export function computeCraterFadeAlpha(
@@ -98,6 +109,8 @@ function worldPxToTileIndex(pxX: number, pxY: number): number {
  */
 export class BattlefieldVfxManager {
   private readonly craters: ScorchCrater[] = [];
+  private readonly oreNuggets: DroppedOreNugget[] = [];
+  private readonly lastHarvesterDropMs: Map<string, number> = new Map();
   private readonly explosions: ActiveExplosion[] = [];
   private readonly particles: VfxParticle[] = [];
   private readonly projectiles: ActiveProjectile[] = [];
@@ -132,16 +145,131 @@ export class BattlefieldVfxManager {
 
   public getActiveCounts(): {
     craters: number;
+    oreNuggets: number;
     explosions: number;
     particles: number;
     projectiles: number;
   } {
     return {
       craters: this.craters.length,
+      oreNuggets: this.oreNuggets.length,
       explosions: this.explosions.length,
       particles: this.particles.length,
       projectiles: this.projectiles.length,
     };
+  }
+
+  /**
+   * Periodically drops small glowing ore nuggets behind a moving Harvester carrying ore.
+   * Dropped nuggets glow on the ground and fade out over `ORE_NUGGET_LIFETIME_MS`.
+   */
+  public maybeSpawnHarvesterOreTrail(
+    entityId: string,
+    worldTileX: number,
+    worldTileY: number,
+    angleIndex: number,
+    cargoOre: number,
+    isMoving: boolean,
+    nowMs: number
+  ): void {
+    if (cargoOre <= 0 || !isMoving) return;
+    const lastMs = this.lastHarvesterDropMs.get(entityId) ?? -Infinity;
+    if (nowMs - lastMs < 360) return;
+    this.lastHarvesterDropMs.set(entityId, nowMs);
+
+    // Direction vector for angleIndex (0 = North = -Y, clockwise in 16 steps)
+    const rad = (angleIndex / 16) * Math.PI * 2 - Math.PI * 0.5;
+    const rearDistPx = 15;
+    const perpRad = rad + Math.PI * 0.5;
+    const jitterAlong = (this.nextRandom() - 0.5) * 5;
+    const jitterSide = (this.nextRandom() - 0.5) * 9;
+
+    const centerPxX = (worldTileX + 0.5) * TILE_PIXEL_SIZE;
+    const centerPxY = (worldTileY + 0.5) * TILE_PIXEL_SIZE;
+    const dropPxX =
+      centerPxX - Math.cos(rad) * (rearDistPx + jitterAlong) + Math.cos(perpRad) * jitterSide;
+    const dropPxY =
+      centerPxY - Math.sin(rad) * (rearDistPx + jitterAlong) + Math.sin(perpRad) * jitterSide;
+
+    if (this.oreNuggets.length >= MAX_ORE_NUGGETS) {
+      this.oreNuggets.shift();
+    }
+    this.oreNuggets.push({
+      worldPxX: dropPxX,
+      worldPxY: dropPxY,
+      tileIdx: worldPxToTileIndex(dropPxX, dropPxY),
+      radiusPx: 2.3 + this.nextRandom() * 1.6,
+      createdAtMs: nowMs,
+      seed: this.nextRandom(),
+    });
+  }
+
+  /**
+   * Renders glowing ore nuggets dropped behind Harvesters, fading out over time.
+   */
+  public renderOreNuggets(
+    ctx: CanvasRenderingContext2D,
+    nowMs: number,
+    visibleCells: ReadonlySet<number>,
+    exploredCells: ReadonlySet<number>,
+    bounds?: { minX: number; maxX: number; minY: number; maxY: number }
+  ): void {
+    if (this.oreNuggets.length === 0) return;
+
+    const minPxX = bounds ? bounds.minX * TILE_PIXEL_SIZE - 32 : -Infinity;
+    const maxPxX = bounds ? (bounds.maxX + 1) * TILE_PIXEL_SIZE + 32 : Infinity;
+    const minPxY = bounds ? bounds.minY * TILE_PIXEL_SIZE - 32 : -Infinity;
+    const maxPxY = bounds ? (bounds.maxY + 1) * TILE_PIXEL_SIZE + 32 : Infinity;
+
+    ctx.save();
+    for (let i = this.oreNuggets.length - 1; i >= 0; i--) {
+      const nug = this.oreNuggets[i]!;
+      const elapsed = nowMs - nug.createdAtMs;
+      if (elapsed >= ORE_NUGGET_LIFETIME_MS) {
+        this.oreNuggets.splice(i, 1);
+        continue;
+      }
+      if (
+        nug.worldPxX < minPxX ||
+        nug.worldPxX > maxPxX ||
+        nug.worldPxY < minPxY ||
+        nug.worldPxY > maxPxY
+      ) {
+        continue;
+      }
+      if (exploredCells.size > 0 && !visibleCells.has(nug.tileIdx)) {
+        continue;
+      }
+
+      const lifeRatio = Math.max(0, Math.min(1, elapsed / ORE_NUGGET_LIFETIME_MS));
+      const fade = 1 - lifeRatio * lifeRatio;
+      const pulse = 0.78 + 0.22 * Math.sin(nowMs * 0.008 + nug.seed * 12);
+
+      // Outer luminescent emerald halo
+      ctx.globalAlpha = fade * pulse * 0.52;
+      ctx.beginPath();
+      ctx.arc(nug.worldPxX, nug.worldPxY, nug.radiusPx * 2.5, 0, Math.PI * 2);
+      ctx.fillStyle = "#10b981";
+      ctx.fill();
+
+      // Faceted crystal nugget core
+      ctx.globalAlpha = fade * 0.95;
+      ctx.beginPath();
+      ctx.moveTo(nug.worldPxX, nug.worldPxY - nug.radiusPx * 1.15);
+      ctx.lineTo(nug.worldPxX + nug.radiusPx, nug.worldPxY);
+      ctx.lineTo(nug.worldPxX, nug.worldPxY + nug.radiusPx * 1.15);
+      ctx.lineTo(nug.worldPxX - nug.radiusPx, nug.worldPxY);
+      ctx.closePath();
+      ctx.fillStyle = nug.seed > 0.45 ? "#34d399" : "#22c55e";
+      ctx.fill();
+
+      // Bright specular crystal glint
+      ctx.beginPath();
+      ctx.arc(nug.worldPxX - 0.5, nug.worldPxY - 0.5, nug.radiusPx * 0.42, 0, Math.PI * 2);
+      ctx.fillStyle = "#ecfdf5";
+      ctx.fill();
+    }
+    ctx.restore();
   }
 
   public ingestProjectiles(

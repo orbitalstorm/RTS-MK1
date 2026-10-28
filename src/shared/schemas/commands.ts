@@ -24,6 +24,7 @@ export const UnitKindSchema = z.enum([
   "RIFLE_INFANTRY",
   "ROCKET_SOLDIER",
   "ENGINEER",
+  "CONSTRUCTOR_BOT",
   "HARVESTER",
   "RECON_BUGGY",
   "MEDIUM_TANK",

@@ -50,6 +50,8 @@ export interface BuildingComponent {
   powerDelta: number;
   storageCapacity: number;
   isRepairing: boolean;
+  buildProgress: number; // 0..1 (1 = fully constructed)
+  buildTicksRequired: number;
 }
 
 export interface EcsEntity {
@@ -60,7 +62,7 @@ export interface EcsEntity {
   kind: BuildingKind | UnitKind;
   sightRadius: number;
   spawnProtectionTicks: number;
-  stateLabel: "IDLE" | "MOVING" | "HARVESTING" | "RETURNING" | "ALERT" | "ATTACKING";
+  stateLabel: "IDLE" | "MOVING" | "HARVESTING" | "RETURNING" | "ALERT" | "ATTACKING" | "BUILDING";
   transform: TransformComponent;
   health: HealthComponent;
   navigation: NavigationComponent | null;
