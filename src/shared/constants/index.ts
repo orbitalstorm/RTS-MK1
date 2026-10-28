@@ -10,12 +10,27 @@ export type BuildingKind =
   | "WAR_FACTORY"
   | "RADAR_DOME"
   | "TECH_CENTER"
+  | "SILVER_MINE"
   | "CONCRETE_SLAB"
   | "SANDBAG_WALL"
   | "CONCRETE_WALL"
   | "GUARD_TOWER"
   | "SAM_SITE"
   | "OBELISK";
+
+export type TreeKind = "TREE_PINE" | "TREE_OAK" | "TREE_PALM";
+
+export interface TreeSpec {
+  kind: TreeKind;
+  name: string;
+  baseHp: number;
+}
+
+export const TREES: Record<TreeKind, TreeSpec> = {
+  TREE_PINE: { kind: "TREE_PINE", name: "Pin Conifère", baseHp: 140 },
+  TREE_OAK: { kind: "TREE_OAK", name: "Chêne Massif", baseHp: 210 },
+  TREE_PALM: { kind: "TREE_PALM", name: "Palmier Aride", baseHp: 120 },
+};
 
 export type UnitKind =
   | "RIFLE_INFANTRY"
@@ -80,7 +95,7 @@ export interface UnitSpec {
   description: string;
 }
 
-export const APP_VERSION = "1.7.0";
+export const APP_VERSION = "1.8.0";
 export const SIM_TICK_RATE_HZ = 20;
 export const SIM_TICK_MS = 50;
 export const MAP_WIDTH_TILES = 72;
@@ -88,6 +103,9 @@ export const MAP_HEIGHT_TILES = 72;
 export const TILE_PIXEL_SIZE = 32;
 export const SPRITE_ATLAS_SCALE = 2; // 64px per tile internal vector rasterization for crisp 2x zoom
 export const BASE_BUILD_RADIUS_TILES = 18;
+export const SPAWN_CONCRETE_PAD_SIZE = 8; // 8x8 concrete slab pad at each spawn
+export const SILVER_MINE_YIELD_PER_CYCLE = 5;
+export const SILVER_MINE_CYCLE_TICKS = 20; // 1.0s at 20 Hz
 export const AI_ATTACK_GRACE_PERIOD_SECONDS = 120; // 2 minutes opening grace period before any enemy AI attack
 export const AI_ATTACK_GRACE_PERIOD_TICKS = AI_ATTACK_GRACE_PERIOD_SECONDS * SIM_TICK_RATE_HZ; // 2400 ticks
 export const UNIT_SPAWN_PROTECTION_TICKS = 20; // 1.0s (20 ticks at 20 Hz) spawn protection cooldown during which a newly created unit cannot be targeted
@@ -104,29 +122,50 @@ export function isRepeatableBuildingKind(kind: BuildingKind): boolean {
 
 /**
  * Returns the number of simulation ticks required for a Constructor Bot to assemble
- * a floor slab or defensive wall/sandbag on site.
+ * any building, floor slab, or defense structure on site.
  */
 export function getTimedConstructionTicks(kind: BuildingKind): number {
   if (kind === "CONCRETE_SLAB") return 16; // 0.8s per slab
   if (kind === "SANDBAG_WALL") return 20; // 1.0s per sandbag
   if (kind === "CONCRETE_WALL") return 28; // 1.4s per heavy wall
-  return 0;
+  return BUILDINGS[kind].buildTimeTicks;
 }
 
 /**
- * Returns true if the building requires a solid Stone or Concrete Slab foundation
+ * Returns true if the building requires a Concrete Slab foundation
  * on every tile under its footprint.
- * Standard buildings and defensive turrets require Stone/Concrete; slabs and walls can be placed on Dirt/Grass/Stone/Concrete.
+ * Standard buildings and defensive turrets require Concrete Slab;
+ * Silver Mine requires a 2x2 Silver Ore deposit; slabs and walls can be placed on Dirt/Grass/Stone/Concrete.
  */
 export function requiresStoneOrConcreteFoundation(kind: BuildingKind): boolean {
-  return !isRepeatableBuildingKind(kind);
+  return !isRepeatableBuildingKind(kind) && kind !== "SILVER_MINE";
 }
 
 /**
- * Returns true if `rawKind` is a valid load-bearing foundation (Stone or Concrete Slab).
+ * Returns true if `rawKind` is a valid load-bearing base foundation (Concrete Slab only in v1.8.0+).
  */
 export function isFoundationTerrainKind(rawKind: number): boolean {
-  return rawKind === TERRAIN_KIND.STONE || rawKind === TERRAIN_KIND.CONCRETE_SLAB;
+  return rawKind === TERRAIN_KIND.CONCRETE_SLAB;
+}
+
+/**
+ * Returns true if a tile with terrain `rawKind` can host a footprint cell of `kind`.
+ */
+export function canPlaceBuildingOnTerrainTile(kind: BuildingKind, rawKind: number): boolean {
+  if (kind === "SILVER_MINE") {
+    return rawKind === TERRAIN_KIND.SILVER_ORE;
+  }
+  if (
+    rawKind === TERRAIN_KIND.CLIFF ||
+    rawKind === TERRAIN_KIND.ORE ||
+    rawKind === TERRAIN_KIND.SILVER_ORE
+  ) {
+    return false;
+  }
+  if (requiresStoneOrConcreteFoundation(kind)) {
+    return isFoundationTerrainKind(rawKind);
+  }
+  return true;
 }
 
 export const TERRAIN_KIND = {
@@ -136,6 +175,7 @@ export const TERRAIN_KIND = {
   ORE: 3, // Gisement de minerai
   GRASS: 4, // Herbe / Prairie naturelle (couche superficielle organique)
   CONCRETE_SLAB: 5, // Dalle de béton armé posée par le joueur
+  SILVER_ORE: 6, // Gros rocher de minerai à pépites argentées (2x2)
 } as const;
 export type TerrainKindCode = (typeof TERRAIN_KIND)[keyof typeof TERRAIN_KIND];
 
@@ -162,10 +202,13 @@ export interface TerrainNeighborMask {
 }
 
 /**
- * Normalizes a terrainGrid code for base-ground rendering: dynamic ore (3) rests on a dirt/earth (0) bed.
+ * Normalizes a terrainGrid code for base-ground rendering: dynamic ore (3) rests on a dirt/earth (0) bed,
+ * and a 2x2 silver ore boulder (6) rests on a stone (1) bed.
  */
 export function normalizeBaseTerrainKind(rawKind: number): number {
-  return rawKind === TERRAIN_KIND.ORE ? TERRAIN_KIND.DIRT : rawKind;
+  if (rawKind === TERRAIN_KIND.ORE) return TERRAIN_KIND.DIRT;
+  if (rawKind === TERRAIN_KIND.SILVER_ORE) return TERRAIN_KIND.STONE;
+  return rawKind;
 }
 
 /**
@@ -684,6 +727,25 @@ export const BUILDINGS: Record<BuildingKind, BuildingSpec> = {
     prerequisites: ["WAR_FACTORY", "RADAR_DOME"],
     description: "Débloque le Char Mammouth lourd et l'Obélisque Laser haute énergie.",
   },
+  SILVER_MINE: {
+    kind: "SILVER_MINE",
+    name: "Mine d'Argent",
+    category: "BUILDING",
+    cost: 800,
+    buildTimeTicks: 70,
+    maxHp: 950,
+    powerDelta: -30,
+    sightRadius: 6,
+    footprintW: 2,
+    footprintH: 2,
+    storageCapacity: 0,
+    detectionRange: 0,
+    attackRange: 0,
+    attackDamage: 0,
+    attackCooldownTicks: 0,
+    prerequisites: ["CONSTRUCTION_YARD", "POWER_PLANT"],
+    description: "Mine d'extraction 2×2 bâtie intégralement sur un gisement de pépites argentées. Produit du minerai d'argent.",
+  },
   CONCRETE_SLAB: {
     kind: "CONCRETE_SLAB",
     name: "Dalle de Béton",
@@ -867,7 +929,7 @@ export const UNITS: Record<UnitKind, UnitSpec> = {
     attackCooldownTicks: 0,
     harvestCapacity: 0,
     prerequisites: ["CONSTRUCTION_YARD"],
-    description: "Unité robotisée produite au Chantier : indispensable pour assembler les dalles de béton, murs et sacs de sable.",
+    description: "Unité robotisée produite au Chantier : indispensable pour assembler sur place tous les bâtiments, dalles de béton, murs et défenses.",
   },
   HARVESTER: {
     kind: "HARVESTER",

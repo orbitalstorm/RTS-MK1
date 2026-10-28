@@ -5,6 +5,7 @@ import {
   BUILDING_REPAIR_COST_PER_TICK,
   BUILDING_REPAIR_HP_PER_TICK,
   BUILDINGS,
+  canPlaceBuildingOnTerrainTile,
   degradeTerrainLayer,
   FACTIONS,
   getTerrainLayerThickness,
@@ -17,13 +18,18 @@ import {
   MAP_HEIGHT_TILES,
   MAP_WIDTH_TILES,
   requiresStoneOrConcreteFoundation,
+  SILVER_MINE_CYCLE_TICKS,
+  SILVER_MINE_YIELD_PER_CYCLE,
+  SPAWN_CONCRETE_PAD_SIZE,
   STARTING_CREDITS,
   TERRAIN_KIND,
+  TREES,
   UNIT_SPAWN_PROTECTION_TICKS,
   UNITS,
   type BuildingKind,
   type FactionId,
   type ProductionCategory,
+  type TreeKind,
   type UnitKind,
 } from "../shared/constants";
 import {
@@ -136,9 +142,9 @@ export class RtsSimulation {
 
     const spawnCorners = [
       { x: 5, y: 5 },
-      { x: this.width - 10, y: this.height - 10 },
-      { x: this.width - 10, y: 5 },
-      { x: 5, y: this.height - 10 },
+      { x: this.width - 13, y: this.height - 13 },
+      { x: this.width - 13, y: 5 },
+      { x: 5, y: this.height - 13 },
     ];
 
     participants.forEach((p, idx) => {
@@ -148,6 +154,7 @@ export class RtsSimulation {
         faction: p.faction,
         isAi: p.isAi,
         credits: STARTING_CREDITS,
+        silverOre: 0,
         maxStorage: BASE_STORAGE_CAPACITY,
         powerProduced: 0,
         powerConsumed: 0,
@@ -166,6 +173,7 @@ export class RtsSimulation {
       this.spawnInitialBase(p.playerId, p.faction, corner.x, corner.y);
     });
 
+    this.spawnDeterministicTrees();
     this.rebuildSpatialReservations();
     this.recomputeAllPlayerEconomies();
     this.fogManager.recomputeTickVisibility(
@@ -211,7 +219,14 @@ export class RtsSimulation {
     const ridgeBotStart = Math.floor(this.height * 0.58);
     const ridgeBotEnd = Math.floor(this.height * 0.66);
 
-    // Organic Earth/Soil (TERRE = 0) & Stone/Bedrock (PIERRE = 1) zones + central tactical ridges
+    const spawnPads = [
+      { x: 5, y: 5 },
+      { x: this.width - 13, y: this.height - 13 },
+      { x: this.width - 13, y: 5 },
+      { x: 5, y: this.height - 13 },
+    ];
+
+    // Organic Earth/Soil (TERRE = 0), Stone/Bedrock (PIERRE = 1) halos, and 8x8 Concrete Slab spawn pads
     for (let y = 0; y < this.height; y++) {
       for (let x = 0; x < this.width; x++) {
         const idx = y * this.width + x;
@@ -223,13 +238,27 @@ export class RtsSimulation {
           terrainGrid[idx] = TERRAIN_KIND.DIRT;
         }
 
-        // Organic rounded stone plateaus around base command areas (all 4 corners)
-        const distNW = Math.hypot(x - 7.5, y - 7.5);
-        const distSE = Math.hypot(x - (this.width - 8.5), y - (this.height - 8.5));
-        const distNE = Math.hypot(x - (this.width - 8.5), y - 7.5);
-        const distSW = Math.hypot(x - 7.5, y - (this.height - 8.5));
-        const minCornerDist = Math.min(distNW, distSE, distNE, distSW);
-        if (minCornerDist <= 7.8) {
+        // Surrounding stone/dirt transition around the 4 corner bases
+        let minCornerDist = Infinity;
+        let onSpawnPad = false;
+        for (const pad of spawnPads) {
+          if (
+            x >= pad.x &&
+            x < pad.x + SPAWN_CONCRETE_PAD_SIZE &&
+            y >= pad.y &&
+            y < pad.y + SPAWN_CONCRETE_PAD_SIZE
+          ) {
+            onSpawnPad = true;
+          }
+          const padCenterX = pad.x + (SPAWN_CONCRETE_PAD_SIZE - 1) * 0.5;
+          const padCenterY = pad.y + (SPAWN_CONCRETE_PAD_SIZE - 1) * 0.5;
+          const d = Math.hypot(x - padCenterX, y - padCenterY);
+          if (d < minCornerDist) minCornerDist = d;
+        }
+
+        if (onSpawnPad) {
+          terrainGrid[idx] = TERRAIN_KIND.CONCRETE_SLAB;
+        } else if (minCornerDist <= 7.8) {
           terrainGrid[idx] = TERRAIN_KIND.STONE;
         } else if (minCornerDist <= 10.6) {
           terrainGrid[idx] = TERRAIN_KIND.DIRT;
@@ -245,52 +274,184 @@ export class RtsSimulation {
       }
     }
 
-    // Ore patches positioned further away from the base spawns to require early field expeditions,
-    // plus high-yield contested mid-map and central Tiberium/Spice basins.
+    // Irregular, organic ore deposits of varied sizes (small pockets, medium veins, large basins)
     const centerTileX = Math.floor(this.width * 0.5);
     const centerTileY = Math.floor(this.height * 0.5);
-    const oreCenters = [
-      { cx: 21, cy: 10, radius: 3, amount: 700 },
-      { cx: 10, cy: 21, radius: 3, amount: 700 },
-      { cx: this.width - 22, cy: this.height - 11, radius: 3, amount: 700 },
-      { cx: this.width - 11, cy: this.height - 22, radius: 3, amount: 700 },
-      { cx: centerTileX, cy: centerTileY, radius: 4, amount: 950 },
-      { cx: 22, cy: this.height - 22, radius: 3, amount: 800 },
-      { cx: this.width - 22, cy: 22, radius: 3, amount: 800 },
-      { cx: centerTileX, cy: 18, radius: 3, amount: 750 },
-      { cx: centerTileX, cy: this.height - 18, radius: 3, amount: 750 },
+    const oreDeposits = [
+      // Medium asymmetrical expansion veins
+      { cx: 22, cy: 10, rx: 3.5, ry: 2.1, angle: 0.42, lobeDx: 2, lobeDy: 1, lobeR: 2.1, amount: 720 },
+      { cx: 10, cy: 22, rx: 2.1, ry: 3.4, angle: -0.36, lobeDx: 1, lobeDy: 2, lobeR: 1.9, amount: 680 },
+      { cx: this.width - 23, cy: this.height - 11, rx: 3.5, ry: 2.1, angle: 0.42, lobeDx: -2, lobeDy: -1, lobeR: 2.1, amount: 720 },
+      { cx: this.width - 11, cy: this.height - 23, rx: 2.1, ry: 3.4, angle: -0.36, lobeDx: -1, lobeDy: -2, lobeR: 1.9, amount: 680 },
+      // Small scattered ore pockets
+      { cx: 28, cy: 15, rx: 1.7, ry: 1.2, angle: 0.85, lobeDx: 1, lobeDy: 0, lobeR: 1.2, amount: 520 },
+      { cx: this.width - 29, cy: this.height - 16, rx: 1.7, ry: 1.2, angle: 0.85, lobeDx: -1, lobeDy: 0, lobeR: 1.2, amount: 520 },
+      { cx: 15, cy: 29, rx: 1.4, ry: 1.9, angle: -0.6, lobeDx: 0, lobeDy: 1, lobeR: 1.1, amount: 500 },
+      { cx: this.width - 16, cy: this.height - 30, rx: 1.4, ry: 1.9, angle: -0.6, lobeDx: 0, lobeDy: -1, lobeR: 1.1, amount: 500 },
+      // Large multi-lobed contested central & flank basins
+      { cx: centerTileX, cy: centerTileY, rx: 4.7, ry: 3.1, angle: 0.62, lobeDx: -2, lobeDy: 2, lobeR: 2.9, amount: 980 },
+      { cx: 22, cy: this.height - 22, rx: 3.9, ry: 2.3, angle: -0.52, lobeDx: 2, lobeDy: -1, lobeR: 2.4, amount: 820 },
+      { cx: this.width - 22, cy: 22, rx: 3.9, ry: 2.3, angle: -0.52, lobeDx: -2, lobeDy: 1, lobeR: 2.4, amount: 820 },
+      { cx: centerTileX, cy: 18, rx: 2.9, ry: 1.9, angle: 0.25, lobeDx: 2, lobeDy: 1, lobeR: 1.8, amount: 750 },
+      { cx: centerTileX, cy: this.height - 18, rx: 2.9, ry: 1.9, angle: 0.25, lobeDx: -2, lobeDy: -1, lobeR: 1.8, amount: 750 },
     ];
 
-    for (const patch of oreCenters) {
-      const haloRadius = patch.radius + 2;
-      for (let dy = -haloRadius; dy <= haloRadius; dy++) {
-        for (let dx = -haloRadius; dx <= haloRadius; dx++) {
-          const d2 = dx * dx + dy * dy;
+    for (const patch of oreDeposits) {
+      const bound = Math.ceil(Math.max(patch.rx, patch.ry, patch.lobeR + 2)) + 2;
+      const cosA = Math.cos(patch.angle);
+      const sinA = Math.sin(patch.angle);
+      for (let dy = -bound; dy <= bound; dy++) {
+        for (let dx = -bound; dx <= bound; dx++) {
           const tx = patch.cx + dx;
           const ty = patch.cy + dy;
-          if (tx >= 1 && ty >= 1 && tx < this.width - 1 && ty < this.height - 1) {
-            const idx = ty * this.width + tx;
-            if (terrainGrid[idx] === TERRAIN_KIND.CLIFF) continue;
-            const distNW = Math.hypot(tx - 7.5, ty - 7.5);
-            const distSE = Math.hypot(tx - (this.width - 8.5), ty - (this.height - 8.5));
-            const distNE = Math.hypot(tx - (this.width - 8.5), ty - 7.5);
-            const distSW = Math.hypot(tx - 7.5, ty - (this.height - 8.5));
-            if (Math.min(distNW, distSE, distNE, distSW) <= 9.0) continue;
-            if (d2 <= patch.radius * patch.radius) {
-              terrainGrid[idx] = TERRAIN_KIND.ORE;
-              oreGrid[idx] = patch.amount;
-            } else if (
-              d2 <= haloRadius * haloRadius &&
-              terrainGrid[idx] === TERRAIN_KIND.GRASS
-            ) {
-              terrainGrid[idx] = TERRAIN_KIND.DIRT;
-            }
+          if (tx < 1 || ty < 1 || tx >= this.width - 1 || ty >= this.height - 1) continue;
+          const idx = ty * this.width + tx;
+          if (
+            terrainGrid[idx] === TERRAIN_KIND.CLIFF ||
+            terrainGrid[idx] === TERRAIN_KIND.CONCRETE_SLAB
+          ) {
+            continue;
+          }
+
+          let minBaseDist = Infinity;
+          for (const pad of spawnPads) {
+            const padCenterX = pad.x + (SPAWN_CONCRETE_PAD_SIZE - 1) * 0.5;
+            const padCenterY = pad.y + (SPAWN_CONCRETE_PAD_SIZE - 1) * 0.5;
+            const d = Math.hypot(tx - padCenterX, ty - padCenterY);
+            if (d < minBaseDist) minBaseDist = d;
+          }
+          if (minBaseDist <= 10.2) continue;
+
+          const rotX = dx * cosA - dy * sinA;
+          const rotY = dx * sinA + dy * cosA;
+          const eDist = Math.hypot(rotX / patch.rx, rotY / patch.ry);
+          const lobeDist =
+            Math.hypot(dx - patch.lobeDx, dy - patch.lobeDy) / Math.max(0.8, patch.lobeR);
+          const jitter =
+            (Math.sin(tx * 1.73 + ty * 2.31) + Math.cos(tx * 2.87 - ty * 1.41)) * 0.12;
+          const shapeMetric = Math.min(eDist, lobeDist) + jitter;
+
+          if (shapeMetric <= 1.0) {
+            terrainGrid[idx] = TERRAIN_KIND.ORE;
+            const richness = Math.max(0.55, 1.15 - shapeMetric * 0.5);
+            oreGrid[idx] = Math.round((patch.amount * richness) / 25) * 25;
+          } else if (shapeMetric <= 1.42 && terrainGrid[idx] === TERRAIN_KIND.GRASS) {
+            terrainGrid[idx] = TERRAIN_KIND.DIRT;
+          }
+        }
+      }
+    }
+
+    // Rare 2x2 Silver Ore boulders (TERRAIN_KIND.SILVER_ORE = 6) on which a 2x2 SILVER_MINE can be built
+    const silverDeposits2x2 = [
+      { x: 15, y: 7 },
+      { x: this.width - 17, y: this.height - 9 },
+      { x: this.width - 17, y: 7 },
+      { x: 15, y: this.height - 9 },
+    ];
+    for (const sDep of silverDeposits2x2) {
+      for (let dy = -1; dy <= 2; dy++) {
+        for (let dx = -1; dx <= 2; dx++) {
+          const tx = sDep.x + dx;
+          const ty = sDep.y + dy;
+          if (tx < 1 || ty < 1 || tx >= this.width - 1 || ty >= this.height - 1) continue;
+          const idx = ty * this.width + tx;
+          if (dx >= 0 && dx <= 1 && dy >= 0 && dy <= 1) {
+            terrainGrid[idx] = TERRAIN_KIND.SILVER_ORE;
+            oreGrid[idx] = 0;
+          } else if (terrainGrid[idx] === TERRAIN_KIND.GRASS) {
+            terrainGrid[idx] = TERRAIN_KIND.STONE;
           }
         }
       }
     }
 
     return { terrainGrid, oreGrid };
+  }
+
+  private spawnDeterministicTrees(): void {
+    const treePlacements: Array<{ x: number; y: number; kind: TreeKind; scale: number }> = [
+      { x: 17, y: 3, kind: "TREE_PINE", scale: 1.25 },
+      { x: 18, y: 4, kind: "TREE_OAK", scale: 0.92 },
+      { x: 3, y: 17, kind: "TREE_PINE", scale: 1.1 },
+      { x: 4, y: 19, kind: "TREE_OAK", scale: 1.32 },
+      { x: 31, y: 8, kind: "TREE_OAK", scale: 1.28 },
+      { x: 33, y: 9, kind: "TREE_PINE", scale: 0.82 },
+      { x: 8, y: 32, kind: "TREE_PALM", scale: 1.18 },
+      { x: 9, y: 34, kind: "TREE_PALM", scale: 0.85 },
+      { x: 26, y: 26, kind: "TREE_PALM", scale: 1.22 },
+      { x: 45, y: 45, kind: "TREE_PALM", scale: 1.15 },
+      { x: 16, y: 44, kind: "TREE_OAK", scale: 1.3 },
+      { x: 17, y: 46, kind: "TREE_PINE", scale: 0.9 },
+      { x: 44, y: 16, kind: "TREE_OAK", scale: 1.24 },
+      { x: 46, y: 17, kind: "TREE_PINE", scale: 0.86 },
+      { x: this.width - 18, y: this.height - 4, kind: "TREE_PINE", scale: 1.25 },
+      { x: this.width - 19, y: this.height - 5, kind: "TREE_OAK", scale: 0.95 },
+      { x: this.width - 4, y: this.height - 18, kind: "TREE_PINE", scale: 1.12 },
+      { x: this.width - 5, y: this.height - 20, kind: "TREE_OAK", scale: 1.3 },
+      { x: this.width - 32, y: this.height - 9, kind: "TREE_OAK", scale: 1.2 },
+      { x: this.width - 9, y: this.height - 33, kind: "TREE_PALM", scale: 1.15 },
+      { x: 12, y: this.height - 18, kind: "TREE_PINE", scale: 1.05 },
+      { x: this.width - 13, y: 18, kind: "TREE_PINE", scale: 1.08 },
+    ];
+
+    for (const t of treePlacements) {
+      if (t.x < 1 || t.y < 1 || t.x >= this.width - 1 || t.y >= this.height - 1) continue;
+      const idx = t.y * this.width + t.x;
+      const tk = this.terrainGrid[idx] ?? TERRAIN_KIND.DIRT;
+      if (
+        tk !== TERRAIN_KIND.GRASS &&
+        tk !== TERRAIN_KIND.DIRT
+      ) {
+        continue;
+      }
+      if (!this.reservationGrid.isTilePassable(t.x, t.y, undefined, false)) continue;
+      this.createTreeEntity(t.kind, t.x, t.y, t.scale);
+    }
+  }
+
+  public createTreeEntity(
+    kind: TreeKind,
+    tileX: number,
+    tileY: number,
+    treeScale = 1
+  ): EcsEntity {
+    const spec = TREES[kind];
+    const clampedScale = Number(Math.max(0.7, Math.min(1.4, treeScale)).toFixed(2));
+    const maxHp = Math.max(60, Math.round(spec.baseHp * clampedScale));
+    const id = `tree_${this.nextEntitySeq++}`;
+
+    const entity: EcsEntity = {
+      id,
+      ownerId: "neutral",
+      faction: "GDI",
+      entityType: "TREE",
+      kind,
+      sightRadius: 0,
+      spawnProtectionTicks: 0,
+      treeScale: clampedScale,
+      stateLabel: "IDLE",
+      transform: {
+        x: tileX,
+        y: tileY,
+        angleIndex: (tileX * 5 + tileY * 7) % 16,
+        turretAngleIndex: 0,
+      },
+      health: {
+        hp: maxHp,
+        maxHp,
+      },
+      navigation: null,
+      combat: null,
+      harvester: null,
+      building: null,
+      dirty: false,
+    };
+
+    this.entities.set(id, entity);
+    this.createdThisTick.push(id);
+    this.reservationGrid.markBuildingFootprint(tileX, tileY, 1, 1);
+    return entity;
   }
 
   private spawnInitialBase(
@@ -337,6 +498,7 @@ export class RtsSimulation {
       kind,
       sightRadius: spec.sightRadius,
       spawnProtectionTicks: 0,
+      treeScale: 1,
       stateLabel: buildProgress < 1 ? "BUILDING" : "IDLE",
       transform: {
         x: tileX,
@@ -402,6 +564,7 @@ export class RtsSimulation {
       kind,
       sightRadius: spec.sightRadius,
       spawnProtectionTicks: UNIT_SPAWN_PROTECTION_TICKS,
+      treeScale: 1,
       stateLabel: "IDLE",
       transform: {
         x: tileX,
@@ -594,22 +757,18 @@ export class RtsSimulation {
     const spec = BUILDINGS[buildingKind];
     if (!spec || spec.category !== category) return false;
 
-    const isRepeatable = isRepeatableBuildingKind(buildingKind);
-    if (isRepeatable && !this.hasLivingConstructorBot(playerId)) {
+    if (!this.hasLivingConstructorBot(playerId)) {
       return false;
     }
 
     const slot = player.queues[category];
-    const paidViaQueue =
-      slot.activeItem === buildingKind &&
-      (slot.readyToPlace || isRepeatable);
-    const canChainRepeat =
+    const paidViaQueue = slot.activeItem === buildingKind;
+    const canPlaceImmediate =
       !paidViaQueue &&
-      isRepeatable &&
       this.hasPrerequisites(playerId, spec.prerequisites) &&
       player.credits >= spec.cost;
 
-    if (!paidViaQueue && !canChainRepeat) return false;
+    if (!paidViaQueue && !canPlaceImmediate) return false;
 
     this.rebuildSpatialReservations();
 
@@ -621,9 +780,10 @@ export class RtsSimulation {
     if (buildingKind === "CONCRETE_SLAB") {
       if (!this.reservationGrid.inBounds(tileX, tileY)) return false;
       const idx = tileY * this.width + tileX;
+      const cellTerrain = this.terrainGrid[idx] ?? TERRAIN_KIND.DIRT;
       if (
-        this.terrainGrid[idx] === TERRAIN_KIND.CLIFF ||
-        this.terrainGrid[idx] === TERRAIN_KIND.CONCRETE_SLAB
+        !canPlaceBuildingOnTerrainTile("CONCRETE_SLAB", cellTerrain) ||
+        cellTerrain === TERRAIN_KIND.CONCRETE_SLAB
       ) {
         return false;
       }
@@ -642,6 +802,12 @@ export class RtsSimulation {
             return false;
           }
         } else if (
+          ent.entityType === "TREE" &&
+          Math.round(ent.transform.x) === tileX &&
+          Math.round(ent.transform.y) === tileY
+        ) {
+          return false;
+        } else if (
           ent.entityType === "UNIT" &&
           ent.ownerId !== playerId &&
           Math.round(ent.transform.x) === tileX &&
@@ -651,7 +817,7 @@ export class RtsSimulation {
         }
       }
 
-      if (canChainRepeat) {
+      if (canPlaceImmediate) {
         player.credits -= spec.cost;
       }
 
@@ -669,9 +835,7 @@ export class RtsSimulation {
       return true;
     }
 
-    const needsFoundation = requiresStoneOrConcreteFoundation(buildingKind);
-
-    // Check terrain, foundation requirement & static buildings first; relocate any friendly mobile units standing on the footprint
+    // Check terrain, foundation requirement (Concrete Slab for base buildings, 2x2 Silver Ore for Silver Mine) & static entities
     for (let dy = 0; dy < spec.footprintH; dy++) {
       for (let dx = 0; dx < spec.footprintW; dx++) {
         const cx = tileX + dx;
@@ -679,11 +843,10 @@ export class RtsSimulation {
         if (!this.reservationGrid.inBounds(cx, cy)) return false;
         const idx = cy * this.width + cx;
         const cellTerrain = this.terrainGrid[idx] ?? TERRAIN_KIND.DIRT;
-        if (cellTerrain === TERRAIN_KIND.CLIFF) return false;
-        if (needsFoundation && !isFoundationTerrainKind(cellTerrain)) {
+        if (!canPlaceBuildingOnTerrainTile(buildingKind, cellTerrain)) {
           return false;
         }
-        // Check if any building or enemy unit occupies (cx, cy)
+        // Check if any building, tree, or enemy unit occupies (cx, cy)
         for (const ent of this.entities.values()) {
           if (ent.entityType === "BUILDING" && ent.building) {
             if (
@@ -694,6 +857,12 @@ export class RtsSimulation {
             ) {
               return false;
             }
+          } else if (
+            ent.entityType === "TREE" &&
+            Math.round(ent.transform.x) === cx &&
+            Math.round(ent.transform.y) === cy
+          ) {
+            return false;
           } else if (
             ent.entityType === "UNIT" &&
             ent.ownerId !== playerId &&
@@ -706,7 +875,7 @@ export class RtsSimulation {
       }
     }
 
-    if (canChainRepeat) {
+    if (canPlaceImmediate) {
       player.credits -= spec.cost;
     }
 
@@ -727,13 +896,13 @@ export class RtsSimulation {
     }
 
     const timedTicks = getTimedConstructionTicks(buildingKind);
-    const created = this.createBuildingEntity(
+    this.createBuildingEntity(
       playerId,
       player.faction,
       buildingKind,
       tileX,
       tileY,
-      timedTicks > 0 ? { buildProgress: 0.05, buildTicksRequired: timedTicks } : undefined
+      { buildProgress: 0.05, buildTicksRequired: Math.max(1, timedTicks) }
     );
 
     for (const ent of this.entities.values()) {
@@ -771,26 +940,29 @@ export class RtsSimulation {
       slot.readyToPlace = false;
     }
 
-    // Free harvester delivered with a new Refinery if space is available nearby
-    if (buildingKind === "REFINERY") {
-      const dock = this.reservationGrid.findNearestFreeDockTile(
-        tileX,
-        tileY,
-        spec.footprintW,
-        spec.footprintH,
-        tileX + 1,
-        tileY + 2
-      );
-      if (dock) {
-        const freeHarv = this.createUnitEntity(playerId, player.faction, "HARVESTER", dock.x, dock.y);
-        if (freeHarv.harvester) {
-          freeHarv.harvester.homeRefineryId = created.id;
-        }
-      }
-    }
-
     this.recomputeAllPlayerEconomies();
     this.pushAcoustic("EVA_BUILDING_DEPLOYED", tileX, tileY, playerId);
+    return true;
+  }
+
+  public issueCancelConstruction(playerId: string, buildingEntityId: string): boolean {
+    const ent = this.entities.get(buildingEntityId);
+    const player = this.players.get(playerId);
+    if (
+      !ent ||
+      !player ||
+      ent.ownerId !== playerId ||
+      ent.entityType !== "BUILDING" ||
+      !ent.building ||
+      ent.building.buildProgress >= 1
+    ) {
+      return false;
+    }
+    const spec = BUILDINGS[ent.kind as BuildingKind];
+    player.credits += spec.cost;
+    this.destroyEntity(ent.id);
+    this.recomputeAllPlayerEconomies();
+    this.pushAcoustic("CREDITS_TICK", ent.transform.x, ent.transform.y, playerId);
     return true;
   }
 
@@ -878,6 +1050,7 @@ export class RtsSimulation {
     this.stepProductionQueues();
     this.stepBuildingRepairs();
     this.stepConstructorBots();
+    this.stepSilverMines();
     this.stepHarvesters();
     this.stepUnitMovement();
     this.stepCombat();
@@ -969,12 +1142,36 @@ export class RtsSimulation {
           ent.building.footprintW,
           ent.building.footprintH
         );
+      } else if (ent.entityType === "TREE") {
+        this.reservationGrid.markBuildingFootprint(
+          Math.round(ent.transform.x),
+          Math.round(ent.transform.y),
+          1,
+          1
+        );
       } else if (ent.entityType === "UNIT") {
         this.reservationGrid.reserveUnitTile(
           Math.round(ent.transform.x),
           Math.round(ent.transform.y),
           ent.id
         );
+      }
+    }
+  }
+
+  private stepSilverMines(): void {
+    if (this.tickCounter % SILVER_MINE_CYCLE_TICKS !== 0) return;
+    for (const ent of this.entities.values()) {
+      if (
+        ent.entityType === "BUILDING" &&
+        ent.kind === "SILVER_MINE" &&
+        ent.building &&
+        ent.building.buildProgress >= 1
+      ) {
+        const owner = this.players.get(ent.ownerId);
+        if (owner && !owner.defeated) {
+          owner.silverOre += SILVER_MINE_YIELD_PER_CYCLE;
+        }
       }
     }
   }
@@ -987,7 +1184,12 @@ export class RtsSimulation {
       let hasRadar = false;
 
       for (const ent of this.entities.values()) {
-        if (ent.ownerId !== p.playerId || ent.entityType !== "BUILDING" || !ent.building) {
+        if (
+          ent.ownerId !== p.playerId ||
+          ent.entityType !== "BUILDING" ||
+          !ent.building ||
+          ent.building.buildProgress < 1
+        ) {
           continue;
         }
         if (ent.building.powerDelta >= 0) {
@@ -1067,7 +1269,8 @@ export class RtsSimulation {
           ent.ownerId === playerId &&
           ent.entityType === "BUILDING" &&
           ent.kind === producerKind &&
-          ent.building
+          ent.building &&
+          ent.building.buildProgress >= 1
         ) {
           const dock = this.reservationGrid.findNearestFreeDockTile(
             ent.transform.x,
@@ -1087,15 +1290,21 @@ export class RtsSimulation {
   }
 
   private stepConstructorBots(): void {
+    const claimedSiteIds = new Set<string>();
+
     for (const bot of this.entities.values()) {
       if (bot.entityType !== "UNIT" || bot.kind !== "CONSTRUCTOR_BOT" || !bot.navigation) {
         continue;
       }
       const nav = bot.navigation;
 
-      // Find nearest incomplete construction site owned by the same commander
-      let bestSite: EcsEntity | null = null;
-      let bestDist = Infinity;
+      // Find nearest incomplete construction site owned by the same commander.
+      // Prefer sites not yet claimed by another Constructor Bot this tick so multiple bots build multiple sites simultaneously.
+      let bestUnclaimedSite: EcsEntity | null = null;
+      let bestUnclaimedDist = Infinity;
+      let bestFallbackSite: EcsEntity | null = null;
+      let bestFallbackDist = Infinity;
+
       for (const ent of this.entities.values()) {
         if (
           ent.ownerId === bot.ownerId &&
@@ -1103,16 +1312,31 @@ export class RtsSimulation {
           ent.building &&
           ent.building.buildProgress < 1
         ) {
-          const d = Math.hypot(
-            ent.transform.x - bot.transform.x,
-            ent.transform.y - bot.transform.y
+          const nearestFootX = Math.max(
+            ent.transform.x,
+            Math.min(bot.transform.x, ent.transform.x + ent.building.footprintW - 1)
           );
-          if (d < bestDist) {
-            bestDist = d;
-            bestSite = ent;
+          const nearestFootY = Math.max(
+            ent.transform.y,
+            Math.min(bot.transform.y, ent.transform.y + ent.building.footprintH - 1)
+          );
+          const d = Math.hypot(
+            nearestFootX - bot.transform.x,
+            nearestFootY - bot.transform.y
+          );
+          if (d < bestFallbackDist) {
+            bestFallbackDist = d;
+            bestFallbackSite = ent;
+          }
+          if (!claimedSiteIds.has(ent.id) && d < bestUnclaimedDist) {
+            bestUnclaimedDist = d;
+            bestUnclaimedSite = ent;
           }
         }
       }
+
+      const bestSite = bestUnclaimedSite ?? bestFallbackSite;
+      const bestDist = bestUnclaimedSite ? bestUnclaimedDist : bestFallbackDist;
 
       if (!bestSite || !bestSite.building) {
         if (bot.stateLabel === "BUILDING") {
@@ -1122,14 +1346,19 @@ export class RtsSimulation {
         continue;
       }
 
-      if (bestDist <= 1.85) {
+      claimedSiteIds.add(bestSite.id);
+
+      const siteCenterX = bestSite.transform.x + (bestSite.building.footprintW - 1) * 0.5;
+      const siteCenterY = bestSite.transform.y + (bestSite.building.footprintH - 1) * 0.5;
+
+      if (bestDist <= 1.55) {
         if (nav.path.length > 0) {
           nav.path = [];
           nav.pathIndex = 0;
         }
         const aimAngle = vectorToAngleIndex16(
-          bestSite.transform.x - bot.transform.x,
-          bestSite.transform.y - bot.transform.y
+          siteCenterX - bot.transform.x,
+          siteCenterY - bot.transform.y
         );
         bot.transform.angleIndex = aimAngle;
         bot.transform.turretAngleIndex = aimAngle;
@@ -1150,8 +1379,8 @@ export class RtsSimulation {
         if (this.tickCounter % 4 === 0) {
           this.pushVisualEffect(
             "HARVEST_SPARKS",
-            bestSite.transform.x,
-            bestSite.transform.y,
+            siteCenterX,
+            siteCenterY,
             0.48,
             0,
             bot.faction
@@ -1189,6 +1418,30 @@ export class RtsSimulation {
               terrainKind: TERRAIN_KIND.CONCRETE_SLAB,
             });
             this.destroyEntity(bestSite.id);
+          } else {
+            if (bestSite.kind === "REFINERY") {
+              const dock = this.reservationGrid.findNearestFreeDockTile(
+                bestSite.transform.x,
+                bestSite.transform.y,
+                bestSite.building.footprintW,
+                bestSite.building.footprintH,
+                bestSite.transform.x + 1,
+                bestSite.transform.y + 2
+              );
+              if (dock) {
+                const freeHarv = this.createUnitEntity(
+                  bestSite.ownerId,
+                  bestSite.faction,
+                  "HARVESTER",
+                  dock.x,
+                  dock.y
+                );
+                if (freeHarv.harvester) {
+                  freeHarv.harvester.homeRefineryId = bestSite.id;
+                }
+              }
+            }
+            this.recomputeAllPlayerEconomies();
           }
         }
       } else if (nav.pathIndex >= nav.path.length) {
@@ -1414,11 +1667,26 @@ export class RtsSimulation {
         );
 
         if (distToFootprint <= 1.55) {
+          const dockX = Math.round(ent.transform.x);
+          const dockY = Math.round(ent.transform.y);
           harv.state = "UNLOADING";
+          harv.unloadPhase = "REVERSING_IN";
+          harv.unloadPhaseTicks = 4;
+          harv.dockPos = { x: dockX, y: dockY };
           ent.stateLabel = "UNLOADING";
           nav.path = [];
           nav.pathIndex = 0;
           nav.waitTicks = 0;
+
+          // Orient chassis outward away from the Refinery bay so the Harvester backs into the bay in reverse gear
+          const refCenterX = ref.transform.x + (ref.building.footprintW - 1) * 0.5;
+          const refCenterY = ref.transform.y + (ref.building.footprintH - 1) * 0.5;
+          const reverseAngle = vectorToAngleIndex16(
+            dockX - refCenterX,
+            dockY - refCenterY
+          );
+          ent.transform.angleIndex = reverseAngle;
+          ent.transform.turretAngleIndex = reverseAngle;
           ent.dirty = true;
           this.pushAcoustic("CREDITS_TICK", ref.transform.x, ref.transform.y, player.playerId);
         } else if (nav.pathIndex >= nav.path.length) {
@@ -1454,48 +1722,105 @@ export class RtsSimulation {
       } else if (harv.state === "UNLOADING") {
         const ref = this.findNearestRefinery(ent.ownerId, ent.transform.x, ent.transform.y);
         if (!ref || !ref.building) {
+          if (harv.dockPos) {
+            ent.transform.x = harv.dockPos.x;
+            ent.transform.y = harv.dockPos.y;
+          }
+          harv.unloadPhase = undefined;
+          harv.unloadPhaseTicks = 0;
           harv.state = "IDLE";
           ent.stateLabel = "IDLE";
           ent.dirty = true;
           continue;
         }
 
-        const unloadChunk = Math.min(harv.cargoOre, HARVESTER_UNLOAD_PER_TICK);
-        if (unloadChunk > 0) {
-          const spaceLeft = Math.max(0, player.maxStorage - player.credits);
-          const deposited = Math.min(spaceLeft, unloadChunk);
-          player.credits += deposited;
-          player.harvestedTotal += unloadChunk;
-          if (deposited < unloadChunk && !player.silosAlertSent) {
-            player.silosAlertSent = true;
-            this.pushAcoustic("EVA_SILOS_NEEDED", ref.transform.x, ref.transform.y, player.playerId);
-          } else if (player.credits < player.maxStorage * 0.9) {
-            player.silosAlertSent = false;
-          }
-          harv.cargoOre -= unloadChunk;
-          ent.dirty = true;
+        const dockX = harv.dockPos?.x ?? Math.round(ent.transform.x);
+        const dockY = harv.dockPos?.y ?? Math.round(ent.transform.y);
+        const bayTileX = Math.max(
+          ref.transform.x,
+          Math.min(dockX, ref.transform.x + ref.building.footprintW - 1)
+        );
+        const bayTileY = Math.max(
+          ref.transform.y,
+          Math.min(dockY, ref.transform.y + ref.building.footprintH - 1)
+        );
+        const insideBayX = Number((dockX + (bayTileX - dockX) * 0.45).toFixed(4));
+        const insideBayY = Number((dockY + (bayTileY - dockY) * 0.45).toFixed(4));
+        const phase = harv.unloadPhase ?? "DUMPING";
 
-          if (this.tickCounter % 4 === 0) {
-            this.pushVisualEffect(
-              "HARVEST_SPARKS",
-              ent.transform.x,
-              ent.transform.y,
-              0.5,
-              0,
-              ent.faction
-            );
+        if (phase === "REVERSING_IN") {
+          const remaining = Math.max(0, (harv.unloadPhaseTicks ?? 1) - 1);
+          harv.unloadPhaseTicks = remaining;
+          const progress = (4 - remaining) / 4;
+          ent.transform.x = Number((dockX + (insideBayX - dockX) * progress).toFixed(4));
+          ent.transform.y = Number((dockY + (insideBayY - dockY) * progress).toFixed(4));
+          ent.dirty = true;
+          if (remaining <= 0) {
+            harv.unloadPhase = "DUMPING";
           }
+          continue;
         }
 
-        if (harv.cargoOre <= 0) {
-          harv.cargoOre = 0;
-          harv.state = "IDLE";
-          ent.stateLabel = "IDLE";
-          nav.path = [];
-          nav.pathIndex = 0;
-          nav.waitTicks = 0;
+        if (phase === "DUMPING") {
+          ent.transform.x = insideBayX;
+          ent.transform.y = insideBayY;
+
+          const unloadChunk = Math.min(harv.cargoOre, HARVESTER_UNLOAD_PER_TICK);
+          if (unloadChunk > 0) {
+            const spaceLeft = Math.max(0, player.maxStorage - player.credits);
+            const deposited = Math.min(spaceLeft, unloadChunk);
+            player.credits += deposited;
+            player.harvestedTotal += unloadChunk;
+            if (deposited < unloadChunk && !player.silosAlertSent) {
+              player.silosAlertSent = true;
+              this.pushAcoustic("EVA_SILOS_NEEDED", ref.transform.x, ref.transform.y, player.playerId);
+            } else if (player.credits < player.maxStorage * 0.9) {
+              player.silosAlertSent = false;
+            }
+            harv.cargoOre -= unloadChunk;
+            ent.dirty = true;
+
+            if (this.tickCounter % 4 === 0) {
+              this.pushVisualEffect(
+                "HARVEST_SPARKS",
+                insideBayX,
+                insideBayY,
+                0.5,
+                0,
+                ent.faction
+              );
+            }
+          }
+
+          if (harv.cargoOre <= 0) {
+            harv.cargoOre = 0;
+            harv.unloadPhase = "PULLING_OUT";
+            harv.unloadPhaseTicks = 4;
+            ent.dirty = true;
+          }
+          continue;
+        }
+
+        if (phase === "PULLING_OUT") {
+          const remaining = Math.max(0, (harv.unloadPhaseTicks ?? 1) - 1);
+          harv.unloadPhaseTicks = remaining;
+          const progress = (4 - remaining) / 4;
+          ent.transform.x = Number((insideBayX + (dockX - insideBayX) * progress).toFixed(4));
+          ent.transform.y = Number((insideBayY + (dockY - insideBayY) * progress).toFixed(4));
           ent.dirty = true;
-          this.pushAcoustic("CREDITS_TICK", ref.transform.x, ref.transform.y, player.playerId);
+          if (remaining <= 0) {
+            ent.transform.x = dockX;
+            ent.transform.y = dockY;
+            harv.unloadPhase = undefined;
+            harv.unloadPhaseTicks = 0;
+            harv.dockPos = null;
+            harv.state = "IDLE";
+            ent.stateLabel = "IDLE";
+            nav.path = [];
+            nav.pathIndex = 0;
+            nav.waitTicks = 0;
+            this.pushAcoustic("CREDITS_TICK", ref.transform.x, ref.transform.y, player.playerId);
+          }
         }
       }
     }
@@ -1643,6 +1968,9 @@ export class RtsSimulation {
 
     for (const ent of this.entities.values()) {
       if (!ent.combat) continue;
+      if (ent.entityType === "BUILDING" && ent.building && ent.building.buildProgress < 1) {
+        continue;
+      }
       const combat = ent.combat;
       if (combat.cooldownRemaining > 0) {
         combat.cooldownRemaining--;
@@ -2184,7 +2512,11 @@ export class RtsSimulation {
     if (prereqs.length === 0) return true;
     const owned = new Set<BuildingKind>();
     for (const ent of this.entities.values()) {
-      if (ent.ownerId === playerId && ent.entityType === "BUILDING") {
+      if (
+        ent.ownerId === playerId &&
+        ent.entityType === "BUILDING" &&
+        (!ent.building || ent.building.buildProgress >= 1)
+      ) {
         owned.add(ent.kind as BuildingKind);
       }
     }
@@ -2201,7 +2533,12 @@ export class RtsSimulation {
     const cx = tileX + w * 0.5;
     const cy = tileY + h * 0.5;
     for (const ent of this.entities.values()) {
-      if (ent.ownerId === playerId && ent.entityType === "BUILDING" && ent.building) {
+      if (
+        ent.ownerId === playerId &&
+        ent.entityType === "BUILDING" &&
+        ent.building &&
+        ent.building.buildProgress >= 1
+      ) {
         const bx = ent.transform.x + ent.building.footprintW * 0.5;
         const by = ent.transform.y + ent.building.footprintH * 0.5;
         if (Math.hypot(cx - bx, cy - by) <= BASE_BUILD_RADIUS_TILES) {
@@ -2217,7 +2554,6 @@ export class RtsSimulation {
     kind: BuildingKind
   ): { x: number; y: number } | null {
     const spec = BUILDINGS[kind];
-    const needsFoundation = requiresStoneOrConcreteFoundation(kind);
     for (const ent of this.entities.values()) {
       if (ent.ownerId === playerId && ent.kind === "CONSTRUCTION_YARD") {
         for (let dy = -7; dy <= 7; dy++) {
@@ -2230,19 +2566,17 @@ export class RtsSimulation {
             ) {
               continue;
             }
-            if (needsFoundation) {
-              let validFoundation = true;
-              for (let fy = 0; fy < spec.footprintH && validFoundation; fy++) {
-                for (let fx = 0; fx < spec.footprintW; fx++) {
-                  const idx = (ty + fy) * this.width + (tx + fx);
-                  if (!isFoundationTerrainKind(this.terrainGrid[idx] ?? 0)) {
-                    validFoundation = false;
-                    break;
-                  }
+            let validFoundation = true;
+            for (let fy = 0; fy < spec.footprintH && validFoundation; fy++) {
+              for (let fx = 0; fx < spec.footprintW; fx++) {
+                const idx = (ty + fy) * this.width + (tx + fx);
+                if (!canPlaceBuildingOnTerrainTile(kind, this.terrainGrid[idx] ?? 0)) {
+                  validFoundation = false;
+                  break;
                 }
               }
-              if (!validFoundation) continue;
             }
+            if (!validFoundation) continue;
             return { x: tx, y: ty };
           }
         }
@@ -2290,7 +2624,13 @@ export class RtsSimulation {
     let best: EcsEntity | null = null;
     let bestDist = Infinity;
     for (const ent of this.entities.values()) {
-      if (ent.ownerId === ownerId && ent.entityType === "BUILDING" && ent.kind === "REFINERY") {
+      if (
+        ent.ownerId === ownerId &&
+        ent.entityType === "BUILDING" &&
+        ent.kind === "REFINERY" &&
+        ent.building &&
+        ent.building.buildProgress >= 1
+      ) {
         const d = Math.hypot(ent.transform.x - fromX, ent.transform.y - fromY);
         if (d < bestDist) {
           bestDist = d;
@@ -2316,7 +2656,11 @@ export class RtsSimulation {
     }
 
     const curKind = this.terrainGrid[idx] ?? TERRAIN_KIND.DIRT;
-    if (curKind === TERRAIN_KIND.CLIFF || curKind === TERRAIN_KIND.STONE) {
+    if (
+      curKind === TERRAIN_KIND.CLIFF ||
+      curKind === TERRAIN_KIND.STONE ||
+      curKind === TERRAIN_KIND.SILVER_ORE
+    ) {
       return false;
     }
 
@@ -2351,7 +2695,9 @@ export class RtsSimulation {
     let best: EcsEntity | undefined;
     let bestDist = range;
     for (const ent of this.entities.values()) {
-      if (ent.ownerId === attacker.ownerId) continue;
+      if (ent.ownerId === attacker.ownerId || ent.ownerId === "neutral" || ent.entityType === "TREE") {
+        continue;
+      }
       if (ent.entityType === "UNIT" && ent.spawnProtectionTicks > 0) continue;
       const tx =
         ent.entityType === "BUILDING" && ent.building
@@ -2372,12 +2718,12 @@ export class RtsSimulation {
 
   private findAnyEnemyEntity(ownerId: string): EcsEntity | undefined {
     for (const ent of this.entities.values()) {
-      if (ent.ownerId !== ownerId && ent.kind === "CONSTRUCTION_YARD") {
+      if (ent.ownerId !== ownerId && ent.ownerId !== "neutral" && ent.kind === "CONSTRUCTION_YARD") {
         return ent;
       }
     }
     for (const ent of this.entities.values()) {
-      if (ent.ownerId !== ownerId) {
+      if (ent.ownerId !== ownerId && ent.ownerId !== "neutral" && ent.entityType !== "TREE") {
         if (ent.entityType === "UNIT" && ent.spawnProtectionTicks > 0) continue;
         return ent;
       }
@@ -2450,6 +2796,7 @@ export class RtsSimulation {
       spawnProtectionTicks: ent.spawnProtectionTicks,
       isRepairing: ent.building ? ent.building.isRepairing : false,
       buildProgress: ent.building ? ent.building.buildProgress : 1,
+      treeScale: ent.treeScale ?? 1,
       stateLabel: ent.stateLabel,
     };
   }
@@ -2459,6 +2806,7 @@ export class RtsSimulation {
       playerId: p.playerId,
       faction: p.faction,
       credits: p.credits,
+      silverOre: p.silverOre,
       maxStorage: p.maxStorage,
       powerProduced: p.powerProduced,
       powerConsumed: p.powerConsumed,

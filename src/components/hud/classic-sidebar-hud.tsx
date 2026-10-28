@@ -84,6 +84,7 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
   }, [playerId, hudRevision]);
 
   const credits = myEcon?.credits ?? 2500;
+  const silverOre = myEcon?.silverOre ?? 0;
   const maxStorage = myEcon?.maxStorage ?? 2000;
   const powerProduced = myEcon?.powerProduced ?? 100;
   const powerConsumed = myEcon?.powerConsumed ?? 40;
@@ -172,7 +173,7 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
           </div>
         </div>
 
-        {/* Credits Counter */}
+        {/* Credits & Silver Ore Counter */}
         <div className="flex items-center justify-between rounded border border-amber-500/40 bg-slate-900 px-2.5 py-1">
           <div className="flex items-center gap-1.5 text-xs text-amber-300">
             <Coins className="h-3.5 w-3.5 text-amber-400" />
@@ -183,6 +184,15 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
             <span className="text-[10px] font-normal text-slate-400">
               / {maxStorage.toLocaleString()}
             </span>
+          </div>
+        </div>
+        <div className="flex items-center justify-between rounded border border-slate-500/40 bg-slate-900 px-2.5 py-1">
+          <div className="flex items-center gap-1.5 text-xs text-slate-200">
+            <Coins className="h-3.5 w-3.5 text-slate-300" />
+            <span>MINERAI ARGENT</span>
+          </div>
+          <div className="text-xs lg:text-sm font-bold tracking-wider text-slate-100">
+            {silverOre.toLocaleString()} <span className="text-[10px] font-normal text-slate-400">Ag</span>
           </div>
         </div>
       </div>
@@ -421,6 +431,9 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
           const isBuildingThis = activeSlot.activeItem === item.kind;
           const canAfford = credits >= item.cost;
           const isRepeatable = isRepeatableBuildingKind(item.kind as BuildingKind);
+          const isDirectBlueprintBuilding =
+            (activeTab === "BUILDING" || activeTab === "DEFENSE") &&
+            item.kind !== "CONSTRUCTOR_BOT";
 
           return (
             <div
@@ -478,15 +491,12 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
                   }
                   disabled={
                     !unlocked ||
-                    (!isRepeatable && activeSlot.activeItem !== null) ||
+                    (!isDirectBlueprintBuilding && activeSlot.activeItem !== null) ||
                     (!canAfford && placementBuilding?.kind !== item.kind)
                   }
                   onClick={() => {
                     globalAudioMixer.playUiClick();
-                    if (
-                      (activeTab === "BUILDING" || activeTab === "DEFENSE") &&
-                      isRepeatable
-                    ) {
+                    if (isDirectBlueprintBuilding && (activeTab === "BUILDING" || activeTab === "DEFENSE")) {
                       if (placementBuilding?.kind === item.kind) {
                         setPlacementBuilding(null);
                       } else {
@@ -505,12 +515,16 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
                 >
                   <Cpu className="h-3 w-3" />
                   {placementBuilding?.kind === item.kind
-                    ? "Pose Continue Active"
+                    ? isRepeatable
+                      ? "Pose Continue Active"
+                      : "Cliquez Carte pour Poser"
                     : isBuildingThis
                       ? "En cours"
                       : isRepeatable
                         ? "Poser en Continu"
-                        : "Produire"}
+                        : isDirectBlueprintBuilding
+                          ? "Poser le Patron"
+                          : "Produire"}
                 </Button>
               </div>
             </div>

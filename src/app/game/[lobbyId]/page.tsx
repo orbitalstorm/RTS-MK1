@@ -30,14 +30,14 @@ import {
 import {
   BASE_BUILD_RADIUS_TILES,
   BUILDINGS,
+  canPlaceBuildingOnTerrainTile,
   computeEdgeScrollVelocity,
   FACTIONS,
-  isFoundationTerrainKind,
   isRepeatableBuildingKind,
   MAP_HEIGHT_TILES,
   MAP_WIDTH_TILES,
-  requiresStoneOrConcreteFoundation,
   resolveTouchTapAction,
+  TERRAIN_KIND,
   TILE_PIXEL_SIZE,
   TOUCH_TAP_MAX_DISTANCE_PX,
   ZOOM_LEVELS,
@@ -84,24 +84,19 @@ function canPlaceBuildingOnGrid(
     return false;
   }
 
-  const isRepeatable = isRepeatableBuildingKind(buildingKind);
-  const needsFoundation = requiresStoneOrConcreteFoundation(buildingKind);
-
-  if (isRepeatable) {
-    let hasConstructorBot = false;
-    for (const ent of st.currEntities.values()) {
-      if (
-        ent.ownerId === st.playerId &&
-        ent.entityType === "UNIT" &&
-        ent.kind === "CONSTRUCTOR_BOT"
-      ) {
-        hasConstructorBot = true;
-        break;
-      }
+  let hasConstructorBot = false;
+  for (const ent of st.currEntities.values()) {
+    if (
+      ent.ownerId === st.playerId &&
+      ent.entityType === "UNIT" &&
+      ent.kind === "CONSTRUCTOR_BOT"
+    ) {
+      hasConstructorBot = true;
+      break;
     }
-    if (!hasConstructorBot) {
-      return false;
-    }
+  }
+  if (!hasConstructorBot) {
+    return false;
   }
 
   for (let dy = 0; dy < spec.footprintH; dy++) {
@@ -110,13 +105,10 @@ function canPlaceBuildingOnGrid(
       const ty = tileY + dy;
       const idx = ty * MAP_WIDTH_TILES + tx;
       const cellTerrain = st.terrainGrid[idx] ?? 0;
-      if (cellTerrain === 2) {
+      if (!canPlaceBuildingOnTerrainTile(buildingKind, cellTerrain)) {
         return false;
       }
-      if (buildingKind === "CONCRETE_SLAB" && cellTerrain === 5) {
-        return false;
-      }
-      if (needsFoundation && !isFoundationTerrainKind(cellTerrain)) {
+      if (buildingKind === "CONCRETE_SLAB" && cellTerrain === TERRAIN_KIND.CONCRETE_SLAB) {
         return false;
       }
       if (pendingPlacements) {
@@ -140,12 +132,23 @@ function canPlaceBuildingOnGrid(
       if (overlapsX && overlapsY) {
         return false;
       }
-      if (ent.ownerId === st.playerId) {
+      if (ent.ownerId === st.playerId && (ent.buildProgress ?? 1) >= 1) {
         const bx = ent.x + bSpec.footprintW * 0.5;
         const by = ent.y + bSpec.footprintH * 0.5;
         if (Math.hypot(cx - bx, cy - by) <= BASE_BUILD_RADIUS_TILES) {
           withinBaseRadius = true;
         }
+      }
+    } else if (ent.entityType === "TREE") {
+      const tx = Math.round(ent.x);
+      const ty = Math.round(ent.y);
+      if (
+        tx >= tileX &&
+        tx < tileX + spec.footprintW &&
+        ty >= tileY &&
+        ty < tileY + spec.footprintH
+      ) {
+        return false;
       }
     } else if (ent.entityType === "UNIT" && ent.ownerId !== st.playerId) {
       const ux = Math.round(ent.x);
@@ -527,13 +530,51 @@ export default function GameMatchPage() {
     const { tileX, tileY } = cameraRef.current.screenToTile(sx, sy);
 
     if (e.button === 2) {
-      // Right-click: Issue Move, Attack, or Force-Attack Ground command for selected units
+      // Right-click: Cancel selected building awaiting construction, or issue Move / Attack / Force-Attack Ground command
       e.preventDefault();
       if (st.placementBuilding || st.sellMode || st.repairMode || st.forceAttackMode) {
         setPlacementBuilding(null);
         return;
       }
-      const selectedUnits = Array.from(st.selectedEntityIds);
+
+      // Check if right-clicking a currently selected allied building awaiting construction -> cancel construction
+      for (const selectedId of st.selectedEntityIds) {
+        const ent = st.currEntities.get(selectedId);
+        if (
+          ent &&
+          ent.ownerId === st.playerId &&
+          ent.entityType === "BUILDING" &&
+          (ent.buildProgress ?? 1) < 1
+        ) {
+          const bSpec = BUILDINGS[ent.kind as BuildingKind];
+          if (
+            tileX >= ent.x &&
+            tileX < ent.x + bSpec.footprintW &&
+            tileY >= ent.y &&
+            tileY < ent.y + bSpec.footprintH
+          ) {
+            globalAudioMixer.playUiClick();
+            sendMessage({
+              type: "COMMAND_CANCEL_CONSTRUCTION",
+              lobbyId,
+              playerId,
+              buildingEntityId: ent.id,
+            });
+            const nextSel = new Set(st.selectedEntityIds);
+            nextSel.delete(ent.id);
+            setSelectedEntities(nextSel);
+            useRtsGameStore.setState({
+              evaBannerText: `EVA : CONSTRUCTION ANNULÉE (${bSpec.name.toUpperCase()}) — CRÉDITS REMBOURSÉS`,
+            });
+            return;
+          }
+        }
+      }
+
+      const selectedUnits = Array.from(st.selectedEntityIds).filter((id) => {
+        const ent = st.currEntities.get(id);
+        return ent?.entityType === "UNIT";
+      });
       if (selectedUnits.length === 0) return;
 
       if (e.ctrlKey) {
@@ -549,12 +590,18 @@ export default function GameMatchPage() {
         return;
       }
 
-      // Check if clicking an enemy entity
+      // Check if clicking an enemy entity or destructible tree
       let targetEnemyId: string | null = null;
       for (const ent of st.currEntities.values()) {
         if (ent.ownerId === st.playerId) continue;
-        const w = ent.entityType === "BUILDING" ? BUILDINGS[ent.kind as keyof typeof BUILDINGS].footprintW : 1;
-        const h = ent.entityType === "BUILDING" ? BUILDINGS[ent.kind as keyof typeof BUILDINGS].footprintH : 1;
+        const w =
+          ent.entityType === "BUILDING"
+            ? BUILDINGS[ent.kind as BuildingKind].footprintW
+            : 1;
+        const h =
+          ent.entityType === "BUILDING"
+            ? BUILDINGS[ent.kind as BuildingKind].footprintH
+            : 1;
         if (tileX >= ent.x && tileX < ent.x + w && tileY >= ent.y && tileY < ent.y + h) {
           targetEnemyId = ent.id;
           break;
@@ -607,10 +654,10 @@ export default function GameMatchPage() {
       const myEcon = st.playersEconomy.get(st.playerId);
       const qSlot = myEcon?.queues.find((q) => q.category === st.placementBuilding?.category);
       const paidInQueue = qSlot?.activeItem === bKind;
-      if (repeatable && !paidInQueue && (myEcon?.credits ?? 0) < spec.cost) {
+      if (!paidInQueue && (myEcon?.credits ?? 0) < spec.cost) {
         useRtsGameStore.setState({
           evaBannerText:
-            "EVA : CRÉDITS INSUFFISANTS POUR POSER CET ÉLÉMENT (CLIC DROIT POUR DÉSÉLECTIONNER L'OUTIL)",
+            "EVA : CRÉDITS INSUFFISANTS POUR POSER CE PATRON (CLIC DROIT POUR DÉSÉLECTIONNER L'OUTIL)",
         });
         return;
       }
@@ -624,9 +671,6 @@ export default function GameMatchPage() {
         tileX,
         tileY,
       });
-      if (bKind === "CONCRETE_SLAB") {
-        st.terrainGrid[tileY * MAP_WIDTH_TILES + tileX] = 5;
-      }
       pendingPlacedTilesRef.current.set(`${tileX},${tileY}`, {
         tileX,
         tileY,
@@ -746,9 +790,6 @@ export default function GameMatchPage() {
             tileX,
             tileY,
           });
-          if (bKind === "CONCRETE_SLAB") {
-            st.terrainGrid[tileY * MAP_WIDTH_TILES + tileX] = 5;
-          }
           pendingPlacedTilesRef.current.set(`${tileX},${tileY}`, {
             tileX,
             tileY,
@@ -793,11 +834,19 @@ export default function GameMatchPage() {
       const sizePx = TILE_PIXEL_SIZE * cam.zoom;
 
       if (isClick) {
+        const wPx =
+          ent.entityType === "BUILDING"
+            ? BUILDINGS[ent.kind as BuildingKind].footprintW * sizePx
+            : sizePx;
+        const hPx =
+          ent.entityType === "BUILDING"
+            ? BUILDINGS[ent.kind as BuildingKind].footprintH * sizePx
+            : sizePx;
         if (
           start.x >= screenX &&
-          start.x <= screenX + sizePx &&
+          start.x <= screenX + wPx &&
           start.y >= screenY &&
-          start.y <= screenY + sizePx
+          start.y <= screenY + hPx
         ) {
           picked.add(ent.id);
           break;
@@ -1096,7 +1145,7 @@ export default function GameMatchPage() {
           bestEnemyDist = dist;
           tappedEnemyEntityId = ent.id;
         }
-      } else {
+      } else if (ent.entityType === "BUILDING") {
         const spec = BUILDINGS[ent.kind as BuildingKind];
         const inFootprint =
           worldTileFloatX >= ent.x - 0.35 &&
@@ -1109,6 +1158,14 @@ export default function GameMatchPage() {
           } else if (!tappedEnemyEntityId) {
             tappedEnemyEntityId = ent.id;
           }
+        }
+      } else if (ent.entityType === "TREE") {
+        const cx = ent.x + 0.5;
+        const cy = ent.y + 0.5;
+        const dist = Math.hypot(worldTileFloatX - cx, worldTileFloatY - cy);
+        if (dist <= bestEnemyDist) {
+          bestEnemyDist = dist;
+          tappedEnemyEntityId = ent.id;
         }
       }
     }
@@ -1169,10 +1226,10 @@ export default function GameMatchPage() {
       const myEcon = st.playersEconomy.get(st.playerId);
       const qSlot = myEcon?.queues.find((q) => q.category === st.placementBuilding?.category);
       const paidInQueue = qSlot?.activeItem === bKind;
-      if (repeatable && !paidInQueue && (myEcon?.credits ?? 0) < spec.cost) {
+      if (!paidInQueue && (myEcon?.credits ?? 0) < spec.cost) {
         useRtsGameStore.setState({
           evaBannerText:
-            "EVA : CRÉDITS INSUFFISANTS POUR POSER CET ÉLÉMENT",
+            "EVA : CRÉDITS INSUFFISANTS POUR POSER CE PATRON",
         });
         return;
       }
@@ -1186,9 +1243,6 @@ export default function GameMatchPage() {
         tileX: deployX,
         tileY: deployY,
       });
-      if (bKind === "CONCRETE_SLAB") {
-        st.terrainGrid[deployY * MAP_WIDTH_TILES + deployX] = 5;
-      }
       pendingPlacedTilesRef.current.set(`${deployX},${deployY}`, {
         tileX: deployX,
         tileY: deployY,

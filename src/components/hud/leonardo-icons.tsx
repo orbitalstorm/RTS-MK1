@@ -267,6 +267,13 @@ export const ProductionItemVectorIcon = React.memo(function ProductionItemVector
           </>
         )}
 
+        {itemKind === "SILVER_MINE" && (
+          <>
+            <polygon points="12,48 20,16 44,16 52,48" fill="#334155" stroke={pColor} strokeWidth="1.8" />
+            <polygon points="22,48 25,26 39,26 42,48" fill="#090d16" stroke="#e2e8f0" strokeWidth="1.6" />
+          </>
+        )}
+
         {itemKind === "CONCRETE_SLAB" && (
           <>
             <polygon points="14,12 50,12 54,16 54,48 50,52 14,52 10,48 10,16" fill="#525e6e" stroke={pColor} strokeWidth="1.8" />
@@ -449,6 +456,15 @@ export const ProductionItemVectorIcon = React.memo(function ProductionItemVector
             <circle cx="44" cy="20" r="3" fill="#38bdf8" />
             <circle cx="20" cy="44" r="3" fill="#38bdf8" />
             <circle cx="44" cy="44" r="3" fill="#38bdf8" />
+          </>
+        )}
+
+        {itemKind === "SILVER_MINE" && (
+          <>
+            <line x1="24" y1="34" x2="40" y2="34" stroke="#94a3b8" strokeWidth="1.5" />
+            <circle cx="17" cy="40" r="3" fill="#f8fafc" />
+            <circle cx="47" cy="40" r="3" fill="#f8fafc" />
+            <circle cx="32" cy="21" r="2.8" fill="#38bdf8" />
           </>
         )}
 

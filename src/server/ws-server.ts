@@ -360,6 +360,13 @@ export function createRtsRealtimeServer(customPort?: number) {
         lobby?.simulation?.issueRepairBuilding(msg.playerId, msg.buildingEntityId);
         return;
       }
+
+      case "COMMAND_CANCEL_CONSTRUCTION": {
+        lobbyManager.recordPlayerHeartbeat(msg.playerId);
+        const lobby = lobbyManager.getLobby(msg.lobbyId);
+        lobby?.simulation?.issueCancelConstruction(msg.playerId, msg.buildingEntityId);
+        return;
+      }
     }
   }
 

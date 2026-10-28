@@ -90,7 +90,11 @@ function computeOwnedBuildingsKey(
 ): string {
   const kinds = new Set<string>();
   for (const ent of entities.values()) {
-    if (ent.ownerId === playerId && ent.entityType === "BUILDING") {
+    if (
+      ent.ownerId === playerId &&
+      ent.entityType === "BUILDING" &&
+      (ent.buildProgress ?? 1) >= 1
+    ) {
       kinds.add(ent.kind);
     }
   }
@@ -104,7 +108,7 @@ function computeHudEconomySignature(econ: PlayerEconomyDelta | undefined): strin
     const pctInt = Math.round(q.progressRatio * 100);
     qSig += `${q.category}:${q.activeItem ?? "-"}:${pctInt}:${q.readyToPlace ? 1 : 0}|`;
   }
-  return `${econ.faction}:${econ.credits}:${econ.maxStorage}:${econ.powerProduced}:${econ.powerConsumed}:${econ.lowPower ? 1 : 0}:${econ.radarActive ? 1 : 0}:${econ.defeated ? 1 : 0}:${qSig}`;
+  return `${econ.faction}:${econ.credits}:${econ.silverOre ?? 0}:${econ.maxStorage}:${econ.powerProduced}:${econ.powerConsumed}:${econ.lowPower ? 1 : 0}:${econ.radarActive ? 1 : 0}:${econ.defeated ? 1 : 0}:${qSig}`;
 }
 
 function isFastTickDeltaPayload(raw: unknown): raw is TickDelta {

@@ -130,11 +130,13 @@ function getOrBuildMinimapTerrainCache(
       offCtx.fillStyle =
         t === TERRAIN_KIND.GRASS
           ? "#274225"
-          : t === TERRAIN_KIND.CONCRETE_SLAB
-            ? "#64748b"
-            : t === TERRAIN_KIND.CLIFF
-              ? "#475569"
-              : "#334155";
+          : t === TERRAIN_KIND.SILVER_ORE
+            ? "#e2e8f0"
+            : t === TERRAIN_KIND.CONCRETE_SLAB
+              ? "#64748b"
+              : t === TERRAIN_KIND.CLIFF
+                ? "#475569"
+                : "#334155";
       offCtx.fillRect(x * scaleX, y * scaleY, Math.ceil(scaleX), cellH);
     }
   }
@@ -333,6 +335,8 @@ export function renderMinimapRadar(input: MinimapRenderInput): void {
         const t = terrainGrid[idx] ?? 0;
         if (ore > 0) {
           ctx.fillStyle = "#16a34a";
+        } else if (t === TERRAIN_KIND.SILVER_ORE) {
+          ctx.fillStyle = "#e2e8f0";
         } else if (t === TERRAIN_KIND.GRASS) {
           ctx.fillStyle = "#274225";
         } else if (t === TERRAIN_KIND.CONCRETE_SLAB) {
@@ -349,10 +353,15 @@ export function renderMinimapRadar(input: MinimapRenderInput): void {
     }
   }
 
-  // Draw units & buildings blips
+  // Draw units, buildings & trees blips
   for (const ent of entities.values()) {
     const idx = Math.round(ent.y) * MAP_WIDTH_TILES + Math.round(ent.x);
     if (ent.ownerId !== localPlayerId && exploredCells.size > 0 && !visibleCells.has(idx)) {
+      continue;
+    }
+    if (ent.entityType === "TREE") {
+      ctx.fillStyle = "#15803d";
+      ctx.fillRect(ent.x * scaleX, ent.y * scaleY, scaleX * 1.2, scaleY * 1.2);
       continue;
     }
     ctx.fillStyle = FACTIONS[ent.faction].primaryColor;

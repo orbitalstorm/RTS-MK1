@@ -852,6 +852,83 @@ export function drawLeonardoBuilding(
     ctx.strokeStyle = "#38bdf8";
     ctx.lineWidth = 2 * u;
     ctx.stroke();
+  } else if (kind === "SILVER_MINE") {
+    // 2x2 Silver Mine featuring the prominent armored tunnel entrance ("l'entrée de la mine")
+    // 1. Sloped rock/concrete excavation embankment framing the mine shaft
+    ctx.beginPath();
+    ctx.moveTo(w * 0.1, h * 0.84);
+    ctx.lineTo(w * 0.2, h * 0.16);
+    ctx.lineTo(w * 0.8, h * 0.16);
+    ctx.lineTo(w * 0.9, h * 0.84);
+    ctx.closePath();
+    const hillGrad = ctx.createLinearGradient(w * 0.1, h * 0.16, w * 0.9, h * 0.84);
+    hillGrad.addColorStop(0, "#475569");
+    hillGrad.addColorStop(0.55, "#334155");
+    hillGrad.addColorStop(1, "#1e293b");
+    ctx.fillStyle = hillGrad;
+    ctx.fill();
+    ctx.strokeStyle = fSpec.primaryColor;
+    ctx.lineWidth = 2.2 * u;
+    ctx.stroke();
+
+    // 2. Heavy Steel Tunnel Portal Arch (L'Entrée de la Mine)
+    ctx.beginPath();
+    ctx.moveTo(w * 0.26, h * 0.84);
+    ctx.lineTo(w * 0.3, h * 0.32);
+    ctx.lineTo(w * 0.7, h * 0.32);
+    ctx.lineTo(w * 0.74, h * 0.84);
+    ctx.closePath();
+    ctx.fillStyle = "#64748b";
+    ctx.fill();
+    ctx.strokeStyle = "#e2e8f0";
+    ctx.lineWidth = 1.8 * u;
+    ctx.stroke();
+
+    // Deep dark subterranean tunnel mouth
+    ctx.beginPath();
+    ctx.moveTo(w * 0.32, h * 0.84);
+    ctx.lineTo(w * 0.35, h * 0.38);
+    ctx.lineTo(w * 0.65, h * 0.38);
+    ctx.lineTo(w * 0.68, h * 0.84);
+    ctx.closePath();
+    ctx.fillStyle = "#060911";
+    ctx.fill();
+
+    // Internal timber/steel support ribs inside the entrance
+    ctx.strokeStyle = "#475569";
+    ctx.lineWidth = 1.4 * u;
+    ctx.beginPath();
+    ctx.moveTo(w * 0.34, h * 0.52);
+    ctx.lineTo(w * 0.66, h * 0.52);
+    ctx.moveTo(w * 0.33, h * 0.66);
+    ctx.lineTo(w * 0.67, h * 0.66);
+    ctx.stroke();
+
+    // Minecart extraction rails emerging from the tunnel entrance
+    ctx.strokeStyle = "#94a3b8";
+    ctx.lineWidth = 1.6 * u;
+    ctx.beginPath();
+    ctx.moveTo(w * 0.43, h * 0.55);
+    ctx.lineTo(w * 0.4, h * 0.92);
+    ctx.moveTo(w * 0.57, h * 0.55);
+    ctx.lineTo(w * 0.6, h * 0.92);
+    ctx.stroke();
+
+    // Gleaming Silver Nuggets & Ore Hoppers flanking the entrance
+    for (const [nx, ny] of [
+      [w * 0.2, h * 0.72],
+      [w * 0.8, h * 0.72],
+      [w * 0.5, h * 0.76],
+    ] as const) {
+      ctx.beginPath();
+      ctx.arc(nx, ny, 4.2 * u, 0, Math.PI * 2);
+      ctx.fillStyle = "#e2e8f0";
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(nx - 1.2 * u, ny - 1.2 * u, 1.8 * u, 0, Math.PI * 2);
+      ctx.fillStyle = "#ffffff";
+      ctx.fill();
+    }
   } else if (kind === "CONCRETE_SLAB") {
     // Heavy Reinforced Concrete Foundation Slab (Dalle de Béton Armé)
     traceChamferedRect(ctx, w * 0.08, h * 0.08, w * 0.84, h * 0.84, 6 * u);

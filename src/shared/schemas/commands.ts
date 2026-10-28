@@ -12,12 +12,19 @@ export const BuildingKindSchema = z.enum([
   "WAR_FACTORY",
   "RADAR_DOME",
   "TECH_CENTER",
+  "SILVER_MINE",
   "CONCRETE_SLAB",
   "SANDBAG_WALL",
   "CONCRETE_WALL",
   "GUARD_TOWER",
   "SAM_SITE",
   "OBELISK",
+]);
+
+export const TreeKindSchema = z.enum([
+  "TREE_PINE",
+  "TREE_OAK",
+  "TREE_PALM",
 ]);
 
 export const UnitKindSchema = z.enum([
@@ -91,6 +98,13 @@ export const IssueRepairBuildingCommandSchema = z.object({
   buildingEntityId: z.string().min(1),
 });
 
+export const IssueCancelConstructionCommandSchema = z.object({
+  type: z.literal("COMMAND_CANCEL_CONSTRUCTION"),
+  lobbyId: z.string().min(1),
+  playerId: z.string().min(1),
+  buildingEntityId: z.string().min(1),
+});
+
 export const ClientLobbyActionSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("LOBBY_CREATE"),
@@ -148,6 +162,7 @@ export const ClientLobbyActionSchema = z.discriminatedUnion("type", [
   IssuePlaceBuildingCommandSchema,
   IssueSellBuildingCommandSchema,
   IssueRepairBuildingCommandSchema,
+  IssueCancelConstructionCommandSchema,
 ]);
 
 export type ClientMessage = z.infer<typeof ClientLobbyActionSchema>;

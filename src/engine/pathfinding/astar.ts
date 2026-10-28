@@ -275,7 +275,12 @@ export class AStarPathfinder {
       gy = alt.y;
     }
 
-    if (sx === gx && sy === gy) return [];
+    if (sx === gx && sy === gy) {
+      if (Math.hypot(gx - startX, gy - startY) > 0.02) {
+        return [{ x: gx, y: gy }];
+      }
+      return [];
+    }
 
     this.searchCounter = (this.searchCounter + 1) & 0x3fffffff;
     const tag = this.searchCounter;

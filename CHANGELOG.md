@@ -2,6 +2,27 @@
 
 All notable changes to **RTS-MK1** (`https://rts-mk1.orbital8.cloud`) follow strict non-reusable `v1.x.y` versioning.
 
+## [v1.8.0] — 2026-10-28
+
+### Added & Changed
+- **Concrete-Only Building Foundation (`TERRAIN_KIND.CONCRETE_SLAB`) & `8×8` Concrete Slab Spawn Pad (`SPAWN_CONCRETE_PAD_SIZE = 8`) (`src/shared/constants/index.ts`, `src/engine/simulation.ts`, `src/app/game/[lobbyId]/page.tsx`, `src/components/hud/classic-sidebar-hud.tsx`)**:
+  - Updated `isFoundationTerrainKind` and `canPlaceBuildingOnTerrainTile` so base buildings and defense turrets (`POWER_PLANT`, `REFINERY`, `SILO`, `BARRACKS`, `WAR_FACTORY`, `RADAR_DOME`, `TECH_CENTER`, `GUARD_TOWER`, `SAM_SITE`, `OBELISK`) can **only** be constructed on Concrete Slabs (`TERRAIN_KIND.CONCRETE_SLAB`), and no longer on Stone (`TERRAIN_KIND.STONE`).
+  - Generated an `8×8` `CONCRETE_SLAB` spawn pad (`(5..12, 5..12)`, `(59..66, 59..66)`, etc.) at each corner base where starting structures and units are deployed, providing immediate room for initial base construction while requiring `CONCRETE_SLAB` paving to expand further out.
+- **On-Site Robot Building Construction, Immediate Ground Blueprints (`Patron au Sol`), Multi-Site Simultaneous Assembly & Right-Click Blueprint Cancellation (`src/shared/constants/index.ts`, `src/shared/schemas/commands.ts`, `src/engine/simulation.ts`, `src/server/ws-server.ts`, `src/store/game-store.ts`, `src/components/hud/classic-sidebar-hud.tsx`, `src/app/game/[lobbyId]/page.tsx`, `src/renderer/world-renderer.ts`)**:
+  - Selecting any building or defense in the HUD immediately activates placement mode (`"Poser Patron"`) without waiting for a HUD timer: clicking on a valid foundation immediately places a ground blueprint (`buildProgress = 0.05`, `"PATRON"` / `"CHANTIER XX%"`) and deducts its cost.
+  - Multiple building blueprints can be placed on the ground ahead of time, and multiple Constructor Bots (`CONSTRUCTOR_BOT`) automatically partition and construct multiple sites simultaneously (`stepConstructorBots` with `claimedSiteIds` and footprint-edge docking). Completing a `REFINERY` on-site automatically deploys its free `HARVESTER`.
+  - Added `COMMAND_CANCEL_CONSTRUCTION` (`issueCancelConstruction`): when an incomplete building/blueprint (`buildProgress < 1`) is selected, right-clicking on it cancels the construction and refunds `100%` of its credit cost.
+- **Organic Multi-Lobed Ore Islands of Varied Sizes (`src/engine/simulation.ts`)**:
+  - Replaced uniform diamond-shaped ore patches with rotated elliptical, multi-lobed, deterministic noise-modulated ore veins (`oreDeposits`) featuring small scattered pockets, medium asymmetric expansion veins, and large contested central/flank basins.
+- **Rare `2×2` Silver Ore Boulders (`TERRAIN_KIND.SILVER_ORE`) & `2×2` Silver Mine (`SILVER_MINE`) (`src/shared/constants/index.ts`, `src/shared/schemas/commands.ts`, `src/shared/schemas/deltas.ts`, `src/engine/simulation.ts`, `src/renderer/generator/leonardo-vector-art.ts`, `src/renderer/world-renderer.ts`, `src/renderer/minimap-renderer.ts`, `src/components/hud/classic-sidebar-hud.tsx`, `src/components/hud/leonardo-icons.tsx`)**:
+  - Added rare `2×2` Silver Ore rock formations (`TERRAIN_KIND.SILVER_ORE = 6`) rendered as a unified `2×2` metallic boulder encrusted with gleaming silver nuggets (`drawSilverOreDeposit2x2`).
+  - Added the `2×2` `SILVER_MINE` (`Mine d'Argent`, `750 cr`), whose sprite displays the fortified mine tunnel entrance, timber/steel arch portal, and ore cart rails. `SILVER_MINE` requires integral coverage of all 4 tiles of a `2×2` `SILVER_ORE` rock (`canPlaceBuildingOnTerrainTile`) and passively yields `+5` Silver Ore (`silverOre`) per cycle (`SILVER_MINE_CYCLE_TICKS = 20`) once assembled by a Constructor Bot, displayed in the HUD's **"Minerai Argent"** counter.
+- **3-Phase Harvester Refinery Unloading Animation (`REVERSING_IN` -> `DUMPING` -> `PULLING_OUT`) (`src/shared/schemas/deltas.ts`, `src/engine/ecs/types.ts`, `src/engine/simulation.ts`, `src/renderer/world-renderer.ts`)**:
+  - Upgraded Harvester Refinery docking into a 3-phase sequence: the Harvester rotates its rear toward the Refinery bay, reverses `45%` inside the Refinery bay (`REVERSING_IN`, `4` ticks) with flashing reverse lights, tilts its dump-bed and discharges glowing ore into the receiving hopper (`DUMPING`, `25` ore/tick), and pulls back out (`PULLING_OUT`, `4` ticks) ready to depart for the next harvest.
+- **Destructible Multi-Species & Multi-Size Battlefield Trees (`TREE_PINE`, `TREE_OAK`, `TREE_PALM`) (`src/shared/constants/index.ts`, `src/shared/schemas/deltas.ts`, `src/engine/ecs/types.ts`, `src/engine/simulation.ts`, `src/renderer/generator/leonardo-vector-art.ts`, `src/renderer/world-renderer.ts`, `src/renderer/minimap-renderer.ts`, `src/app/game/[lobbyId]/page.tsx`)**:
+  - Added `TREE` entities across 3 distinct botanical species (`TREE_PINE` conifer, `TREE_OAK` broadleaf oak, `TREE_PALM` oasis palm) with varied scales (`0.82×` to `1.32×`) and scaled hit points (`~110` to `280 HP`).
+  - Trees block movement/placement and can be targeted (`COMMAND_ATTACK` by clicking a tree with combat units selected, or `COMMAND_ATTACK_GROUND`), taking multiple shots to destroy before collapsing with a burst of debris while being ignored by automatic enemy aggro.
+
 ## [v1.7.0] — 2026-10-28
 
 ### Added & Changed

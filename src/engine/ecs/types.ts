@@ -2,6 +2,7 @@ import type {
   BuildingKind,
   FactionId,
   ProductionCategory,
+  TreeKind,
   UnitKind,
 } from "../../shared/constants";
 
@@ -42,6 +43,9 @@ export interface HarvesterComponent {
   state: "IDLE" | "MOVING_TO_ORE" | "HARVESTING" | "RETURNING_TO_REFINERY" | "UNLOADING";
   targetOreTile: { x: number; y: number } | null;
   homeRefineryId: string | null;
+  unloadPhase?: "REVERSING_IN" | "DUMPING" | "PULLING_OUT";
+  unloadPhaseTicks?: number;
+  dockPos?: { x: number; y: number } | null;
 }
 
 export interface BuildingComponent {
@@ -58,10 +62,11 @@ export interface EcsEntity {
   id: string;
   ownerId: string;
   faction: FactionId;
-  entityType: "BUILDING" | "UNIT";
-  kind: BuildingKind | UnitKind;
+  entityType: "BUILDING" | "UNIT" | "TREE";
+  kind: BuildingKind | UnitKind | TreeKind;
   sightRadius: number;
   spawnProtectionTicks: number;
+  treeScale: number;
   stateLabel:
     | "IDLE"
     | "MOVING"
@@ -94,6 +99,7 @@ export interface PlayerSimState {
   faction: FactionId;
   isAi: boolean;
   credits: number;
+  silverOre: number;
   maxStorage: number;
   powerProduced: number;
   powerConsumed: number;

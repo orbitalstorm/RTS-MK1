@@ -3,6 +3,7 @@ import {
   BuildingKindSchema,
   FactionIdSchema,
   ProductionCategorySchema,
+  TreeKindSchema,
   UnitKindSchema,
 } from "./commands";
 
@@ -10,8 +11,8 @@ export const EntityStateSchema = z.object({
   id: z.string().min(1),
   ownerId: z.string().min(1),
   faction: FactionIdSchema,
-  entityType: z.enum(["BUILDING", "UNIT"]),
-  kind: z.union([BuildingKindSchema, UnitKindSchema]),
+  entityType: z.enum(["BUILDING", "UNIT", "TREE"]),
+  kind: z.union([BuildingKindSchema, UnitKindSchema, TreeKindSchema]),
   x: z.number(),
   y: z.number(),
   hp: z.number(),
@@ -22,6 +23,7 @@ export const EntityStateSchema = z.object({
   spawnProtectionTicks: z.number().int().min(0).default(0),
   isRepairing: z.boolean().default(false),
   buildProgress: z.number().min(0).max(1).default(1),
+  treeScale: z.number().min(0.5).max(2).default(1),
   stateLabel: z
     .enum([
       "IDLE",
@@ -45,7 +47,7 @@ export const OreTileDeltaSchema = z.object({
 export const TerrainTileDeltaSchema = z.object({
   tileX: z.number().int().min(0),
   tileY: z.number().int().min(0),
-  terrainKind: z.number().int().min(0).max(5),
+  terrainKind: z.number().int().min(0).max(6),
 });
 
 export const ProductionQueueSlotSchema = z.object({
@@ -59,6 +61,7 @@ export const PlayerEconomyDeltaSchema = z.object({
   playerId: z.string().min(1),
   faction: FactionIdSchema,
   credits: z.number().int().min(0),
+  silverOre: z.number().int().min(0).default(0),
   maxStorage: z.number().int().min(0),
   powerProduced: z.number().int(),
   powerConsumed: z.number().int(),
@@ -157,7 +160,7 @@ export const FullSnapshotSchema = z.object({
   tickId: z.number().int().min(0),
   mapWidth: z.number().int().positive(),
   mapHeight: z.number().int().positive(),
-  terrainGrid: z.array(z.number().int().min(0).max(5)), // 0=dirt/earth, 1=stone, 2=cliff(blocked), 3=ore, 4=grass, 5=concrete_slab
+  terrainGrid: z.array(z.number().int().min(0).max(6)), // 0=dirt/earth, 1=stone, 2=cliff(blocked), 3=ore, 4=grass, 5=concrete_slab, 6=silver_ore
   oreGrid: z.array(z.number().int().min(0)),
   entities: z.array(EntityStateSchema),
   players: z.array(PlayerEconomyDeltaSchema),

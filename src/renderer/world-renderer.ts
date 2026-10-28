@@ -662,6 +662,8 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
       const oreAmt = oreGrid[idx] ?? 0;
       if (oreAmt > 0) {
         drawActiveOreFormation(ctx, tx, ty, tx * s, ty * s, s, oreAmt, frameNowMs);
+      } else if (terrainGrid[idx] === TERRAIN_KIND.SILVER_ORE) {
+        drawSilverOreBoulderTile(ctx, terrainGrid, tx, ty, tx * s, ty * s, s, frameNowMs);
       }
     }
   }
@@ -761,7 +763,16 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
       }
 
       if (buildProg < 1) {
-        drawConstructionProgressOverlay(ctx, px, py, bw, bh, buildProg, frameNowMs);
+        drawConstructionProgressOverlay(
+          ctx,
+          px,
+          py,
+          bw,
+          bh,
+          buildProg,
+          frameNowMs,
+          ent.kind === "SILVER_MINE"
+        );
       }
 
       const ownerEcon = playersEconomy?.get(ent.ownerId);
@@ -820,6 +831,15 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
             FACTIONS[ent.faction].primaryColor
           );
         }
+      }
+    } else if (ent.entityType === "TREE") {
+      drawDestructibleTreeEntity(ctx, ent, px, py, s, frameNowMs);
+      const isSelected = selectedIds.has(ent.id);
+      if (ent.hp < ent.maxHp || isSelected) {
+        drawHealthBar(ctx, px + 4, py - 5, s - 8, 3, ent.hp, ent.maxHp);
+      }
+      if (isSelected) {
+        drawSelectionBracket(ctx, px + 2, py + 2, s - 4, s - 4, "#22c55e");
       }
     } else {
       const unitSpec = UNITS[ent.kind as UnitKind];
@@ -1392,7 +1412,8 @@ function drawVerticalStorageGauge(
 }
 
 /**
- * Renders scaffolding & a cyan assembly progress bar on floor slabs and walls while a Constructor Bot builds them.
+ * Renders blueprint ("patron positionné au sol"), scaffolding & a cyan assembly progress bar
+ * while a Constructor Bot builds the structure, plus the tunnel entrance outline on Silver Mines.
  */
 function drawConstructionProgressOverlay(
   ctx: CanvasRenderingContext2D,
@@ -1401,15 +1422,36 @@ function drawConstructionProgressOverlay(
   bw: number,
   bh: number,
   buildProgress: number,
-  frameNowMs: number
+  frameNowMs: number,
+  isSilverMine = false
 ): void {
   const pulse = 0.5 + 0.5 * Math.sin(frameNowMs * 0.014);
   ctx.save();
+
+  // Holographic blueprint ground grid ("patron positionné au sol")
+  ctx.fillStyle = `rgba(14, 165, 233, ${(0.12 + (1 - buildProgress) * 0.14).toFixed(2)})`;
+  ctx.fillRect(px + 2, py + 2, bw - 4, bh - 4);
+
   ctx.strokeStyle = `rgba(56, 189, 248, ${(0.5 + pulse * 0.4).toFixed(2)})`;
   ctx.lineWidth = 1.4;
   ctx.setLineDash([3, 3]);
   ctx.strokeRect(px + 2, py + 2, bw - 4, bh - 4);
   ctx.setLineDash([]);
+
+  // Prominent entrance portal outline for Silver Mine ("la partie affichée lors de sa construction est l'entrée")
+  if (isSilverMine) {
+    ctx.fillStyle = "rgba(6, 9, 17, 0.92)";
+    ctx.beginPath();
+    ctx.moveTo(px + bw * 0.3, py + bh * 0.84);
+    ctx.lineTo(px + bw * 0.34, py + bh * 0.36);
+    ctx.lineTo(px + bw * 0.66, py + bh * 0.36);
+    ctx.lineTo(px + bw * 0.7, py + bh * 0.84);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = "#e2e8f0";
+    ctx.lineWidth = 1.8;
+    ctx.stroke();
+  }
 
   // Progress bar at bottom of construction site
   const barW = bw - 6;
@@ -1754,6 +1796,20 @@ function drawBuildingLiveAnimation(
       bh * 0.68,
       storageFillRatio
     );
+  } else if (ent.kind === "SILVER_MINE") {
+    // Silver Mine entrance work lamps & gleaming silver nugget extraction pulse
+    const lampR = 2.6 + pulse * 1.4;
+    ctx.fillStyle = `rgba(226, 232, 240, ${(0.5 + pulse * 0.45).toFixed(2)})`;
+    ctx.beginPath();
+    ctx.arc(cx, py + bh * 0.26, lampR, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Animated silver cart glint inside the tunnel mouth
+    const cartOffset = Math.sin(frameNowMs * 0.0035) * (bh * 0.12);
+    ctx.fillStyle = "#f8fafc";
+    ctx.beginPath();
+    ctx.arc(cx, py + bh * 0.62 + cartOffset, 2.8, 0, Math.PI * 2);
+    ctx.fill();
   } else if (ent.kind === "SILO") {
     // Fill-level dependent luminescent emerald glow & vertical fill gauge on Silo
     const fillClamped = Math.max(0.05, Math.min(1, storageFillRatio));
@@ -1907,6 +1963,21 @@ function drawUnitLiveAnimation(
       ctx.fillStyle = "#a7f3d0";
       ctx.fill();
     } else if (ent.stateLabel === "UNLOADING") {
+      // Tilting rear dump-bed (benne relevée), reverse gear warning strobes & ore discharge stream into Refinery bay
+      const blink = Math.floor(frameNowMs / 140) % 2 === 0;
+      ctx.fillStyle = blink ? "#fef08a" : "#ef4444";
+      ctx.beginPath();
+      ctx.arc(-s * 0.24, s * 0.34, 2.1, 0, Math.PI * 2);
+      ctx.arc(s * 0.24, s * 0.34, 2.1, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Raised hydraulic dump-bed lip
+      ctx.fillStyle = "rgba(16, 185, 129, 0.38)";
+      ctx.strokeStyle = "#a7f3d0";
+      ctx.lineWidth = 1.4;
+      ctx.fillRect(-s * 0.22, 0, s * 0.44, s * 0.32);
+      ctx.strokeRect(-s * 0.22, 0, s * 0.44, s * 0.32);
+
       // Active ore discharge chute stream from rear dump-bed (+Y) into Refinery hopper
       const streamPhase = (frameNowMs * 0.012) % 1;
       ctx.strokeStyle = "#34d399";
@@ -1929,7 +2000,7 @@ function drawUnitLiveAnimation(
       }
     }
   } else if (ent.kind === "CONSTRUCTOR_BOT" && ent.stateLabel === "BUILDING") {
-    // Oscillating cyan/amber robotic welding arc while assembling slabs or walls
+    // Oscillating cyan/amber robotic welding arc while assembling structures
     const arcX = Math.sin(frameNowMs * 0.024) * 3.5;
     ctx.strokeStyle = "#38bdf8";
     ctx.lineWidth = 1.8;
@@ -1949,6 +2020,185 @@ function drawUnitLiveAnimation(
     ctx.arc(0, 2, 2.2 + pulse * 1.4, 0, Math.PI * 2);
     ctx.fillStyle = `rgba(250, 204, 21, ${(0.45 + pulse * 0.5).toFixed(2)})`;
     ctx.fill();
+  }
+
+  ctx.restore();
+}
+
+/**
+ * Renders a 2x2 Silver Ore boulder tile (`TERRAIN_KIND.SILVER_ORE = 6`) with gleaming silver nuggets ("pépites argentées").
+ */
+function drawSilverOreBoulderTile(
+  ctx: CanvasRenderingContext2D,
+  terrainGrid: readonly number[],
+  tx: number,
+  ty: number,
+  px: number,
+  py: number,
+  s: number,
+  frameNowMs: number
+): void {
+  const isSilverAt = (x: number, y: number): boolean => {
+    if (x < 0 || y < 0 || x >= MAP_WIDTH_TILES || y >= MAP_HEIGHT_TILES) return false;
+    return terrainGrid[y * MAP_WIDTH_TILES + x] === TERRAIN_KIND.SILVER_ORE;
+  };
+
+  // If this tile is the top-left corner of a 2x2 Silver Ore boulder, render the unified 2x2 rock formation
+  const isTopLeftOf2x2 =
+    !isSilverAt(tx - 1, ty) &&
+    !isSilverAt(tx, ty - 1) &&
+    isSilverAt(tx + 1, ty) &&
+    isSilverAt(tx, ty + 1);
+
+  if (!isTopLeftOf2x2 && (isSilverAt(tx - 1, ty) || isSilverAt(tx, ty - 1))) {
+    return;
+  }
+
+  const spanW = isTopLeftOf2x2 ? s * 2 : s;
+  const spanH = isTopLeftOf2x2 ? s * 2 : s;
+  const cx = px + spanW * 0.5;
+  const cy = py + spanH * 0.5;
+  const pulse = 0.5 + 0.5 * Math.sin(frameNowMs * 0.005 + tx * 0.7);
+
+  ctx.save();
+
+  // 1. Ground shadow under the 2x2 boulder
+  ctx.fillStyle = "rgba(6, 9, 15, 0.55)";
+  ctx.beginPath();
+  ctx.ellipse(cx + 2, cy + 3, spanW * 0.45, spanH * 0.43, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 2. Massive faceted crag boulder body
+  ctx.beginPath();
+  ctx.moveTo(px + spanW * 0.16, py + spanH * 0.82);
+  ctx.lineTo(px + spanW * 0.08, py + spanH * 0.42);
+  ctx.lineTo(px + spanW * 0.28, py + spanH * 0.12);
+  ctx.lineTo(px + spanW * 0.72, py + spanH * 0.1);
+  ctx.lineTo(px + spanW * 0.92, py + spanH * 0.44);
+  ctx.lineTo(px + spanW * 0.82, py + spanH * 0.86);
+  ctx.closePath();
+  const rockGrad = ctx.createLinearGradient(px, py, px + spanW, py + spanH);
+  rockGrad.addColorStop(0, "#64748b");
+  rockGrad.addColorStop(0.55, "#475569");
+  rockGrad.addColorStop(1, "#1e293b");
+  ctx.fillStyle = rockGrad;
+  ctx.fill();
+  ctx.strokeStyle = "#cbd5e1";
+  ctx.lineWidth = 1.6;
+  ctx.stroke();
+
+  // 3. Gleaming Silver Nuggets ("pépites argentées") embedded across the 2x2 boulder
+  const nuggets: Array<[number, number, number]> = [
+    [0.32, 0.34, 4.5],
+    [0.64, 0.28, 5.2],
+    [0.48, 0.52, 6.0],
+    [0.28, 0.66, 4.2],
+    [0.7, 0.64, 4.8],
+  ];
+  for (let i = 0; i < nuggets.length; i++) {
+    const [nxRatio, nyRatio, rad] = nuggets[i]!;
+    const nx = px + spanW * nxRatio;
+    const ny = py + spanH * nyRatio;
+    ctx.beginPath();
+    ctx.arc(nx, ny, rad, 0, Math.PI * 2);
+    ctx.fillStyle = "#cbd5e1";
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(nx - rad * 0.28, ny - rad * 0.28, rad * (0.48 + pulse * 0.15), 0, Math.PI * 2);
+    ctx.fillStyle = "#ffffff";
+    ctx.fill();
+  }
+
+  ctx.restore();
+}
+
+/**
+ * Renders a destructible Tree entity (`TREE_PINE`, `TREE_OAK`, `TREE_PALM`) with its size scale (`treeScale`).
+ */
+function drawDestructibleTreeEntity(
+  ctx: CanvasRenderingContext2D,
+  ent: EntityState,
+  px: number,
+  py: number,
+  s: number,
+  frameNowMs: number
+): void {
+  const scale = ent.treeScale ?? 1;
+  const cx = px + s * 0.5;
+  const cy = py + s * 0.5;
+  const sway = Math.sin(frameNowMs * 0.0022 + ent.x * 1.3 + ent.y * 0.9) * 1.2 * scale;
+
+  ctx.save();
+
+  // 1. Soft elliptical ground shadow
+  ctx.fillStyle = "rgba(8, 14, 10, 0.45)";
+  ctx.beginPath();
+  ctx.ellipse(cx + 3 * scale, cy + 4 * scale, 10 * scale, 6 * scale, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 2. Trunk
+  ctx.fillStyle = "#5c4028";
+  ctx.fillRect(cx - 2.2 * scale, cy - 2 * scale, 4.4 * scale, 8 * scale);
+
+  // 3. Species-specific foliage canopy
+  if (ent.kind === "TREE_PINE") {
+    const tiers = [
+      { yOff: 3, w: 12, h: 11, color: "#14532d" },
+      { yOff: -2, w: 9.5, h: 10, color: "#166534" },
+      { yOff: -7, w: 6.5, h: 8.5, color: "#22c55e" },
+    ];
+    for (const tier of tiers) {
+      ctx.beginPath();
+      ctx.moveTo(cx + sway, cy + (tier.yOff - tier.h) * scale);
+      ctx.lineTo(cx + tier.w * scale + sway * 0.5, cy + tier.yOff * scale);
+      ctx.lineTo(cx - tier.w * scale + sway * 0.5, cy + tier.yOff * scale);
+      ctx.closePath();
+      ctx.fillStyle = tier.color;
+      ctx.fill();
+      ctx.strokeStyle = "#052e16";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+  } else if (ent.kind === "TREE_PALM") {
+    // Arid curved palm fronds radiating from crown
+    const crownX = cx + sway;
+    const crownY = cy - 4 * scale;
+    ctx.strokeStyle = "#15803d";
+    ctx.lineWidth = 2.6 * scale;
+    ctx.lineCap = "round";
+    for (let i = 0; i < 6; i++) {
+      const ang = (i / 6) * Math.PI * 2 + 0.3;
+      const tipX = crownX + Math.cos(ang) * 11.5 * scale;
+      const tipY = crownY + Math.sin(ang) * 9.5 * scale;
+      ctx.beginPath();
+      ctx.moveTo(crownX, crownY);
+      ctx.quadraticCurveTo(
+        crownX + Math.cos(ang) * 6 * scale,
+        crownY + Math.sin(ang) * 4 * scale - 2 * scale,
+        tipX,
+        tipY
+      );
+      ctx.stroke();
+    }
+    ctx.beginPath();
+    ctx.arc(crownX, crownY, 3 * scale, 0, Math.PI * 2);
+    ctx.fillStyle = "#4ade80";
+    ctx.fill();
+  } else {
+    // TREE_OAK: lush multi-lobed broadleaf canopy
+    const lobes: Array<[number, number, number, string]> = [
+      [-5, 1, 7.5, "#14532d"],
+      [5, 1, 7.5, "#166534"],
+      [0, -4, 8.5, "#15803d"],
+      [-2.5, -2, 5.5, "#22c55e"],
+    ];
+    for (const [lx, ly, lr, col] of lobes) {
+      ctx.beginPath();
+      ctx.arc(cx + lx * scale + sway * 0.6, cy + ly * scale, lr * scale, 0, Math.PI * 2);
+      ctx.fillStyle = col;
+      ctx.fill();
+    }
   }
 
   ctx.restore();

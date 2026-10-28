@@ -23,6 +23,7 @@ import {
   APP_VERSION,
   BUILDINGS,
   CAMERA_SHAKE_MAX_OFFSET_PX,
+  canPlaceBuildingOnTerrainTile,
   computeCameraShakeOffset,
   computeDistanceAttenuatedShakeTrauma,
   computeEdgeScrollVelocity,
@@ -40,9 +41,13 @@ import {
   MAP_WIDTH_TILES,
   requiresStoneOrConcreteFoundation,
   resolveTouchTapAction,
+  SILVER_MINE_CYCLE_TICKS,
+  SILVER_MINE_YIELD_PER_CYCLE,
+  SPAWN_CONCRETE_PAD_SIZE,
   SPRITE_ATLAS_SCALE,
   TERRAIN_KIND,
   TOUCH_INTERACTION_MODES,
+  TREES,
   UNITS,
   UNIT_SPAWN_PROTECTION_TICKS,
   WATCHDOG_DISCONNECT_TIMEOUT_MS,
@@ -289,7 +294,7 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
   });
 
   it("v1.2.0 — supports Game Juice camera shake, shortest-arc 16-angle interpolation, and 2x Hi-DPI sprite scale", () => {
-    expect(APP_VERSION).toBe("1.7.0");
+    expect(APP_VERSION).toBe("1.8.0");
     expect(SPRITE_ATLAS_SCALE).toBe(2);
 
     // Zero trauma produces zero offset
@@ -574,11 +579,11 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
       sim.stepTick();
     }
     expect(sim.getPlayerState("p1")?.queues.BUILDING.readyToPlace).toBe(true);
-    expect(sim.issuePlaceBuilding("p1", "BUILDING", "CONCRETE_SLAB", 9, 5)).toBe(true);
-    for (let t = 0; t < 40; t++) {
+    expect(sim.issuePlaceBuilding("p1", "BUILDING", "CONCRETE_SLAB", 13, 5)).toBe(true);
+    for (let t = 0; t < 50; t++) {
       sim.stepTick();
     }
-    expect(sim.terrainGrid[5 * sim.width + 9]).toBe(TERRAIN_KIND.CONCRETE_SLAB);
+    expect(sim.terrainGrid[5 * sim.width + 13]).toBe(TERRAIN_KIND.CONCRETE_SLAB);
 
     // 6. 2-Minute AI Attack Grace Period (2400 ticks = 120s)
     expect(AI_ATTACK_GRACE_PERIOD_TICKS).toBe(2400);
@@ -731,15 +736,15 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
     expect(BUILDINGS.CONCRETE_WALL.category).toBe("DEFENSE");
 
     // Continuous placement of CONCRETE_SLAB without having to re-queue each tile in the menu
-    expect(sim.issuePlaceBuilding("p1", "BUILDING", "CONCRETE_SLAB", 8, 5)).toBe(true);
-    expect(sim.issuePlaceBuilding("p1", "BUILDING", "CONCRETE_SLAB", 9, 5)).toBe(true);
-    expect(sim.issuePlaceBuilding("p1", "BUILDING", "CONCRETE_SLAB", 10, 5)).toBe(true);
-    for (let t = 0; t < 90; t++) {
+    expect(sim.issuePlaceBuilding("p1", "BUILDING", "CONCRETE_SLAB", 8, 13)).toBe(true);
+    expect(sim.issuePlaceBuilding("p1", "BUILDING", "CONCRETE_SLAB", 9, 13)).toBe(true);
+    expect(sim.issuePlaceBuilding("p1", "BUILDING", "CONCRETE_SLAB", 10, 13)).toBe(true);
+    for (let t = 0; t < 110; t++) {
       sim.stepTick();
     }
-    expect(sim.terrainGrid[5 * sim.width + 8]).toBe(TERRAIN_KIND.CONCRETE_SLAB);
-    expect(sim.terrainGrid[5 * sim.width + 9]).toBe(TERRAIN_KIND.CONCRETE_SLAB);
-    expect(sim.terrainGrid[5 * sim.width + 10]).toBe(TERRAIN_KIND.CONCRETE_SLAB);
+    expect(sim.terrainGrid[13 * sim.width + 8]).toBe(TERRAIN_KIND.CONCRETE_SLAB);
+    expect(sim.terrainGrid[13 * sim.width + 9]).toBe(TERRAIN_KIND.CONCRETE_SLAB);
+    expect(sim.terrainGrid[13 * sim.width + 10]).toBe(TERRAIN_KIND.CONCRETE_SLAB);
 
     // Continuous placement of SANDBAG_WALL & CONCRETE_WALL
     expect(sim.issuePlaceBuilding("p1", "DEFENSE", "SANDBAG_WALL", 11, 6)).toBe(true);
@@ -815,7 +820,7 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
     expect(sim.getPlayerState("p1")!.credits).toBe(initialCredits - expectedSpent);
 
     // Allow Constructor Bot to finish assembling the walls, sandbags, and concrete slabs
-    for (let t = 0; t < 320; t++) {
+    for (let t = 0; t < 420; t++) {
       sim.stepTick();
     }
 
@@ -904,14 +909,14 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
     expect(sim.getEntity(wallSite.id)?.health.hp).toBe(wallSite.health.maxHp);
     expect(sim.terrainGrid[slabIdx]).toBe(TERRAIN_KIND.CONCRETE_SLAB);
 
-    // 3. Buildings can ONLY be constructed on Stone (TERRAIN_KIND.STONE) or Concrete (TERRAIN_KIND.CONCRETE_SLAB) foundations
+    // 3. Buildings can ONLY be constructed on Concrete (TERRAIN_KIND.CONCRETE_SLAB) foundations (no longer Stone in v1.8.0)
     expect(requiresStoneOrConcreteFoundation("POWER_PLANT")).toBe(true);
     expect(requiresStoneOrConcreteFoundation("BARRACKS")).toBe(true);
     expect(requiresStoneOrConcreteFoundation("GUARD_TOWER")).toBe(true);
     expect(requiresStoneOrConcreteFoundation("CONCRETE_SLAB")).toBe(false);
     expect(requiresStoneOrConcreteFoundation("CONCRETE_WALL")).toBe(false);
     expect(requiresStoneOrConcreteFoundation("SANDBAG_WALL")).toBe(false);
-    expect(isFoundationTerrainKind(TERRAIN_KIND.STONE)).toBe(true);
+    expect(isFoundationTerrainKind(TERRAIN_KIND.STONE)).toBe(false);
     expect(isFoundationTerrainKind(TERRAIN_KIND.CONCRETE_SLAB)).toBe(true);
     expect(isFoundationTerrainKind(TERRAIN_KIND.GRASS)).toBe(false);
     expect(isFoundationTerrainKind(TERRAIN_KIND.DIRT)).toBe(false);
@@ -1023,22 +1028,22 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
 
     const creditsBefore = sim.getPlayerState("p1")!.credits;
 
-    // First tick at dock transitions Harvester into UNLOADING without dumping cargo instantaneously
+    // First tick at dock transitions Harvester into UNLOADING (REVERSING_IN phase) without dumping cargo instantaneously
     sim.stepTick();
     expect(harv.harvester!.state).toBe("UNLOADING");
     expect(harv.stateLabel).toBe("UNLOADING");
     expect(harv.harvester!.cargoOre).toBe(HARVESTER_MAX_LOAD);
 
-    // Next 5 ticks unload 5 * 25 = 125 ore progressively
-    for (let t = 0; t < 5; t++) {
+    // 4 ticks of REVERSING_IN + 5 ticks of DUMPING unload 5 * 25 = 125 ore progressively
+    for (let t = 0; t < 4 + 5; t++) {
       sim.stepTick();
     }
     expect(harv.harvester!.state).toBe("UNLOADING");
     expect(harv.harvester!.cargoOre).toBe(HARVESTER_MAX_LOAD - 5 * HARVESTER_UNLOAD_PER_TICK);
     expect(sim.getPlayerState("p1")!.credits).toBe(creditsBefore + 5 * HARVESTER_UNLOAD_PER_TICK);
 
-    // Remaining 15 ticks complete the 500-ore unload and return Harvester to IDLE
-    for (let t = 0; t < 15; t++) {
+    // Remaining 15 ticks of DUMPING + 4 ticks of PULLING_OUT complete the 500-ore unload and return Harvester to IDLE
+    for (let t = 0; t < 15 + 4; t++) {
       sim.stepTick();
     }
     expect(harv.harvester!.cargoOre).toBe(0);
@@ -1053,5 +1058,186 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
     expect(vfx.getActiveCounts().oreNuggets).toBe(1);
     vfx.maybeSpawnHarvesterOreTrail("harv_rate", 11.0, 10, 4, 400, true, 1700);
     expect(vfx.getActiveCounts().oreNuggets).toBe(2);
+  });
+
+  it("v1.8.0 — enforces Concrete-only foundation with 8x8 spawn pad, Constructor Bot building assembly with simultaneous multi-bot construction and right-click cancel, organic ore islands, 2x2 Silver Ore & Silver Mine, Harvester reverse-in Refinery animation, and destructible Trees", () => {
+    const sim = new RtsSimulation("test_v180_features", [
+      { playerId: "p1", commanderName: "Alpha", faction: "GDI", isAi: false },
+      { playerId: "p2", commanderName: "Beta", faction: "NOD", isAi: false },
+    ]);
+
+    // 1. 8x8 Concrete Slab spawn pad at (5..12, 5..12) and Concrete-only foundation rule (Stone is rejected)
+    expect(SPAWN_CONCRETE_PAD_SIZE).toBe(8);
+    for (let dy = 0; dy < SPAWN_CONCRETE_PAD_SIZE; dy++) {
+      for (let dx = 0; dx < SPAWN_CONCRETE_PAD_SIZE; dx++) {
+        expect(sim.terrainGrid[(5 + dy) * sim.width + (5 + dx)]).toBe(TERRAIN_KIND.CONCRETE_SLAB);
+      }
+    }
+    expect(canPlaceBuildingOnTerrainTile("POWER_PLANT", TERRAIN_KIND.CONCRETE_SLAB)).toBe(true);
+    expect(canPlaceBuildingOnTerrainTile("POWER_PLANT", TERRAIN_KIND.STONE)).toBe(false);
+
+    // Verify placing a building on STONE (outside the 8x8 concrete pad) is rejected
+    sim.terrainGrid[5 * sim.width + 13] = TERRAIN_KIND.STONE;
+    sim.terrainGrid[5 * sim.width + 14] = TERRAIN_KIND.STONE;
+    sim.terrainGrid[6 * sim.width + 13] = TERRAIN_KIND.STONE;
+    sim.terrainGrid[6 * sim.width + 14] = TERRAIN_KIND.STONE;
+    expect(sim.issuePlaceBuilding("p1", "BUILDING", "POWER_PLANT", 13, 5)).toBe(false);
+
+    // 2. Immediate blueprint placement on the 8x8 Concrete pad, simultaneous multi-bot construction, and cancel construction
+    // Spawn a 2nd Constructor Bot so 2 bots can build 2 blueprints simultaneously
+    const bot2 = sim.createUnitEntity("p1", "GDI", "CONSTRUCTOR_BOT", 9, 9);
+    bot2.spawnProtectionTicks = 0;
+
+    const creditsBeforeBlueprints = sim.getPlayerState("p1")!.credits;
+    // Place three blueprints immediately on the 8x8 Concrete Slab pad without pre-waiting in the HUD queue:
+    // Blueprint A: BARRACKS at (8, 11)
+    // Blueprint B: POWER_PLANT at (11, 7)
+    // Blueprint C: POWER_PLANT at (11, 10) (to test right-click cancellation)
+    expect(sim.issuePlaceBuilding("p1", "BUILDING", "BARRACKS", 8, 11)).toBe(true);
+    expect(sim.issuePlaceBuilding("p1", "BUILDING", "POWER_PLANT", 11, 7)).toBe(true);
+    expect(sim.issuePlaceBuilding("p1", "BUILDING", "POWER_PLANT", 11, 10)).toBe(true);
+
+    const barracksBp = sim
+      .getAllEntities()
+      .find((e) => e.ownerId === "p1" && e.kind === "BARRACKS" && e.transform.x === 8 && e.transform.y === 11)!;
+    const powerBp = sim
+      .getAllEntities()
+      .find((e) => e.ownerId === "p1" && e.kind === "POWER_PLANT" && e.transform.x === 11 && e.transform.y === 7)!;
+    const towerBp = sim
+      .getAllEntities()
+      .find((e) => e.ownerId === "p1" && e.kind === "POWER_PLANT" && e.transform.x === 11 && e.transform.y === 10)!;
+
+    expect(barracksBp).toBeDefined();
+    expect(powerBp).toBeDefined();
+    expect(towerBp).toBeDefined();
+    expect(barracksBp.building!.buildProgress).toBeLessThan(1);
+    expect(powerBp.building!.buildProgress).toBeLessThan(1);
+    expect(towerBp.building!.buildProgress).toBeLessThan(1);
+
+    // Cancel Blueprint C via issueCancelConstruction (triggered by right-clicking a selected blueprint)
+    const creditsBeforeCancel = sim.getPlayerState("p1")!.credits;
+    expect(sim.issueCancelConstruction("p1", towerBp.id)).toBe(true);
+    expect(sim.getEntity(towerBp.id)).toBeUndefined();
+    expect(sim.getPlayerState("p1")!.credits).toBe(creditsBeforeCancel + BUILDINGS.POWER_PLANT.cost);
+    expect(sim.getPlayerState("p1")!.credits).toBe(
+      creditsBeforeBlueprints - BUILDINGS.BARRACKS.cost - BUILDINGS.POWER_PLANT.cost
+    );
+
+    // Step 15 ticks and verify BOTH blueprints (BARRACKS and POWER_PLANT) are being constructed simultaneously by the 2 Constructor Bots
+    for (let t = 0; t < 15; t++) {
+      sim.stepTick();
+    }
+    expect(sim.getEntity(barracksBp.id)!.building!.buildProgress).toBeGreaterThan(0.1);
+    expect(sim.getEntity(powerBp.id)!.building!.buildProgress).toBeGreaterThan(0.1);
+
+    // Step until both buildings are 100% completed
+    for (let t = 0; t < 95; t++) {
+      sim.stepTick();
+    }
+    expect(sim.getEntity(barracksBp.id)!.building!.buildProgress).toBe(1);
+    expect(sim.getEntity(powerBp.id)!.building!.buildProgress).toBe(1);
+
+    // 3. Rare 2x2 Silver Ore boulder (TERRAIN_KIND.SILVER_ORE) & 2x2 Silver Mine (SILVER_MINE)
+    expect(BUILDINGS.SILVER_MINE).toBeDefined();
+    expect(BUILDINGS.SILVER_MINE.footprintW).toBe(2);
+    expect(BUILDINGS.SILVER_MINE.footprintH).toBe(2);
+    expect(sim.terrainGrid[7 * sim.width + 15]).toBe(TERRAIN_KIND.SILVER_ORE);
+    expect(sim.terrainGrid[7 * sim.width + 16]).toBe(TERRAIN_KIND.SILVER_ORE);
+    expect(sim.terrainGrid[8 * sim.width + 15]).toBe(TERRAIN_KIND.SILVER_ORE);
+    expect(sim.terrainGrid[8 * sim.width + 16]).toBe(TERRAIN_KIND.SILVER_ORE);
+
+    // Partial overlap with the 2x2 Silver Ore rock (e.g. (14, 7)) MUST be rejected
+    expect(sim.issuePlaceBuilding("p1", "BUILDING", "SILVER_MINE", 14, 7)).toBe(false);
+    // Placing SILVER_MINE on Concrete MUST be rejected
+    expect(sim.issuePlaceBuilding("p1", "BUILDING", "SILVER_MINE", 8, 8)).toBe(false);
+    // Exact 2x2 integral coverage on (15, 7) MUST succeed
+    expect(sim.issuePlaceBuilding("p1", "BUILDING", "SILVER_MINE", 15, 7)).toBe(true);
+
+    const silverMine = sim
+      .getAllEntities()
+      .find((e) => e.ownerId === "p1" && e.kind === "SILVER_MINE" && e.transform.x === 15 && e.transform.y === 7)!;
+    expect(silverMine).toBeDefined();
+    expect(silverMine.building!.buildProgress).toBeLessThan(1);
+
+    // Step until Constructor Bot completes the Silver Mine and it passively extracts Silver Ore
+    for (let t = 0; t < 130; t++) {
+      sim.stepTick();
+    }
+    expect(sim.getEntity(silverMine.id)!.building!.buildProgress).toBe(1);
+    expect(SILVER_MINE_YIELD_PER_CYCLE).toBeGreaterThan(0);
+    expect(SILVER_MINE_CYCLE_TICKS).toBe(20);
+    expect(sim.getPlayerState("p1")!.silverOre).toBeGreaterThanOrEqual(SILVER_MINE_YIELD_PER_CYCLE);
+
+    // 4. Harvester 3-phase unloading animation at Refinery (REVERSING_IN -> DUMPING -> PULLING_OUT)
+    const harv = sim
+      .getAllEntities()
+      .find((e) => e.ownerId === "p1" && e.entityType === "UNIT" && e.kind === "HARVESTER")!;
+    const refinery = sim
+      .getAllEntities()
+      .find((e) => e.ownerId === "p1" && e.entityType === "BUILDING" && e.kind === "REFINERY")!;
+    harv.harvester!.cargoOre = 100;
+    harv.harvester!.state = "RETURNING_TO_REFINERY";
+    harv.transform.x = refinery.transform.x + 1;
+    harv.transform.y = refinery.transform.y + refinery.building!.footprintH;
+    const dockY = harv.transform.y;
+
+    sim.stepTick();
+    expect(harv.harvester!.state).toBe("UNLOADING");
+    expect(harv.harvester!.unloadPhase).toBe("REVERSING_IN");
+
+    // Step 3 ticks in REVERSING_IN -> Harvester reverses partially North inside the Refinery bay
+    for (let t = 0; t < 3; t++) {
+      sim.stepTick();
+    }
+    expect(harv.transform.y).toBeLessThan(dockY - 0.3);
+
+    // Next tick completes REVERSING_IN (45% inside bay) and transitions into DUMPING
+    sim.stepTick();
+    expect(harv.transform.y).toBeCloseTo(dockY - 0.45, 2);
+    expect(harv.harvester!.unloadPhase).toBe("DUMPING");
+
+    // 4 ticks of DUMPING empty the 100 ore and transition to PULLING_OUT
+    for (let t = 0; t < 4; t++) {
+      sim.stepTick();
+    }
+    expect(harv.harvester!.cargoOre).toBe(0);
+    expect(harv.harvester!.unloadPhase).toBe("PULLING_OUT");
+
+    // 4 ticks of PULLING_OUT return Harvester to dockY and IDLE
+    for (let t = 0; t < 4; t++) {
+      sim.stepTick();
+    }
+    expect(harv.harvester!.state).toBe("IDLE");
+    expect(harv.transform.y).toBeCloseTo(dockY, 2);
+
+    // 5. Destructible Trees of different species and sizes on the map
+    expect(Object.keys(TREES)).toEqual(["TREE_PINE", "TREE_OAK", "TREE_PALM"]);
+    const trees = sim.getAllEntities().filter((e) => e.entityType === "TREE");
+    expect(trees.length).toBeGreaterThanOrEqual(20);
+    const speciesSet = new Set(trees.map((t) => t.kind));
+    expect(speciesSet.has("TREE_PINE")).toBe(true);
+    expect(speciesSet.has("TREE_OAK")).toBe(true);
+    expect(speciesSet.has("TREE_PALM")).toBe(true);
+    const scales = new Set(trees.map((t) => t.treeScale));
+    expect(scales.size).toBeGreaterThanOrEqual(3);
+
+    // Spawn a tree near a Mammoth Tank and attack it over multiple shots until destroyed
+    const testTree = sim.createTreeEntity("TREE_OAK", 14, 14, 1.0);
+    const tank = sim.createUnitEntity("p1", "GDI", "MAMMOTH_TANK", 14, 12);
+    tank.spawnProtectionTicks = 0;
+    const initialTreeHp = testTree.health.hp;
+    sim.issueAttackCommand("p1", [tank.id], testTree.id);
+
+    sim.stepTick();
+    // First volley damages the tree but does not destroy it in a single shot
+    expect(sim.getEntity(testTree.id)).toBeDefined();
+    expect(sim.getEntity(testTree.id)!.health.hp).toBeLessThan(initialTreeHp);
+
+    // Continue firing across multiple volleys until the tree is destroyed
+    for (let t = 0; t < 100; t++) {
+      sim.stepTick();
+      if (!sim.getEntity(testTree.id)) break;
+    }
+    expect(sim.getEntity(testTree.id)).toBeUndefined();
   });
 });
