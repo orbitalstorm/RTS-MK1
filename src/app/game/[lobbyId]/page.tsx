@@ -32,6 +32,7 @@ import {
   BUILDINGS,
   computeEdgeScrollVelocity,
   FACTIONS,
+  isRepeatableBuildingKind,
   MAP_HEIGHT_TILES,
   MAP_WIDTH_TILES,
   resolveTouchTapAction,
@@ -456,14 +457,27 @@ export default function GameMatchPage() {
     const { tileX, tileY } = cameraRef.current.screenToTile(sx, sy);
 
     if (e.button === 2) {
-      // Right-click: Issue Move or Attack command for selected units
+      // Right-click: Issue Move, Attack, or Force-Attack Ground command for selected units
       e.preventDefault();
-      if (st.placementBuilding) {
+      if (st.placementBuilding || st.sellMode || st.repairMode || st.forceAttackMode) {
         setPlacementBuilding(null);
         return;
       }
       const selectedUnits = Array.from(st.selectedEntityIds);
       if (selectedUnits.length === 0) return;
+
+      if (e.ctrlKey) {
+        globalAudioMixer.playUiClick();
+        sendMessage({
+          type: "COMMAND_ATTACK_GROUND",
+          lobbyId,
+          playerId,
+          entityIds: selectedUnits,
+          targetTileX: tileX,
+          targetTileY: tileY,
+        });
+        return;
+      }
 
       // Check if clicking an enemy entity
       let targetEnemyId: string | null = null;
@@ -499,11 +513,12 @@ export default function GameMatchPage() {
       return;
     }
 
-    // Left-click: Place building, Sell structure, or start selection box
+    // Left-click: Place building, Repair structure, Sell structure, Force-Attack Ground, or start selection box
     if (st.placementBuilding) {
+      const bKind = st.placementBuilding.kind;
       const valid = canPlaceBuildingOnGrid(
         st,
-        st.placementBuilding.kind,
+        bKind,
         tileX,
         tileY
       );
@@ -520,11 +535,41 @@ export default function GameMatchPage() {
         lobbyId,
         playerId,
         category: st.placementBuilding.category,
-        buildingKind: st.placementBuilding.kind,
+        buildingKind: bKind,
         tileX,
         tileY,
       });
-      setPlacementBuilding(null);
+      const myEcon = st.playersEconomy.get(st.playerId);
+      const spec = BUILDINGS[bKind];
+      const keepToolActive =
+        isRepeatableBuildingKind(bKind) && (myEcon?.credits ?? 0) >= spec.cost;
+      if (!keepToolActive) {
+        setPlacementBuilding(null);
+      }
+      return;
+    }
+
+    if (st.repairMode) {
+      for (const ent of st.currEntities.values()) {
+        if (ent.ownerId === st.playerId && ent.entityType === "BUILDING") {
+          const spec = BUILDINGS[ent.kind as keyof typeof BUILDINGS];
+          if (
+            tileX >= ent.x &&
+            tileX < ent.x + spec.footprintW &&
+            tileY >= ent.y &&
+            tileY < ent.y + spec.footprintH
+          ) {
+            globalAudioMixer.playUiClick();
+            sendMessage({
+              type: "COMMAND_REPAIR_BUILDING",
+              lobbyId,
+              playerId,
+              buildingEntityId: ent.id,
+            });
+            break;
+          }
+        }
+      }
       return;
     }
 
@@ -550,6 +595,22 @@ export default function GameMatchPage() {
         }
       }
       return;
+    }
+
+    if (st.forceAttackMode || e.ctrlKey) {
+      const selectedUnits = Array.from(st.selectedEntityIds);
+      if (selectedUnits.length > 0) {
+        globalAudioMixer.playUiClick();
+        sendMessage({
+          type: "COMMAND_ATTACK_GROUND",
+          lobbyId,
+          playerId,
+          entityIds: selectedUnits,
+          targetTileX: tileX,
+          targetTileY: tileY,
+        });
+        return;
+      }
     }
 
     dragStartRef.current = { x: sx, y: sy };
@@ -919,6 +980,8 @@ export default function GameMatchPage() {
       mode: touchMode,
       hasPlacementBuilding: Boolean(st.placementBuilding),
       sellMode: st.sellMode,
+      repairMode: st.repairMode,
+      forceAttackMode: st.forceAttackMode,
       tappedOwnUnitId,
       tappedOwnBuildingId,
       tappedEnemyEntityId,
@@ -958,7 +1021,23 @@ export default function GameMatchPage() {
         tileX: deployX,
         tileY: deployY,
       });
-      setPlacementBuilding(null);
+      const myEcon = st.playersEconomy.get(st.playerId);
+      const keepToolActive =
+        isRepeatableBuildingKind(bKind) && (myEcon?.credits ?? 0) >= spec.cost;
+      if (!keepToolActive) {
+        setPlacementBuilding(null);
+      }
+      return;
+    }
+
+    if (action === "REPAIR_BUILDING" && tappedOwnBuildingId) {
+      globalAudioMixer.playUiClick();
+      sendMessage({
+        type: "COMMAND_REPAIR_BUILDING",
+        lobbyId,
+        playerId,
+        buildingEntityId: tappedOwnBuildingId,
+      });
       return;
     }
 
@@ -970,6 +1049,22 @@ export default function GameMatchPage() {
         playerId,
         buildingEntityId: tappedOwnBuildingId,
       });
+      return;
+    }
+
+    if (action === "ATTACK_GROUND") {
+      const selectedUnits = Array.from(st.selectedEntityIds);
+      if (selectedUnits.length > 0) {
+        globalAudioMixer.playUiClick();
+        sendMessage({
+          type: "COMMAND_ATTACK_GROUND",
+          lobbyId,
+          playerId,
+          entityIds: selectedUnits,
+          targetTileX: tileX,
+          targetTileY: tileY,
+        });
+      }
       return;
     }
 

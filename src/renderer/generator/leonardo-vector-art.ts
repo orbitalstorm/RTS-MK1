@@ -874,6 +874,77 @@ export function drawLeonardoBuilding(
     ctx.moveTo(cx, h * 0.16);
     ctx.lineTo(cx, h * 0.84);
     ctx.stroke();
+  } else if (kind === "SANDBAG_WALL") {
+    // Stacked Tactical Burlap Sandbag Barricade (2 staggered courses with canvas seams & shadow)
+    const bagRows: Array<{ y: number; offsets: number[] }> = [
+      { y: h * 0.28, offsets: [w * 0.24, w * 0.52, w * 0.76] },
+      { y: h * 0.5, offsets: [w * 0.34, w * 0.66] },
+      { y: h * 0.7, offsets: [w * 0.24, w * 0.5, w * 0.76] },
+    ];
+    for (const row of bagRows) {
+      for (const bx of row.offsets) {
+        // Bag cast shadow
+        ctx.beginPath();
+        ctx.ellipse(bx + 1 * u, row.y + 2 * u, 9.5 * u, 5.5 * u, 0, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(0, 0, 0, 0.45)";
+        ctx.fill();
+
+        // Sandbag body
+        const bagGrad = ctx.createLinearGradient(bx - 8 * u, row.y - 5 * u, bx + 8 * u, row.y + 5 * u);
+        bagGrad.addColorStop(0, "#d6b87c");
+        bagGrad.addColorStop(0.55, "#b59457");
+        bagGrad.addColorStop(1, "#7c6234");
+        ctx.beginPath();
+        ctx.ellipse(bx, row.y, 9 * u, 5 * u, 0, 0, Math.PI * 2);
+        ctx.fillStyle = bagGrad;
+        ctx.fill();
+        ctx.strokeStyle = "#4a381b";
+        ctx.lineWidth = 1.1 * u;
+        ctx.stroke();
+
+        // Burlap tie seam
+        ctx.strokeStyle = "rgba(254, 243, 199, 0.45)";
+        ctx.lineWidth = 0.9 * u;
+        ctx.beginPath();
+        ctx.moveTo(bx - 5 * u, row.y - 1 * u);
+        ctx.lineTo(bx + 5 * u, row.y - 1 * u);
+        ctx.stroke();
+      }
+    }
+  } else if (kind === "CONCRETE_WALL") {
+    // Heavy Ferro-Concrete Fortification Wall with Faction Buttresses & Anti-Tank Parapet
+    traceChamferedRect(ctx, w * 0.1, h * 0.1, w * 0.8, h * 0.8, 6 * u);
+    const wallGrad = ctx.createLinearGradient(0, 0, w, h);
+    wallGrad.addColorStop(0, "#94a3b8");
+    wallGrad.addColorStop(0.5, "#64748b");
+    wallGrad.addColorStop(1, "#334155");
+    ctx.fillStyle = wallGrad;
+    ctx.fill();
+    ctx.strokeStyle = "#0f172a";
+    ctx.lineWidth = 2.2 * u;
+    ctx.stroke();
+
+    // Raised armored parapet core & steel buttress ribs
+    traceChamferedRect(ctx, w * 0.2, h * 0.2, w * 0.6, h * 0.6, 4 * u);
+    ctx.fillStyle = "#475569";
+    ctx.fill();
+    ctx.strokeStyle = fSpec.primaryColor;
+    ctx.lineWidth = 1.8 * u;
+    ctx.stroke();
+
+    // Cross reinforcement steel beams
+    ctx.fillStyle = fSpec.secondaryColor;
+    ctx.fillRect(cx - 3.5 * u, h * 0.12, 7 * u, h * 0.76);
+    ctx.fillRect(w * 0.12, cy - 3.5 * u, w * 0.76, 7 * u);
+
+    // Center armored cap
+    ctx.beginPath();
+    ctx.arc(cx, cy, 5.5 * u, 0, Math.PI * 2);
+    ctx.fillStyle = fSpec.primaryColor;
+    ctx.fill();
+    ctx.strokeStyle = "#0f172a";
+    ctx.lineWidth = 1.4 * u;
+    ctx.stroke();
   } else if (kind === "GUARD_TOWER") {
     // Octagonal Concrete/Steel Casemate
     traceChamferedRect(ctx, w * 0.16, h * 0.16, w * 0.68, h * 0.68, 8 * u);

@@ -124,6 +124,92 @@ function computeBaseTerrainSignature(grid: readonly number[]): number {
   return hash | 0;
 }
 
+function hashTileCoord(tx: number, ty: number, salt: number): number {
+  let h = Math.imul(tx + 374761393, 668265263) ^ Math.imul(ty + 1274126177, 2246822519) ^ salt;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return (h ^ (h >>> 16)) >>> 0;
+}
+
+/**
+ * Draws sparse, non-repetitive organic micro-details on unified ground strata:
+ * - Darker grass tufts ("touffes d'herbe plus foncées éparses") on GRASS tiles.
+ * - Random lighter pebbles ("cailloux plus clairs aléatoires") on DIRT tiles.
+ */
+function drawSparseOrganicTerrainDetail(
+  ctx: CacheContext,
+  centerKind: number,
+  tx: number,
+  ty: number,
+  px: number,
+  py: number,
+  s: number
+): void {
+  const h0 = hashTileCoord(tx, ty, 0x9e3779b9);
+
+  if (centerKind === TERRAIN_KIND.GRASS) {
+    // Sparse darker grass tufts (~42% of grass tiles get 1 or 2 light tufts)
+    if ((h0 & 255) > 108) return;
+    const tuftCount = (h0 & 255) < 34 ? 2 : 1;
+    for (let i = 0; i < tuftCount; i++) {
+      const hi = hashTileCoord(tx, ty, 0x517cc1b7 + i * 7919);
+      const gx = px + 7 + ((hi & 0xff) / 255) * (s - 14);
+      const gy = py + 8 + (((hi >>> 8) & 0xff) / 255) * (s - 15);
+      const scale = 0.85 + (((hi >>> 16) & 0x3f) / 63) * 0.4;
+
+      // Subtle base shadow dot
+      ctx.fillStyle = "rgba(18, 34, 17, 0.55)";
+      ctx.beginPath();
+      ctx.ellipse(gx, gy + 0.8, 2.4 * scale, 1.0 * scale, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 3 delicate darker grass blades fanning upward
+      ctx.strokeStyle = (hi & 1) === 0 ? "#1b331a" : "#213c1f";
+      ctx.lineWidth = 1.15;
+      ctx.beginPath();
+      ctx.moveTo(gx - 0.8 * scale, gy + 0.5);
+      ctx.lineTo(gx - 2.3 * scale, gy - 2.8 * scale);
+      ctx.moveTo(gx, gy + 0.6);
+      ctx.lineTo(gx + 0.2 * scale, gy - 3.6 * scale);
+      ctx.moveTo(gx + 0.8 * scale, gy + 0.5);
+      ctx.lineTo(gx + 2.4 * scale, gy - 2.5 * scale);
+      ctx.stroke();
+    }
+    return;
+  }
+
+  if (centerKind === TERRAIN_KIND.DIRT) {
+    // Random lighter pebbles on dirt tiles (~48% of dirt tiles get 1 to 3 small pebbles)
+    if ((h0 & 255) > 122) return;
+    const pebbleCount = (h0 & 255) < 28 ? 3 : (h0 & 255) < 76 ? 2 : 1;
+    for (let i = 0; i < pebbleCount; i++) {
+      const hi = hashTileCoord(tx, ty, 0x85ebca6b + i * 6151);
+      const rx = px + 6.5 + ((hi & 0xff) / 255) * (s - 13);
+      const ry = py + 6.5 + (((hi >>> 8) & 0xff) / 255) * (s - 13);
+      const radX = 1.2 + (((hi >>> 16) & 0x1f) / 31) * 1.15;
+      const radY = radX * (0.68 + (((hi >>> 21) & 0x0f) / 15) * 0.24);
+      const rot = (((hi >>> 25) & 0x1f) / 31) * Math.PI;
+
+      // Cast shadow
+      ctx.fillStyle = "rgba(22, 15, 9, 0.48)";
+      ctx.beginPath();
+      ctx.ellipse(rx + 0.7, ry + 0.8, radX, radY, rot, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Lighter pebble body
+      ctx.fillStyle = (hi & 1) === 0 ? "#6e563e" : "#785f46";
+      ctx.beginPath();
+      ctx.ellipse(rx, ry, radX, radY, rot, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Crisp sunlit NW highlight
+      ctx.fillStyle = "#96795b";
+      ctx.beginPath();
+      ctx.arc(rx - radX * 0.28, ry - radY * 0.28, Math.max(0.55, radX * 0.45), 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
 function traceRoundedTilePath(
   ctx: CacheContext,
   x: number,
@@ -176,6 +262,7 @@ function drawUnifiedOrganicTerrainCell(
   if (mask.isInterior) {
     ctx.fillStyle = palette.fill;
     ctx.fillRect(px, py, s, s);
+    drawSparseOrganicTerrainDetail(ctx, mask.centerKind, tx, ty, px, py, s);
     return;
   }
 
@@ -223,6 +310,8 @@ function drawUnifiedOrganicTerrainCell(
   ctx.save();
   traceRoundedTilePath(ctx, px, py, s, rTL, rTR, rBR, rBL);
   ctx.clip();
+
+  drawSparseOrganicTerrainDetail(ctx, mask.centerKind, tx, ty, px, py, s);
 
   // Sunlit NW upper rim highlight along North & West zone boundaries
   if (!mask.sameN || !mask.sameW || rTL > 0) {
@@ -527,6 +616,8 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
         ctx.drawImage(bmp, px, py, bw, bh);
       }
 
+      drawBuildingLiveAnimation(ctx, ent, px, py, bw, bh, frameNowMs);
+
       if (spec.category === "DEFENSE") {
         const turretAngle = prev
           ? interpolateAngleIndex16(prev.turretAngleIndex, ent.turretAngleIndex, alpha)
@@ -578,6 +669,8 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
       if (turretBmp) {
         ctx.drawImage(turretBmp, px, py, s, s);
       }
+
+      drawUnitLiveAnimation(ctx, ent, px, py, s, bodyAngle, frameNowMs);
 
       // Spawn protection cooldown shield effect (1s target-immunity ring on newly created units)
       if ((ent.spawnProtectionTicks ?? 0) > 0) {
@@ -929,6 +1022,272 @@ function drawTacticalRangeCircles(
   ctx.globalAlpha = 0.62;
   ctx.lineWidth = 1.5;
   ctx.stroke();
+
+  ctx.restore();
+}
+
+/**
+ * Renders live mechanical & luminescent animations on buildings so the battlefield feels alive:
+ * - POWER_PLANT: rotating dual turbine rotors & pulsing plasma core
+ * - CONSTRUCTION_YARD: articulated swinging crane boom, cable trolley & assembly arc strobe
+ * - RADAR_DOME: rotating parabolic dish & 360° cyan radar sweep cone
+ * - REFINERY: pulsing smelter blast furnaces, animated ore hopper & unloading dock beacons
+ * - TECH_CENTER: rotating quantum particle ring & pulsing cryogenic nodes
+ * - BARRACKS / WAR_FACTORY / SILO: sequential runway/muster lights & active repair overlay
+ */
+function drawBuildingLiveAnimation(
+  ctx: CanvasRenderingContext2D,
+  ent: EntityState,
+  px: number,
+  py: number,
+  bw: number,
+  bh: number,
+  frameNowMs: number
+): void {
+  const cx = px + bw * 0.5;
+  const cy = py + bh * 0.5;
+  const minDim = Math.min(bw, bh);
+  const pulse = 0.5 + 0.5 * Math.sin(frameNowMs * 0.006);
+
+  ctx.save();
+
+  if (ent.kind === "POWER_PLANT") {
+    const rOuter = minDim * 0.21;
+    const baseSpin = frameNowMs * 0.0042;
+    const centers: Array<[number, number]> = [
+      [px + bw * 0.31, 1],
+      [px + bw * 0.69, -1],
+    ];
+    for (const [tx, dir] of centers) {
+      ctx.save();
+      ctx.translate(tx, cy);
+      ctx.rotate(baseSpin * dir);
+
+      // Rotating 4-blade turbine rotor
+      ctx.strokeStyle = "#cbd5e1";
+      ctx.lineWidth = 1.8;
+      for (let i = 0; i < 4; i++) {
+        const ang = (i * Math.PI) / 2;
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(ang) * rOuter * 0.22, Math.sin(ang) * rOuter * 0.22);
+        ctx.lineTo(Math.cos(ang) * rOuter * 0.88, Math.sin(ang) * rOuter * 0.88);
+        ctx.stroke();
+      }
+      ctx.restore();
+
+      // Pulsing cyan plasma core
+      ctx.beginPath();
+      ctx.arc(tx, cy, rOuter * (0.34 + pulse * 0.14), 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(56, 189, 248, ${(0.45 + pulse * 0.4).toFixed(2)})`;
+      ctx.fill();
+    }
+  } else if (ent.kind === "CONSTRUCTION_YARD") {
+    // Articulated crane boom swinging over the assembly bay
+    const pivotX = px + bw * 0.44;
+    const pivotY = py + bh * 0.72;
+    const swing = Math.sin(frameNowMs * 0.0018) * 0.36;
+    const boomLen = minDim * 0.46;
+    const tipX = pivotX + Math.cos(-0.82 + swing) * boomLen;
+    const tipY = pivotY + Math.sin(-0.82 + swing) * boomLen;
+
+    ctx.strokeStyle = "#facc15";
+    ctx.lineWidth = 3.2;
+    ctx.beginPath();
+    ctx.moveTo(pivotX, pivotY);
+    ctx.lineTo(tipX, tipY);
+    ctx.stroke();
+
+    // Trolley & welding spark at crane tip
+    ctx.beginPath();
+    ctx.arc(tipX, tipY, 2.6, 0, Math.PI * 2);
+    ctx.fillStyle = pulse > 0.65 ? "#e0f2fe" : "#38bdf8";
+    ctx.fill();
+
+    // Blinking command telemetry beacon
+    ctx.beginPath();
+    ctx.arc(px + bw * 0.16, py + bh * 0.12, 2.4 + pulse * 1.2, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(56, 189, 248, ${(0.4 + pulse * 0.55).toFixed(2)})`;
+    ctx.fill();
+  } else if (ent.kind === "RADAR_DOME") {
+    // Rotating parabolic dish & 360° cyan radar sweep cone
+    const domeR = minDim * 0.3;
+    const sweepAngle = (frameNowMs * 0.0028) % (Math.PI * 2);
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(sweepAngle);
+
+    // Sweeping radar cone
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.arc(0, 0, domeR * 0.9, -0.35, 0.35);
+    ctx.closePath();
+    ctx.fillStyle = "rgba(56, 189, 248, 0.28)";
+    ctx.fill();
+
+    // Dish cross-axis bar
+    ctx.strokeStyle = "#7dd3fc";
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(-domeR * 0.78, 0);
+    ctx.lineTo(domeR * 0.78, 0);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(domeR * 0.55, 0, 2.0, 0, Math.PI * 2);
+    ctx.fillStyle = "#e0f2fe";
+    ctx.fill();
+    ctx.restore();
+  } else if (ent.kind === "REFINERY") {
+    // Pulsing smelter furnace glow (left towers) & sequential unloading dock beacons
+    for (const fy of [py + bh * 0.34, py + bh * 0.66]) {
+      const furnaceR = 3.5 + pulse * 3.0;
+      const fGrad = ctx.createRadialGradient(
+        px + bw * 0.24,
+        fy,
+        0.8,
+        px + bw * 0.24,
+        fy,
+        furnaceR
+      );
+      fGrad.addColorStop(0, "#fef08a");
+      fGrad.addColorStop(0.5, "#f97316");
+      fGrad.addColorStop(1, "rgba(249, 115, 22, 0)");
+      ctx.fillStyle = fGrad;
+      ctx.beginPath();
+      ctx.arc(px + bw * 0.24, fy, furnaceR, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Sequential amber guide lights on harvester bay
+    const activeLight = Math.floor(frameNowMs / 220) % 3;
+    for (let i = 0; i < 3; i++) {
+      ctx.fillStyle = i === activeLight ? "#facc15" : "rgba(234, 179, 8, 0.28)";
+      ctx.beginPath();
+      ctx.arc(px + bw * 0.88, py + bh * (0.3 + i * 0.2), 2.0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } else if (ent.kind === "TECH_CENTER") {
+    // Rotating quantum ring & pulsing violet/cyan core
+    const qR = minDim * 0.22;
+    const qAngle = (frameNowMs * 0.0032) % (Math.PI * 2);
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(qAngle);
+    ctx.strokeStyle = "#e879f9";
+    ctx.lineWidth = 1.6;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.arc(0, 0, qR, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, 3.5 + pulse * 2.2, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(240, 171, 252, ${(0.5 + pulse * 0.45).toFixed(2)})`;
+    ctx.fill();
+  } else if (ent.kind === "WAR_FACTORY" || ent.kind === "BARRACKS") {
+    // Sequential roll-out / muster runway beacon lights
+    const step = Math.floor(frameNowMs / 240) % 3;
+    for (let i = 0; i < 3; i++) {
+      ctx.fillStyle = i === step ? "#38bdf8" : "rgba(56, 189, 248, 0.24)";
+      ctx.fillRect(px + bw * (0.32 + i * 0.16), py + bh * 0.82, 3, 2);
+    }
+  }
+
+  // Active Building Repair Overlay (golden/cyan wrench badge + welding sparks)
+  if (ent.isRepairing) {
+    ctx.strokeStyle = `rgba(56, 189, 248, ${(0.55 + pulse * 0.4).toFixed(2)})`;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 3]);
+    ctx.strokeRect(px + 2, py + 2, bw - 4, bh - 4);
+    ctx.setLineDash([]);
+
+    // Floating repair badge at top-right of structure
+    const bx = px + bw - 10;
+    const by = py + 10;
+    ctx.beginPath();
+    ctx.arc(bx, by, 6.5, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(15, 23, 42, 0.9)";
+    ctx.fill();
+    ctx.strokeStyle = "#38bdf8";
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    ctx.strokeStyle = "#facc15";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(bx - 3.2, by);
+    ctx.lineTo(bx + 3.2, by);
+    ctx.moveTo(bx, by - 3.2);
+    ctx.lineTo(bx, by + 3.2);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+/**
+ * Renders subtle live animations on mobile units (vehicle headlights, Harvester plasma cutter beam, MCV beacon).
+ */
+function drawUnitLiveAnimation(
+  ctx: CanvasRenderingContext2D,
+  ent: EntityState,
+  px: number,
+  py: number,
+  s: number,
+  bodyAngleIndex: number,
+  frameNowMs: number
+): void {
+  const spec = UNITS[ent.kind as UnitKind];
+  if (!spec || spec.category !== "VEHICLE") return;
+
+  const cx = px + s * 0.5;
+  const cy = py + s * 0.5;
+  const rad = (bodyAngleIndex / 16) * Math.PI * 2;
+  const pulse = 0.5 + 0.5 * Math.sin(frameNowMs * 0.01);
+
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(rad);
+
+  // Subtle dual forward headlights (-Y is forward in sprite space)
+  ctx.fillStyle = "rgba(254, 240, 138, 0.22)";
+  ctx.beginPath();
+  ctx.moveTo(-4, -s * 0.34);
+  ctx.lineTo(-9, -s * 0.62);
+  ctx.lineTo(0, -s * 0.62);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo(4, -s * 0.34);
+  ctx.lineTo(0, -s * 0.62);
+  ctx.lineTo(9, -s * 0.62);
+  ctx.closePath();
+  ctx.fill();
+
+  if (ent.kind === "HARVESTER" && ent.stateLabel === "HARVESTING") {
+    // Oscillating emerald plasma harvesting beam at front scoop
+    const sweep = Math.sin(frameNowMs * 0.018) * 4.5;
+    ctx.strokeStyle = "#34d399";
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    ctx.moveTo(-4.5, -s * 0.32);
+    ctx.lineTo(sweep, -s * 0.52);
+    ctx.lineTo(4.5, -s * 0.32);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(sweep, -s * 0.52, 2.2 + pulse * 1.4, 0, Math.PI * 2);
+    ctx.fillStyle = "#86efac";
+    ctx.fill();
+  } else if (ent.kind === "MCV") {
+    // Blinking amber command beacon on MCV roof
+    ctx.beginPath();
+    ctx.arc(0, 2, 2.2 + pulse * 1.4, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(250, 204, 21, ${(0.45 + pulse * 0.5).toFixed(2)})`;
+    ctx.fill();
+  }
 
   ctx.restore();
 }

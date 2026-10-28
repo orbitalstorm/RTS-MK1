@@ -33,6 +33,7 @@ export interface CombatComponent {
   attackCooldownTicks: number;
   cooldownRemaining: number;
   targetEntityId: string | null;
+  groundTarget: { x: number; y: number } | null;
 }
 
 export interface HarvesterComponent {
@@ -48,6 +49,7 @@ export interface BuildingComponent {
   footprintH: number;
   powerDelta: number;
   storageCapacity: number;
+  isRepairing: boolean;
 }
 
 export interface EcsEntity {

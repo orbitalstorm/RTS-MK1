@@ -303,6 +303,18 @@ export function createRtsRealtimeServer(customPort?: number) {
         return;
       }
 
+      case "COMMAND_ATTACK_GROUND": {
+        lobbyManager.recordPlayerHeartbeat(msg.playerId);
+        const lobby = lobbyManager.getLobby(msg.lobbyId);
+        lobby?.simulation?.issueAttackGroundCommand(
+          msg.playerId,
+          msg.entityIds,
+          msg.targetTileX,
+          msg.targetTileY
+        );
+        return;
+      }
+
       case "COMMAND_START_PRODUCTION": {
         lobbyManager.recordPlayerHeartbeat(msg.playerId);
         const lobby = lobbyManager.getLobby(msg.lobbyId);
@@ -339,6 +351,13 @@ export function createRtsRealtimeServer(customPort?: number) {
         lobbyManager.recordPlayerHeartbeat(msg.playerId);
         const lobby = lobbyManager.getLobby(msg.lobbyId);
         lobby?.simulation?.issueSellBuilding(msg.playerId, msg.buildingEntityId);
+        return;
+      }
+
+      case "COMMAND_REPAIR_BUILDING": {
+        lobbyManager.recordPlayerHeartbeat(msg.playerId);
+        const lobby = lobbyManager.getLobby(msg.lobbyId);
+        lobby?.simulation?.issueRepairBuilding(msg.playerId, msg.buildingEntityId);
         return;
       }
     }

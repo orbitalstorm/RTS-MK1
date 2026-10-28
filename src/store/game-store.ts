@@ -59,6 +59,8 @@ export interface RtsGameStoreState {
   selectedEntityIds: Set<string>;
   placementBuilding: { category: "BUILDING" | "DEFENSE"; kind: BuildingKind } | null;
   sellMode: boolean;
+  repairMode: boolean;
+  forceAttackMode: boolean;
   audioMuted: boolean;
   evaBannerText: string;
 
@@ -69,6 +71,8 @@ export interface RtsGameStoreState {
   setSelectedEntities: (ids: Set<string>) => void;
   setPlacementBuilding: (b: { category: "BUILDING" | "DEFENSE"; kind: BuildingKind } | null) => void;
   setSellMode: (enabled: boolean) => void;
+  setRepairMode: (enabled: boolean) => void;
+  setForceAttackMode: (enabled: boolean) => void;
   setAudioMuted: (muted: boolean) => void;
   consumeAcousticEvents: () => AcousticEvent[];
   consumeVisualEffects: () => VisualEffectEvent[];
@@ -166,6 +170,8 @@ export const useRtsGameStore = create<RtsGameStoreState>((set, get) => ({
   selectedEntityIds: new Set(),
   placementBuilding: null,
   sellMode: false,
+  repairMode: false,
+  forceAttackMode: false,
   audioMuted: false,
   evaBannerText: "LIAISON TACTIQUE EVA PRÊTE",
 
@@ -262,8 +268,34 @@ export const useRtsGameStore = create<RtsGameStoreState>((set, get) => ({
   },
 
   setSelectedEntities: (ids) => set({ selectedEntityIds: ids }),
-  setPlacementBuilding: (b) => set({ placementBuilding: b, sellMode: false }),
-  setSellMode: (enabled) => set({ sellMode: enabled, placementBuilding: null }),
+  setPlacementBuilding: (b) =>
+    set({
+      placementBuilding: b,
+      sellMode: false,
+      repairMode: false,
+      forceAttackMode: false,
+    }),
+  setSellMode: (enabled) =>
+    set({
+      sellMode: enabled,
+      placementBuilding: null,
+      repairMode: false,
+      forceAttackMode: false,
+    }),
+  setRepairMode: (enabled) =>
+    set({
+      repairMode: enabled,
+      placementBuilding: null,
+      sellMode: false,
+      forceAttackMode: false,
+    }),
+  setForceAttackMode: (enabled) =>
+    set({
+      forceAttackMode: enabled,
+      placementBuilding: null,
+      sellMode: false,
+      repairMode: false,
+    }),
   setAudioMuted: (muted) => set({ audioMuted: muted }),
 
   consumeAcousticEvents: () => {

@@ -274,6 +274,23 @@ export const ProductionItemVectorIcon = React.memo(function ProductionItemVector
           </>
         )}
 
+        {itemKind === "SANDBAG_WALL" && (
+          <>
+            <ellipse cx="22" cy="24" rx="10" ry="5.5" fill="#b59457" stroke="#4a381b" strokeWidth="1.5" />
+            <ellipse cx="42" cy="24" rx="10" ry="5.5" fill="#b59457" stroke="#4a381b" strokeWidth="1.5" />
+            <ellipse cx="32" cy="33" rx="11" ry="5.8" fill="#d6b87c" stroke="#4a381b" strokeWidth="1.5" />
+            <ellipse cx="22" cy="42" rx="10" ry="5.5" fill="#b59457" stroke="#4a381b" strokeWidth="1.5" />
+            <ellipse cx="42" cy="42" rx="10" ry="5.5" fill="#b59457" stroke="#4a381b" strokeWidth="1.5" />
+          </>
+        )}
+
+        {itemKind === "CONCRETE_WALL" && (
+          <>
+            <polygon points="14,12 50,12 52,16 52,48 50,52 14,52 12,48 12,16" fill="#64748b" stroke={pColor} strokeWidth="2" />
+            <rect x="18" y="18" width="28" height="28" rx="3" fill="#475569" stroke="#0f172a" strokeWidth="1.6" />
+          </>
+        )}
+
         {itemKind === "GUARD_TOWER" && (
           <>
             <polygon points="20,18 44,18 48,24 48,48 16,48 16,24" fill={sColor} stroke={pColor} strokeWidth="1.8" />
@@ -432,6 +449,22 @@ export const ProductionItemVectorIcon = React.memo(function ProductionItemVector
             <circle cx="44" cy="22" r="2" fill="#cbd5e1" />
             <circle cx="20" cy="42" r="2" fill="#cbd5e1" />
             <circle cx="44" cy="42" r="2" fill="#cbd5e1" />
+          </>
+        )}
+
+        {itemKind === "SANDBAG_WALL" && (
+          <>
+            <line x1="16" y1="24" x2="28" y2="24" stroke="#fef3c7" strokeWidth="1.2" opacity="0.6" />
+            <line x1="36" y1="24" x2="48" y2="24" stroke="#fef3c7" strokeWidth="1.2" opacity="0.6" />
+            <line x1="25" y1="33" x2="39" y2="33" stroke="#fef3c7" strokeWidth="1.2" opacity="0.7" />
+          </>
+        )}
+
+        {itemKind === "CONCRETE_WALL" && (
+          <>
+            <rect x="29" y="14" width="6" height="36" fill={sColor} />
+            <rect x="14" y="29" width="36" height="6" fill={sColor} />
+            <circle cx="32" cy="32" r="5" fill={pColor} stroke="#0f172a" strokeWidth="1.4" />
           </>
         )}
 

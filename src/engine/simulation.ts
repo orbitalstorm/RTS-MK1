@@ -2,12 +2,15 @@ import {
   AI_ATTACK_GRACE_PERIOD_TICKS,
   BASE_BUILD_RADIUS_TILES,
   BASE_STORAGE_CAPACITY,
+  BUILDING_REPAIR_COST_PER_TICK,
+  BUILDING_REPAIR_HP_PER_TICK,
   BUILDINGS,
   degradeTerrainLayer,
   FACTIONS,
   getTerrainLayerThickness,
   HARVESTER_LOAD_PER_TICK,
   HARVESTER_MAX_LOAD,
+  isRepeatableBuildingKind,
   MAP_HEIGHT_TILES,
   MAP_WIDTH_TILES,
   STARTING_CREDITS,
@@ -324,6 +327,7 @@ export class RtsSimulation {
               attackCooldownTicks: spec.attackCooldownTicks,
               cooldownRemaining: 0,
               targetEntityId: null,
+              groundTarget: null,
             }
           : null,
       harvester: null,
@@ -332,6 +336,7 @@ export class RtsSimulation {
         footprintH: spec.footprintH,
         powerDelta: spec.powerDelta,
         storageCapacity: spec.storageCapacity,
+        isRepairing: false,
       },
       dirty: false,
     };
@@ -390,6 +395,7 @@ export class RtsSimulation {
               attackCooldownTicks: spec.attackCooldownTicks,
               cooldownRemaining: 0,
               targetEntityId: null,
+              groundTarget: null,
             }
           : null,
       harvester:
@@ -443,6 +449,7 @@ export class RtsSimulation {
       ent.navigation.waitTicks = 0;
       if (ent.combat) {
         ent.combat.targetEntityId = null;
+        ent.combat.groundTarget = null;
       }
       if (ent.harvester) {
         const idxTile = gy * this.width + gx;
@@ -474,6 +481,26 @@ export class RtsSimulation {
       const ent = this.entities.get(id);
       if (!ent || ent.ownerId !== playerId || !ent.combat) continue;
       ent.combat.targetEntityId = targetEntityId;
+      ent.combat.groundTarget = null;
+      ent.stateLabel = "ATTACKING";
+      ent.dirty = true;
+    }
+  }
+
+  public issueAttackGroundCommand(
+    playerId: string,
+    entityIds: readonly string[],
+    targetTileX: number,
+    targetTileY: number
+  ): void {
+    const gx = Math.max(0, Math.min(this.width - 1, Math.round(targetTileX)));
+    const gy = Math.max(0, Math.min(this.height - 1, Math.round(targetTileY)));
+
+    for (const id of entityIds) {
+      const ent = this.entities.get(id);
+      if (!ent || ent.ownerId !== playerId || !ent.combat) continue;
+      ent.combat.targetEntityId = null;
+      ent.combat.groundTarget = { x: gx, y: gy };
       ent.stateLabel = "ATTACKING";
       ent.dirty = true;
     }
@@ -515,12 +542,21 @@ export class RtsSimulation {
   ): boolean {
     const player = this.players.get(playerId);
     if (!player || player.defeated) return false;
+    const spec = BUILDINGS[buildingKind];
+    if (!spec || spec.category !== category) return false;
+
     const slot = player.queues[category];
-    if (!slot.readyToPlace || slot.activeItem !== buildingKind) return false;
+    const paidViaQueue = slot.readyToPlace && slot.activeItem === buildingKind;
+    const canChainRepeat =
+      !paidViaQueue &&
+      isRepeatableBuildingKind(buildingKind) &&
+      this.hasPrerequisites(playerId, spec.prerequisites) &&
+      player.credits >= spec.cost;
+
+    if (!paidViaQueue && !canChainRepeat) return false;
 
     this.rebuildSpatialReservations();
 
-    const spec = BUILDINGS[buildingKind];
     if (!this.isWithinBaseBuildRadius(playerId, tileX, tileY, spec.footprintW, spec.footprintH)) {
       return false;
     }
@@ -546,6 +582,10 @@ export class RtsSimulation {
         }
       }
 
+      if (canChainRepeat) {
+        player.credits -= spec.cost;
+      }
+
       this.terrainGrid[idx] = TERRAIN_KIND.CONCRETE_SLAB;
       this.terrainDamageGrid[idx] = 0;
       if ((this.oreGrid[idx] ?? 0) > 0) {
@@ -562,10 +602,12 @@ export class RtsSimulation {
         terrainKind: TERRAIN_KIND.CONCRETE_SLAB,
       });
 
-      slot.activeItem = null;
-      slot.ticksElapsed = 0;
-      slot.ticksRequired = 0;
-      slot.readyToPlace = false;
+      if (paidViaQueue) {
+        slot.activeItem = null;
+        slot.ticksElapsed = 0;
+        slot.ticksRequired = 0;
+        slot.readyToPlace = false;
+      }
       this.pushAcoustic("EVA_BUILDING_DEPLOYED", tileX, tileY, playerId);
       return true;
     }
@@ -599,6 +641,10 @@ export class RtsSimulation {
           }
         }
       }
+    }
+
+    if (canChainRepeat) {
+      player.credits -= spec.cost;
     }
 
     // Relocate any friendly mobile units currently inside the new building footprint to perimeter dock tiles
@@ -647,10 +693,12 @@ export class RtsSimulation {
         }
       }
     }
-    slot.activeItem = null;
-    slot.ticksElapsed = 0;
-    slot.ticksRequired = 0;
-    slot.readyToPlace = false;
+    if (paidViaQueue) {
+      slot.activeItem = null;
+      slot.ticksElapsed = 0;
+      slot.ticksRequired = 0;
+      slot.readyToPlace = false;
+    }
 
     // Free harvester delivered with a new Refinery if space is available nearby
     if (buildingKind === "REFINERY") {
@@ -672,6 +720,50 @@ export class RtsSimulation {
 
     this.recomputeAllPlayerEconomies();
     this.pushAcoustic("EVA_BUILDING_DEPLOYED", tileX, tileY, playerId);
+    return true;
+  }
+
+  public issueRepairBuilding(playerId: string, buildingEntityId: string): boolean {
+    const ent = this.entities.get(buildingEntityId);
+    const player = this.players.get(playerId);
+    if (
+      !ent ||
+      !player ||
+      ent.ownerId !== playerId ||
+      ent.entityType !== "BUILDING" ||
+      !ent.building
+    ) {
+      return false;
+    }
+    if (ent.health.hp >= ent.health.maxHp) {
+      if (ent.building.isRepairing) {
+        ent.building.isRepairing = false;
+        ent.dirty = true;
+      }
+      return false;
+    }
+
+    ent.building.isRepairing = !ent.building.isRepairing;
+    if (ent.building.isRepairing && player.credits >= BUILDING_REPAIR_COST_PER_TICK) {
+      player.credits -= BUILDING_REPAIR_COST_PER_TICK;
+      ent.health.hp = Math.min(
+        ent.health.maxHp,
+        ent.health.hp + BUILDING_REPAIR_HP_PER_TICK * 2
+      );
+      if (ent.health.hp >= ent.health.maxHp) {
+        ent.building.isRepairing = false;
+      }
+      this.pushVisualEffect(
+        "HARVEST_SPARKS",
+        ent.transform.x + (ent.building.footprintW - 1) * 0.5,
+        ent.transform.y + (ent.building.footprintH - 1) * 0.5,
+        0.75,
+        0,
+        ent.faction
+      );
+      this.pushAcoustic("CREDITS_TICK", ent.transform.x, ent.transform.y, playerId);
+    }
+    ent.dirty = true;
     return true;
   }
 
@@ -713,6 +805,7 @@ export class RtsSimulation {
     this.recomputeAllPlayerEconomies();
 
     this.stepProductionQueues();
+    this.stepBuildingRepairs();
     this.stepHarvesters();
     this.stepUnitMovement();
     this.stepCombat();
@@ -1225,9 +1318,13 @@ export class RtsSimulation {
       if (lastDx !== 0 || lastDy !== 0) {
         const newAngle = vectorToAngleIndex16(lastDx, lastDy);
         ent.transform.angleIndex = newAngle;
-        if (!ent.combat || !ent.combat.targetEntityId) {
+        if (!ent.combat || (!ent.combat.targetEntityId && !ent.combat.groundTarget)) {
           ent.transform.turretAngleIndex = newAngle;
         }
+      }
+
+      if (nav.pathIndex >= nav.path.length && ent.stateLabel === "MOVING") {
+        ent.stateLabel = "IDLE";
       }
 
       this.reservationGrid.reserveUnitTile(
@@ -1235,6 +1332,34 @@ export class RtsSimulation {
         Math.round(ent.transform.y),
         ent.id
       );
+      ent.dirty = true;
+    }
+  }
+
+  private stepBuildingRepairs(): void {
+    for (const ent of this.entities.values()) {
+      if (ent.entityType !== "BUILDING" || !ent.building || !ent.building.isRepairing) {
+        continue;
+      }
+      if (ent.health.hp >= ent.health.maxHp) {
+        ent.building.isRepairing = false;
+        ent.dirty = true;
+        continue;
+      }
+      const player = this.players.get(ent.ownerId);
+      if (!player || player.credits < BUILDING_REPAIR_COST_PER_TICK) {
+        ent.building.isRepairing = false;
+        ent.dirty = true;
+        continue;
+      }
+      player.credits -= BUILDING_REPAIR_COST_PER_TICK;
+      ent.health.hp = Math.min(
+        ent.health.maxHp,
+        ent.health.hp + BUILDING_REPAIR_HP_PER_TICK
+      );
+      if (ent.health.hp >= ent.health.maxHp) {
+        ent.building.isRepairing = false;
+      }
       ent.dirty = true;
     }
   }
@@ -1260,11 +1385,173 @@ export class RtsSimulation {
         if (owner?.lowPower) {
           if (ent.stateLabel !== "IDLE" || combat.targetEntityId !== null) {
             combat.targetEntityId = null;
+            combat.groundTarget = null;
             ent.stateLabel = "IDLE";
             ent.dirty = true;
           }
           continue;
         }
+      }
+
+      // 1. Prioritize active unit MOVE orders: never interrupt or auto-acquire targets while executing a move path
+      if (
+        ent.entityType === "UNIT" &&
+        ent.stateLabel === "MOVING" &&
+        ent.navigation &&
+        ent.navigation.pathIndex < ent.navigation.path.length &&
+        combat.targetEntityId === null &&
+        combat.groundTarget === null
+      ) {
+        continue;
+      }
+
+      // 2. Ground-target force-fire order (COMMAND_ATTACK_GROUND)
+      if (combat.groundTarget && combat.targetEntityId === null) {
+        const gx = combat.groundTarget.x;
+        const gy = combat.groundTarget.y;
+        const gDist = Math.hypot(gx - ent.transform.x, gy - ent.transform.y);
+
+        if (gDist > combat.attackRange) {
+          if (ent.entityType === "BUILDING") {
+            combat.groundTarget = null;
+            ent.stateLabel = "IDLE";
+            ent.dirty = true;
+            continue;
+          }
+          const aimAngle = vectorToAngleIndex16(gx - ent.transform.x, gy - ent.transform.y);
+          if (ent.transform.turretAngleIndex !== aimAngle) {
+            ent.transform.turretAngleIndex = aimAngle;
+            ent.dirty = true;
+          }
+          if (
+            ent.navigation &&
+            ent.navigation.pathIndex >= ent.navigation.path.length &&
+            chaseRepathsThisTick < maxChaseRepathsPerTick
+          ) {
+            if (ent.navigation.waitTicks > 0) {
+              ent.navigation.waitTicks--;
+            } else {
+              chaseRepathsThisTick++;
+              ent.navigation.path = this.pathfinder.findPath(
+                ent.transform.x,
+                ent.transform.y,
+                Math.round(gx),
+                Math.round(gy),
+                this.reservationGrid,
+                ent.id,
+                true
+              );
+              ent.navigation.pathIndex = 0;
+              ent.navigation.waitTicks = 10;
+            }
+          }
+          continue;
+        }
+
+        if (ent.entityType === "UNIT" && ent.navigation && ent.navigation.path.length > 0) {
+          ent.navigation.path = [];
+          ent.navigation.pathIndex = 0;
+        }
+
+        const aimAngle = vectorToAngleIndex16(gx - ent.transform.x, gy - ent.transform.y);
+        if (ent.transform.turretAngleIndex !== aimAngle || ent.stateLabel !== "ATTACKING") {
+          ent.transform.turretAngleIndex = aimAngle;
+          ent.stateLabel = "ATTACKING";
+          ent.dirty = true;
+        }
+
+        if (combat.cooldownRemaining <= 0) {
+          combat.cooldownRemaining = combat.attackCooldownTicks;
+          const weaponStyle =
+            ent.kind === "OBELISK"
+              ? "LASER"
+              : ent.kind === "ROCKET_SOLDIER" || ent.kind === "ARTILLERY" || ent.kind === "SAM_SITE"
+                ? "ROCKET"
+                : ent.kind === "RIFLE_INFANTRY" || ent.kind === "GUARD_TOWER" || ent.kind === "RECON_BUGGY"
+                  ? "BULLET"
+                  : "SHELL";
+
+          this.projectilesThisTick.push({
+            id: `prj_${this.tickCounter}_${ent.id}`,
+            fromX: ent.transform.x,
+            fromY: ent.transform.y,
+            toX: gx,
+            toY: gy,
+            weaponStyle,
+            faction: ent.faction,
+          });
+
+          this.pushVisualEffect("MUZZLE_FLASH", ent.transform.x, ent.transform.y, 0.55, 0, ent.faction);
+          if (weaponStyle === "LASER") {
+            this.pushVisualEffect("LASER_BURN", gx, gy, 1.1, 0.32, ent.faction);
+          } else if (weaponStyle === "ROCKET") {
+            this.pushVisualEffect("ROCKET_EXPLOSION", gx, gy, 1.0, 0.24, ent.faction);
+          } else if (weaponStyle === "SHELL") {
+            this.pushVisualEffect(
+              "SHELL_IMPACT",
+              gx,
+              gy,
+              ent.kind === "MAMMOTH_TANK" ? 1.05 : 0.8,
+              ent.kind === "MAMMOTH_TANK" ? 0.28 : 0.16,
+              ent.faction
+            );
+          } else {
+            this.pushVisualEffect("SHELL_IMPACT", gx, gy, 0.45, 0, ent.faction);
+          }
+
+          this.degradeTerrainAtImpact(gx, gy, weaponStyle, false);
+
+          const soundKind =
+            weaponStyle === "LASER"
+              ? "LASER_BEAM"
+              : weaponStyle === "ROCKET"
+                ? "ROCKET_LAUNCH"
+                : weaponStyle === "BULLET"
+                  ? "RIFLE_BURST"
+                  : "CANNON_FIRE";
+          this.pushAcoustic(soundKind, ent.transform.x, ent.transform.y, null);
+
+          // Damage any entity standing on the targeted tile
+          for (const occupant of this.entities.values()) {
+            if (occupant.id === ent.id) continue;
+            if (occupant.entityType === "UNIT" && occupant.spawnProtectionTicks > 0) continue;
+            const inTile =
+              occupant.entityType === "BUILDING" && occupant.building
+                ? gx >= occupant.transform.x &&
+                  gx < occupant.transform.x + occupant.building.footprintW &&
+                  gy >= occupant.transform.y &&
+                  gy < occupant.transform.y + occupant.building.footprintH
+                : Math.hypot(occupant.transform.x - gx, occupant.transform.y - gy) <= 0.85;
+            if (inTile) {
+              occupant.health.hp = Math.max(0, occupant.health.hp - combat.attackDamage);
+              occupant.dirty = true;
+              if (occupant.health.hp <= 0) {
+                this.degradeTerrainAtImpact(gx, gy, weaponStyle, true);
+                this.pushVisualEffect(
+                  occupant.entityType === "BUILDING" ? "BUILDING_DEMOLITION" : "UNIT_EXPLOSION",
+                  gx,
+                  gy,
+                  occupant.entityType === "BUILDING" ? 2.5 : 1.45,
+                  occupant.entityType === "BUILDING" ? 0.95 : 0.55,
+                  occupant.faction
+                );
+                this.pushAcoustic(
+                  occupant.entityType === "BUILDING" ? "EXPLOSION_LARGE" : "EXPLOSION_SMALL",
+                  gx,
+                  gy,
+                  null
+                );
+                if (occupant.entityType === "UNIT") {
+                  this.pushAcoustic("EVA_UNIT_LOST", gx, gy, occupant.ownerId);
+                }
+                this.destroyEntity(occupant.id);
+                this.recomputeAllPlayerEconomies();
+              }
+              break;
+            }
+          }
+        }
+        continue;
       }
 
       let target = combat.targetEntityId ? this.entities.get(combat.targetEntityId) : undefined;
@@ -1876,6 +2163,7 @@ export class RtsSimulation {
       turretAngleIndex: ent.transform.turretAngleIndex,
       cargoOre: ent.harvester ? ent.harvester.cargoOre : 0,
       spawnProtectionTicks: ent.spawnProtectionTicks,
+      isRepairing: ent.building ? ent.building.isRepairing : false,
       stateLabel: ent.stateLabel,
     };
   }

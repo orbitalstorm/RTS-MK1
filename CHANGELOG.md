@@ -2,6 +2,22 @@
 
 All notable changes to **RTS-MK1** (`https://rts-mk1.orbital8.cloud`) follow strict non-reusable `v1.x.y` versioning.
 
+## [v1.5.0] — 2026-10-28
+
+### Added & Changed
+- **Prioritized Unit Move Orders Over Nearby Enemies (`src/engine/simulation.ts`)**:
+  - Fixed `RtsSimulation.stepCombat()` and `stepUnitMovement()` so that when a unit is executing a player-issued `COMMAND_MOVE` (`stateLabel === "MOVING"` with active waypoints and `targetEntityId === null && groundTarget === null`), it never auto-acquires nearby enemies or clears its navigation path to stop and fire. Units now strictly obey movement orders until reaching their destination.
+- **Force-Fire on Specific Ground Tiles (`COMMAND_ATTACK_GROUND`) (`src/shared/schemas/commands.ts`, `src/engine/ecs/types.ts`, `src/engine/simulation.ts`, `src/server/ws-server.ts`, `src/store/game-store.ts`, `src/components/hud/classic-sidebar-hud.tsx`, `src/app/game/[lobbyId]/page.tsx`)**:
+  - Added `IssueAttackGroundCommandSchema` (`COMMAND_ATTACK_GROUND`) and `groundTarget` in `CombatComponent`, allowing combat units to fire directly at any ground coordinate `(targetTileX, targetTileY)` even when no enemy is present (via the **"Tir Forcé au Sol"** button in the HUD or `Ctrl + Clic` on the tactical map), degrading terrain strata (`Herbe` -> `Terre` -> `Pierre`), spawning muzzle/impact VFX & SFX, and damaging any entity occupying that tile.
+- **Building Repair System (`COMMAND_REPAIR_BUILDING`) (`src/shared/constants/index.ts`, `src/shared/schemas/commands.ts`, `src/shared/schemas/deltas.ts`, `src/engine/ecs/types.ts`, `src/engine/simulation.ts`, `src/server/ws-server.ts`, `src/components/hud/classic-sidebar-hud.tsx`, `src/renderer/world-renderer.ts`)**:
+  - Added `IssueRepairBuildingCommandSchema` (`COMMAND_REPAIR_BUILDING`), `isRepairing` in `EntityStateSchema` & `BuildingComponent`, `stepBuildingRepairs()` (`+10 HP/tick` for `2 cr/tick`), and the **"Réparer"** toggle button in `ClassicSidebarHud`, with live welding spark & repair badge overlays on structures being repaired.
+- **Buildable Sandbag Barricades (`SANDBAG_WALL`) & Armored Concrete Walls (`CONCRETE_WALL`) + Continuous Concrete Slab Placement (`src/shared/constants/index.ts`, `src/engine/simulation.ts`, `src/renderer/generator/leonardo-vector-art.ts`, `src/components/hud/leonardo-icons.tsx`, `src/components/hud/classic-sidebar-hud.tsx`, `src/app/game/[lobbyId]/page.tsx`)**:
+  - Added `SANDBAG_WALL` ("Sacs de Sable", `40 cr`, `350 HP`, `1×1`) and `CONCRETE_WALL` ("Mur d'Enceinte Blindé", `80 cr`, `850 HP`, `1×1`) in the `DEFENSE` category with 4-layer vector art and SVG icons.
+  - Added `isRepeatableBuildingKind` (`CONCRETE_SLAB`, `SANDBAG_WALL`, `CONCRETE_WALL`) so the placement tool remains active after placing a slab or wall, allowing continuous chain-placement across the base as long as the player has credits.
+- **Live Mechanical & Luminescent Animations on Structures & Vehicles + Sparse Organic Ground Details (`src/renderer/world-renderer.ts`)**:
+  - Added `drawBuildingLiveAnimation` and `drawUnitLiveAnimation`: rotating dual turbine rotors on `POWER_PLANT`, articulated swinging crane boom & telemetry beacon on `CONSTRUCTION_YARD`, rotating parabolic dish & 360° cyan sweep cone on `RADAR_DOME`, pulsing smelter furnaces & unloading dock guide lights on `REFINERY`, rotating quantum ring on `TECH_CENTER`, sequential runway beacons on `BARRACKS`/`WAR_FACTORY`, forward vehicle headlights, oscillating emerald plasma cutter beam on `HARVESTER` during `HARVESTING`, and blinking roof beacon on `MCV`.
+  - Added `drawSparseOrganicTerrainDetail`: deterministic non-repeating sparse darker grass tufts (`#1b331a` / `#213c1f`) on `TERRAIN_KIND.GRASS` tiles and random lighter pebbles (`#6e563e` / `#96795b` with cast shadow) on `TERRAIN_KIND.DIRT` tiles.
+
 ## [v1.4.1] — 2026-10-28
 
 ### Added & Changed

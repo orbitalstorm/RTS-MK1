@@ -13,6 +13,8 @@ export const BuildingKindSchema = z.enum([
   "RADAR_DOME",
   "TECH_CENTER",
   "CONCRETE_SLAB",
+  "SANDBAG_WALL",
+  "CONCRETE_WALL",
   "GUARD_TOWER",
   "SAM_SITE",
   "OBELISK",
@@ -47,6 +49,15 @@ export const IssueAttackCommandSchema = z.object({
   targetEntityId: z.string().min(1),
 });
 
+export const IssueAttackGroundCommandSchema = z.object({
+  type: z.literal("COMMAND_ATTACK_GROUND"),
+  lobbyId: z.string().min(1),
+  playerId: z.string().min(1),
+  entityIds: z.array(z.string().min(1)).min(1).max(64),
+  targetTileX: z.number().int().min(0).max(127),
+  targetTileY: z.number().int().min(0).max(127),
+});
+
 export const IssueStartProductionCommandSchema = z.object({
   type: z.literal("COMMAND_START_PRODUCTION"),
   lobbyId: z.string().min(1),
@@ -67,6 +78,13 @@ export const IssuePlaceBuildingCommandSchema = z.object({
 
 export const IssueSellBuildingCommandSchema = z.object({
   type: z.literal("COMMAND_SELL_BUILDING"),
+  lobbyId: z.string().min(1),
+  playerId: z.string().min(1),
+  buildingEntityId: z.string().min(1),
+});
+
+export const IssueRepairBuildingCommandSchema = z.object({
+  type: z.literal("COMMAND_REPAIR_BUILDING"),
   lobbyId: z.string().min(1),
   playerId: z.string().min(1),
   buildingEntityId: z.string().min(1),
@@ -124,9 +142,11 @@ export const ClientLobbyActionSchema = z.discriminatedUnion("type", [
   }),
   IssueMoveCommandSchema,
   IssueAttackCommandSchema,
+  IssueAttackGroundCommandSchema,
   IssueStartProductionCommandSchema,
   IssuePlaceBuildingCommandSchema,
   IssueSellBuildingCommandSchema,
+  IssueRepairBuildingCommandSchema,
 ]);
 
 export type ClientMessage = z.infer<typeof ClientLobbyActionSchema>;

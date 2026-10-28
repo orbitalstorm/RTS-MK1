@@ -7,6 +7,7 @@ import {
   ChevronUp,
   Coins,
   Cpu,
+  Crosshair,
   DollarSign,
   PanelRightClose,
   Radar,
@@ -15,12 +16,14 @@ import {
   Users,
   Volume2,
   VolumeX,
+  Wrench,
   Zap,
   ZoomIn,
 } from "lucide-react";
 import {
   BUILDING_LIST,
   FACTIONS,
+  isRepeatableBuildingKind,
   UNIT_LIST,
   ZOOM_LEVELS,
   type BuildingKind,
@@ -57,9 +60,13 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
   const ownedBuildingsKey = useRtsGameStore((s) => s.ownedBuildingsKey);
   const placementBuilding = useRtsGameStore((s) => s.placementBuilding);
   const sellMode = useRtsGameStore((s) => s.sellMode);
+  const repairMode = useRtsGameStore((s) => s.repairMode);
+  const forceAttackMode = useRtsGameStore((s) => s.forceAttackMode);
   const audioMuted = useRtsGameStore((s) => s.audioMuted);
   const setPlacementBuilding = useRtsGameStore((s) => s.setPlacementBuilding);
   const setSellMode = useRtsGameStore((s) => s.setSellMode);
+  const setRepairMode = useRtsGameStore((s) => s.setRepairMode);
+  const setForceAttackMode = useRtsGameStore((s) => s.setForceAttackMode);
   const setAudioMuted = useRtsGameStore((s) => s.setAudioMuted);
   const triggerProduction = useRtsGameStore((s) => s.triggerProduction);
 
@@ -280,17 +287,45 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
             ))}
           </div>
         </div>
+        <div className="grid grid-cols-2 gap-1.5">
+          <Button
+            variant={repairMode ? "tactical" : "ghost"}
+            size="sm"
+            className="w-full"
+            onClick={() => {
+              globalAudioMixer.playUiClick();
+              setRepairMode(!repairMode);
+            }}
+          >
+            <Wrench className="h-3.5 w-3.5" />
+            {repairMode ? "Réparer : ACTIF" : "Réparer"}
+          </Button>
+          <Button
+            variant={sellMode ? "danger" : "ghost"}
+            size="sm"
+            className="w-full"
+            onClick={() => {
+              globalAudioMixer.playUiClick();
+              setSellMode(!sellMode);
+            }}
+          >
+            <DollarSign className="h-3.5 w-3.5" />
+            {sellMode ? "Vente : 50%" : "Vendre (50%)"}
+          </Button>
+        </div>
         <Button
-          variant={sellMode ? "danger" : "ghost"}
+          variant={forceAttackMode ? "danger" : "ghost"}
           size="sm"
           className="w-full"
           onClick={() => {
             globalAudioMixer.playUiClick();
-            setSellMode(!sellMode);
+            setForceAttackMode(!forceAttackMode);
           }}
         >
-          <DollarSign className="h-3.5 w-3.5" />
-          {sellMode ? "Mode Vente : ACTIF (50%)" : "Vendre Structure (50%)"}
+          <Crosshair className="h-3.5 w-3.5" />
+          {forceAttackMode
+            ? "Tir Forcé au Sol : ACTIF (Cliquez Carte)"
+            : "Tir Forcé au Sol (Ctrl + Clic)"}
         </Button>
       </div>
 
@@ -427,10 +462,35 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
                 </span>
                 <Button
                   size="sm"
-                  variant={isBuildingThis ? "tactical" : "default"}
-                  disabled={!unlocked || activeSlot.activeItem !== null || !canAfford}
+                  variant={
+                    isBuildingThis || placementBuilding?.kind === item.kind
+                      ? "tactical"
+                      : "default"
+                  }
+                  disabled={
+                    !unlocked ||
+                    (!isRepeatableBuildingKind(item.kind as BuildingKind) &&
+                      activeSlot.activeItem !== null) ||
+                    !canAfford
+                  }
                   onClick={() => {
                     globalAudioMixer.playUiClick();
+                    if (
+                      (activeTab === "BUILDING" || activeTab === "DEFENSE") &&
+                      isRepeatableBuildingKind(item.kind as BuildingKind)
+                    ) {
+                      if (activeSlot.activeItem === null) {
+                        triggerProduction(
+                          activeTab,
+                          item.kind as BuildingKind | UnitKind
+                        );
+                      }
+                      setPlacementBuilding({
+                        category: activeTab,
+                        kind: item.kind as BuildingKind,
+                      });
+                      return;
+                    }
                     triggerProduction(
                       activeTab,
                       item.kind as BuildingKind | UnitKind
@@ -438,7 +498,13 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
                   }}
                 >
                   <Cpu className="h-3 w-3" />
-                  {isBuildingThis ? "En cours" : "Produire"}
+                  {placementBuilding?.kind === item.kind
+                    ? "Pose Continue Active"
+                    : isBuildingThis
+                      ? "En cours"
+                      : isRepeatableBuildingKind(item.kind as BuildingKind)
+                        ? "Poser en Continu"
+                        : "Produire"}
                 </Button>
               </div>
             </div>

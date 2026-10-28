@@ -11,6 +11,8 @@ export type BuildingKind =
   | "RADAR_DOME"
   | "TECH_CENTER"
   | "CONCRETE_SLAB"
+  | "SANDBAG_WALL"
+  | "CONCRETE_WALL"
   | "GUARD_TOWER"
   | "SAM_SITE"
   | "OBELISK";
@@ -77,7 +79,7 @@ export interface UnitSpec {
   description: string;
 }
 
-export const APP_VERSION = "1.4.1";
+export const APP_VERSION = "1.5.0";
 export const SIM_TICK_RATE_HZ = 20;
 export const SIM_TICK_MS = 50;
 export const MAP_WIDTH_TILES = 48;
@@ -88,6 +90,16 @@ export const BASE_BUILD_RADIUS_TILES = 16;
 export const AI_ATTACK_GRACE_PERIOD_SECONDS = 120; // 2 minutes opening grace period before any enemy AI attack
 export const AI_ATTACK_GRACE_PERIOD_TICKS = AI_ATTACK_GRACE_PERIOD_SECONDS * SIM_TICK_RATE_HZ; // 2400 ticks
 export const UNIT_SPAWN_PROTECTION_TICKS = 20; // 1.0s (20 ticks at 20 Hz) spawn protection cooldown during which a newly created unit cannot be targeted
+export const BUILDING_REPAIR_HP_PER_TICK = 10;
+export const BUILDING_REPAIR_COST_PER_TICK = 2;
+
+export function isRepeatableBuildingKind(kind: BuildingKind): boolean {
+  return (
+    kind === "CONCRETE_SLAB" ||
+    kind === "SANDBAG_WALL" ||
+    kind === "CONCRETE_WALL"
+  );
+}
 
 export const TERRAIN_KIND = {
   DIRT: 0, // Terre / Sol aride (sous l'herbe)
@@ -248,6 +260,8 @@ export interface TouchTapResolutionInput {
   mode: TouchInteractionMode;
   hasPlacementBuilding: boolean;
   sellMode: boolean;
+  repairMode?: boolean;
+  forceAttackMode?: boolean;
   tappedOwnUnitId: string | null;
   tappedOwnBuildingId: string | null;
   tappedEnemyEntityId: string | null;
@@ -257,15 +271,17 @@ export interface TouchTapResolutionInput {
 export type TouchTapResolvedAction =
   | "PLACE_BUILDING"
   | "SELL_BUILDING"
+  | "REPAIR_BUILDING"
   | "SELECT_ENTITY"
   | "ATTACK_ENEMY"
+  | "ATTACK_GROUND"
   | "MOVE_UNITS"
   | "CLEAR_SELECTION"
   | "NONE";
 
 /**
  * Pure deterministic decision function for mobile touch taps on the tactical canvas.
- * Allows effortless 1-tap unit selection, movement, attack, building placement, and selling.
+ * Allows effortless 1-tap unit selection, movement, attack, force-attack ground, building placement, repair, and selling.
  */
 export function resolveTouchTapAction(input: TouchTapResolutionInput): TouchTapResolvedAction {
   if (input.hasPlacementBuilding) {
@@ -273,6 +289,12 @@ export function resolveTouchTapAction(input: TouchTapResolutionInput): TouchTapR
   }
   if (input.sellMode) {
     return input.tappedOwnBuildingId ? "SELL_BUILDING" : "NONE";
+  }
+  if (input.repairMode) {
+    return input.tappedOwnBuildingId ? "REPAIR_BUILDING" : "NONE";
+  }
+  if (input.forceAttackMode) {
+    return input.selectedUnitCount > 0 ? "ATTACK_GROUND" : "NONE";
   }
 
   if (input.mode === "COMMAND") {
@@ -650,7 +672,45 @@ export const BUILDINGS: Record<BuildingKind, BuildingSpec> = {
     attackDamage: 0,
     attackCooldownTicks: 0,
     prerequisites: ["CONSTRUCTION_YARD"],
-    description: "Pave le sol avec une dalle de béton armé (1×1) unifiée, stabilisant la zone et résistant aux impacts.",
+    description: "Pave le sol en continu avec une dalle de béton armé (1×1) unifiée et résistante aux impacts.",
+  },
+  SANDBAG_WALL: {
+    kind: "SANDBAG_WALL",
+    name: "Sacs de Sable",
+    category: "DEFENSE",
+    cost: 40,
+    buildTimeTicks: 10,
+    maxHp: 350,
+    powerDelta: 0,
+    sightRadius: 2,
+    footprintW: 1,
+    footprintH: 1,
+    storageCapacity: 0,
+    detectionRange: 0,
+    attackRange: 0,
+    attackDamage: 0,
+    attackCooldownTicks: 0,
+    prerequisites: ["CONSTRUCTION_YARD"],
+    description: "Barricade tactique 1×1 économique posable à la chaîne pour canaliser l'infanterie et les véhicules légers.",
+  },
+  CONCRETE_WALL: {
+    kind: "CONCRETE_WALL",
+    name: "Mur d'Enceinte Blindé",
+    category: "DEFENSE",
+    cost: 80,
+    buildTimeTicks: 16,
+    maxHp: 850,
+    powerDelta: 0,
+    sightRadius: 2,
+    footprintW: 1,
+    footprintH: 1,
+    storageCapacity: 0,
+    detectionRange: 0,
+    attackRange: 0,
+    attackDamage: 0,
+    attackCooldownTicks: 0,
+    prerequisites: ["CONSTRUCTION_YARD"],
+    description: "Rempart lourd en ferro-béton 1×1 à haute résistance (850 PV) pour fortifier la base et protéger les tourelles.",
   },
   GUARD_TOWER: {
     kind: "GUARD_TOWER",

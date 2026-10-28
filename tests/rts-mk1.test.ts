@@ -276,7 +276,7 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
   });
 
   it("v1.2.0 — supports Game Juice camera shake, shortest-arc 16-angle interpolation, and 2x Hi-DPI sprite scale", () => {
-    expect(APP_VERSION).toBe("1.4.1");
+    expect(APP_VERSION).toBe("1.5.0");
     expect(SPRITE_ATLAS_SCALE).toBe(2);
 
     // Zero trauma produces zero offset
@@ -645,5 +645,122 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
     const updatedTowerIdle = sim.getEntity(tower.id)!;
     expect(updatedTowerIdle.stateLabel).toBe("IDLE");
     expect(updatedTowerIdle.combat?.targetEntityId).toBeNull();
+  });
+
+  it("v1.5.0 — enforces move-order priority over nearby enemies, ground force-fire, building repair, Sandbags/Concrete Walls, and continuous Concrete Slab placement", () => {
+    const sim = new RtsSimulation("test_v150_features", [
+      { playerId: "p1", commanderName: "Alpha", faction: "GDI", isAi: false },
+      { playerId: "p2", commanderName: "Beta", faction: "NOD", isAi: false },
+    ]);
+
+    // 1. Move-order priority: a unit ordered to move while an enemy is in attackRange must NOT stop to attack
+    const p1Tank = sim.createUnitEntity("p1", "GDI", "MEDIUM_TANK", 20, 20);
+    p1Tank.spawnProtectionTicks = 0;
+    const p2EnemyBuilding = sim.createBuildingEntity("p2", "NOD", "POWER_PLANT", 22, 22);
+    expect(p2EnemyBuilding).toBeDefined();
+
+    // Order p1Tank to move away to (14, 20) even though p2EnemyBuilding is within attackRange (5.4t)
+    sim.issueMoveCommand("p1", [p1Tank.id], 14, 20);
+    expect(p1Tank.stateLabel).toBe("MOVING");
+    expect(p1Tank.navigation?.path.length).toBeGreaterThan(0);
+
+    for (let t = 0; t < 15; t++) {
+      sim.stepTick();
+    }
+    const movedTank = sim.getEntity(p1Tank.id)!;
+    // Tank must have moved significantly West toward x=14 and must NOT have cleared its move path to attack p2EnemyBuilding
+    expect(movedTank.transform.x).toBeLessThan(18.5);
+    expect(movedTank.combat?.targetEntityId).toBeNull();
+    expect(sim.getEntity(p2EnemyBuilding.id)!.health.hp).toBe(p2EnemyBuilding.health.maxHp);
+
+    // 2. Ground force-fire (COMMAND_ATTACK_GROUND): unit fires at a specific ground tile even without an enemy
+    const targetGroundX = 16;
+    const targetGroundY = 18;
+    sim.terrainGrid[targetGroundY * 48 + targetGroundX] = TERRAIN_KIND.GRASS;
+    sim.issueAttackGroundCommand("p1", [p1Tank.id], targetGroundX, targetGroundY);
+    expect(sim.getEntity(p1Tank.id)!.combat?.groundTarget).toEqual({
+      x: targetGroundX,
+      y: targetGroundY,
+    });
+
+    const groundFireDelta = sim.stepTick();
+    expect(
+      groundFireDelta.projectiles.some(
+        (prj) => prj.toX === targetGroundX && prj.toY === targetGroundY
+      )
+    ).toBe(true);
+    // Grass tile blasted by ground fire degrades to Dirt
+    expect(sim.terrainGrid[targetGroundY * 48 + targetGroundX]).toBe(TERRAIN_KIND.DIRT);
+
+    // 3. Building repair (COMMAND_REPAIR_BUILDING & stepBuildingRepairs)
+    const p1Yard = sim
+      .getAllEntities()
+      .find(
+        (e) => e.ownerId === "p1" && e.entityType === "BUILDING" && e.kind === "CONSTRUCTION_YARD"
+      )!;
+    p1Yard.health.hp = p1Yard.health.maxHp - 120;
+    const hpBeforeRepair = p1Yard.health.hp;
+    expect(sim.issueRepairBuilding("p1", p1Yard.id)).toBe(true);
+    expect(sim.getEntity(p1Yard.id)!.building?.isRepairing).toBe(true);
+    expect(sim.getEntity(p1Yard.id)!.health.hp).toBeGreaterThan(hpBeforeRepair);
+
+    for (let t = 0; t < 15; t++) {
+      sim.stepTick();
+    }
+    expect(sim.getEntity(p1Yard.id)!.health.hp).toBe(p1Yard.health.maxHp);
+    expect(sim.getEntity(p1Yard.id)!.building?.isRepairing).toBe(false);
+
+    // 4. Sandbag Wall (SANDBAG_WALL) & Concrete Wall (CONCRETE_WALL) + Continuous Concrete Slab placement
+    expect(BUILDINGS.SANDBAG_WALL.category).toBe("DEFENSE");
+    expect(BUILDINGS.CONCRETE_WALL.category).toBe("DEFENSE");
+
+    // Continuous placement of CONCRETE_SLAB without having to re-queue each tile in the menu
+    expect(sim.issuePlaceBuilding("p1", "BUILDING", "CONCRETE_SLAB", 8, 5)).toBe(true);
+    expect(sim.issuePlaceBuilding("p1", "BUILDING", "CONCRETE_SLAB", 9, 5)).toBe(true);
+    expect(sim.issuePlaceBuilding("p1", "BUILDING", "CONCRETE_SLAB", 10, 5)).toBe(true);
+    expect(sim.terrainGrid[5 * 48 + 8]).toBe(TERRAIN_KIND.CONCRETE_SLAB);
+    expect(sim.terrainGrid[5 * 48 + 9]).toBe(TERRAIN_KIND.CONCRETE_SLAB);
+    expect(sim.terrainGrid[5 * 48 + 10]).toBe(TERRAIN_KIND.CONCRETE_SLAB);
+
+    // Continuous placement of SANDBAG_WALL & CONCRETE_WALL
+    expect(sim.issuePlaceBuilding("p1", "DEFENSE", "SANDBAG_WALL", 11, 6)).toBe(true);
+    expect(sim.issuePlaceBuilding("p1", "DEFENSE", "CONCRETE_WALL", 12, 6)).toBe(true);
+    expect(
+      sim
+        .getAllEntities()
+        .some((e) => e.ownerId === "p1" && e.kind === "SANDBAG_WALL" && e.transform.x === 11)
+    ).toBe(true);
+    expect(
+      sim
+        .getAllEntities()
+        .some((e) => e.ownerId === "p1" && e.kind === "CONCRETE_WALL" && e.transform.x === 12)
+    ).toBe(true);
+
+    // Touch tap resolution for REPAIR_BUILDING and ATTACK_GROUND
+    expect(
+      resolveTouchTapAction({
+        mode: "AUTO",
+        hasPlacementBuilding: false,
+        sellMode: false,
+        repairMode: true,
+        tappedOwnUnitId: null,
+        tappedOwnBuildingId: p1Yard.id,
+        tappedEnemyEntityId: null,
+        selectedUnitCount: 0,
+      })
+    ).toBe("REPAIR_BUILDING");
+
+    expect(
+      resolveTouchTapAction({
+        mode: "AUTO",
+        hasPlacementBuilding: false,
+        sellMode: false,
+        forceAttackMode: true,
+        tappedOwnUnitId: null,
+        tappedOwnBuildingId: null,
+        tappedEnemyEntityId: null,
+        selectedUnitCount: 2,
+      })
+    ).toBe("ATTACK_GROUND");
   });
 });
