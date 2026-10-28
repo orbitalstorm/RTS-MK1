@@ -80,14 +80,14 @@ export interface UnitSpec {
   description: string;
 }
 
-export const APP_VERSION = "1.6.0";
+export const APP_VERSION = "1.7.0";
 export const SIM_TICK_RATE_HZ = 20;
 export const SIM_TICK_MS = 50;
-export const MAP_WIDTH_TILES = 48;
-export const MAP_HEIGHT_TILES = 48;
+export const MAP_WIDTH_TILES = 72;
+export const MAP_HEIGHT_TILES = 72;
 export const TILE_PIXEL_SIZE = 32;
 export const SPRITE_ATLAS_SCALE = 2; // 64px per tile internal vector rasterization for crisp 2x zoom
-export const BASE_BUILD_RADIUS_TILES = 16;
+export const BASE_BUILD_RADIUS_TILES = 18;
 export const AI_ATTACK_GRACE_PERIOD_SECONDS = 120; // 2 minutes opening grace period before any enemy AI attack
 export const AI_ATTACK_GRACE_PERIOD_TICKS = AI_ATTACK_GRACE_PERIOD_SECONDS * SIM_TICK_RATE_HZ; // 2400 ticks
 export const UNIT_SPAWN_PROTECTION_TICKS = 20; // 1.0s (20 ticks at 20 Hz) spawn protection cooldown during which a newly created unit cannot be targeted
@@ -487,6 +487,7 @@ export const BASE_STORAGE_CAPACITY = 2000;
 export const SILO_STORAGE_BONUS = 1500;
 export const STARTING_CREDITS = 2500;
 export const HARVESTER_LOAD_PER_TICK = 25;
+export const HARVESTER_UNLOAD_PER_TICK = 25;
 export const HARVESTER_MAX_LOAD = 500;
 export const WATCHDOG_INTERVAL_MS = 10_000;
 export const WATCHDOG_DISCONNECT_TIMEOUT_MS = 60_000;

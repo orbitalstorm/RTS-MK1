@@ -75,6 +75,7 @@ const MAX_PARTICLES = 320;
 const MAX_PROJECTILES = 96;
 export const CRATER_LIFETIME_MS = 12_000;
 export const ORE_NUGGET_LIFETIME_MS = 5_500;
+export const HARVESTER_NUGGET_DROP_INTERVAL_MS = 680;
 const MAX_SEEN_IDS = 256;
 
 export function computeCraterFadeAlpha(
@@ -174,7 +175,7 @@ export class BattlefieldVfxManager {
   ): void {
     if (cargoOre <= 0 || !isMoving) return;
     const lastMs = this.lastHarvesterDropMs.get(entityId) ?? -Infinity;
-    if (nowMs - lastMs < 360) return;
+    if (nowMs - lastMs < HARVESTER_NUGGET_DROP_INTERVAL_MS) return;
     this.lastHarvesterDropMs.set(entityId, nowMs);
 
     // Direction vector for angleIndex (0 = North = -Y, clockwise in 16 steps)

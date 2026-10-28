@@ -39,7 +39,7 @@ export interface CombatComponent {
 export interface HarvesterComponent {
   cargoOre: number;
   maxCapacity: number;
-  state: "IDLE" | "MOVING_TO_ORE" | "HARVESTING" | "RETURNING_TO_REFINERY";
+  state: "IDLE" | "MOVING_TO_ORE" | "HARVESTING" | "RETURNING_TO_REFINERY" | "UNLOADING";
   targetOreTile: { x: number; y: number } | null;
   homeRefineryId: string | null;
 }
@@ -62,7 +62,15 @@ export interface EcsEntity {
   kind: BuildingKind | UnitKind;
   sightRadius: number;
   spawnProtectionTicks: number;
-  stateLabel: "IDLE" | "MOVING" | "HARVESTING" | "RETURNING" | "ALERT" | "ATTACKING" | "BUILDING";
+  stateLabel:
+    | "IDLE"
+    | "MOVING"
+    | "HARVESTING"
+    | "RETURNING"
+    | "UNLOADING"
+    | "ALERT"
+    | "ATTACKING"
+    | "BUILDING";
   transform: TransformComponent;
   health: HealthComponent;
   navigation: NavigationComponent | null;

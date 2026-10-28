@@ -23,7 +23,16 @@ export const EntityStateSchema = z.object({
   isRepairing: z.boolean().default(false),
   buildProgress: z.number().min(0).max(1).default(1),
   stateLabel: z
-    .enum(["IDLE", "MOVING", "HARVESTING", "RETURNING", "ALERT", "ATTACKING", "BUILDING"])
+    .enum([
+      "IDLE",
+      "MOVING",
+      "HARVESTING",
+      "RETURNING",
+      "UNLOADING",
+      "ALERT",
+      "ATTACKING",
+      "BUILDING",
+    ])
     .default("IDLE"),
 });
 

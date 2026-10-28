@@ -2,6 +2,21 @@
 
 All notable changes to **RTS-MK1** (`https://rts-mk1.orbital8.cloud`) follow strict non-reusable `v1.x.y` versioning.
 
+## [v1.7.0] — 2026-10-28
+
+### Added & Changed
+- **Vertical Storage Fill Gauge (`Jauge Verticale`) on Refinery (`REFINERY`) & Silo (`SILO`) (`src/renderer/world-renderer.ts`)**:
+  - Added `drawVerticalStorageGauge` rendering an armored vertical sight-glass gauge with graduated `25%`, `50%`, and `75%` tick marks, a luminous vertical fill column (`#059669` -> `#6ee7b7`, shifting to `#d97706` -> `#fef08a` above `85%` capacity), and a bright fluid meniscus line on both `REFINERY` and `SILO`.
+- **Timed Ore Unloading at the Refinery (`UNLOADING` State & `HARVESTER_UNLOAD_PER_TICK`) (`src/shared/constants/index.ts`, `src/shared/schemas/deltas.ts`, `src/engine/ecs/types.ts`, `src/engine/simulation.ts`, `src/renderer/world-renderer.ts`)**:
+  - Added `"UNLOADING"` to `EntityStateSchema.shape.stateLabel`, `HarvesterComponent["state"]`, and `EcsEntity["stateLabel"]`, plus `HARVESTER_UNLOAD_PER_TICK = 25`.
+  - When a Harvester docks at a `REFINERY`, it no longer dumps its entire `500` ore payload instantaneously in 1 tick; instead, it transitions into `"UNLOADING"` and transfers `25` ore/tick (`20` ticks = `1.0s` for a full load) progressively into player credits, accompanied by an animated rear discharge chute stream and unloading sparks.
+- **Reduced Harvester Glowing Ore Nugget Drop Rate (`src/renderer/vfx-manager.ts`)**:
+  - Increased `HARVESTER_NUGGET_DROP_INTERVAL_MS` from `360 ms` to `680 ms` (~47% lower nugget drop frequency) so moving Harvesters leave a cleaner, more spaced trail of luminescent ore nuggets.
+- **Single-Contour Multi-Layer Terrain Transitions Without Double Transitions or Right-Angle Steps (`src/renderer/world-renderer.ts`)**:
+  - Refactored `drawUnifiedOrganicTerrainCell` and `traceRoundedTilePath` (`k = 0.22` diagonal chamfer curve) so only higher-priority strata round convex corners or draw stratigraphic bevels over lower-priority strata, and suppressed internal half-edge border segments (`nX0..nX1`, `sX0..sX1`, `wY0..wY1`, `eY0..eY1`) wherever an adjacent tile draws a concave corner bridge (`pNW/pNE/pSE/pSW >= centerPriority`), completely eliminating the double transition and 90° right-angle border artifacts between `Herbe`, `Terre`, and `Pierre`.
+- **Enlarged `72×72` Battlefield Map & Distant Ore Fields (`src/shared/constants/index.ts`, `src/engine/simulation.ts`, `src/components/hud/classic-sidebar-hud.tsx`)**:
+  - Enlarged the tactical map from `48×48` (`2,304` tiles) to **`72×72` (`5,184` tiles, `2.25×` surface area)** and moved the nearest starting ore fields out to `(21, 10)` and `(10, 21)` (`>= 11.5` tiles from the base spawn instead of right beside the starting buildings), requiring players to venture out beyond their initial base perimeter from the very start of the match.
+
 ## [v1.6.0] — 2026-10-28
 
 ### Added & Changed

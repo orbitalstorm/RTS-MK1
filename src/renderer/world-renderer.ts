@@ -235,23 +235,24 @@ function traceRoundedTilePath(
   rBR: number,
   rBL: number
 ): void {
+  const k = 0.22; // Smooth diagonal chamfer control-point ratio
   ctx.beginPath();
   ctx.moveTo(x + rTL, y);
   ctx.lineTo(x + s - rTR, y);
   if (rTR > 0) {
-    ctx.quadraticCurveTo(x + s, y, x + s, y + rTR);
+    ctx.quadraticCurveTo(x + s - rTR * k, y + rTR * k, x + s, y + rTR);
   }
   ctx.lineTo(x + s, y + s - rBR);
   if (rBR > 0) {
-    ctx.quadraticCurveTo(x + s, y + s, x + s - rBR, y + s);
+    ctx.quadraticCurveTo(x + s - rBR * k, y + s - rBR * k, x + s - rBR, y + s);
   }
   ctx.lineTo(x + rBL, y + s);
   if (rBL > 0) {
-    ctx.quadraticCurveTo(x, y + s, x, y + s - rBL);
+    ctx.quadraticCurveTo(x + rBL * k, y + s - rBL * k, x, y + s - rBL);
   }
   ctx.lineTo(x, y + rTL);
   if (rTL > 0) {
-    ctx.quadraticCurveTo(x, y, x + rTL, y);
+    ctx.quadraticCurveTo(x + rTL * k, y + rTL * k, x + rTL, y);
   }
   ctx.closePath();
 }
@@ -259,8 +260,9 @@ function traceRoundedTilePath(
 /**
  * Renders a single tile `(tx, ty)` as part of a continuous, unified geological stratum.
  * - Interior tiles (`mask.isInterior === true`) are filled as a pure solid surface with zero borders or repeated textures.
- * - Zone boundaries (`!sameN/E/S/W`) display stratigraphic thickness lips and rounded organic corners (`quadraticCurveTo`),
- *   revealing the underlying geological layer beneath rounded outer corners.
+ * - Only higher-priority strata round their convex corners or draw stratigraphic lips over lower-priority strata,
+ *   while internal half-edges covered by adjacent concave corner bridges are suppressed so diagonal boundaries
+ *   form a single continuous contour with zero right-angle steps and zero double transitions.
  */
 function drawUnifiedOrganicTerrainCell(
   ctx: CacheContext,
@@ -281,179 +283,217 @@ function drawUnifiedOrganicTerrainCell(
     return;
   }
 
-  // 1. Fill underlying geological stratum beneath rounded outer corners
-  const underPalette = getStratumPalette(mask.underlyingKind);
-  ctx.fillStyle = underPalette.fill;
-  ctx.fillRect(px, py, s, s);
-
-  // Also blend corner background with the exact adjacent neighbor when two neighboring sides share a stratum
   const neighborAt = (nx: number, ny: number): number => {
     const cx = Math.max(0, Math.min(MAP_WIDTH_TILES - 1, nx));
     const cy = Math.max(0, Math.min(MAP_HEIGHT_TILES - 1, ny));
     return normalizeBaseTerrainKind(terrainGrid[cy * MAP_WIDTH_TILES + cx] ?? 0);
   };
-  const half = s * 0.5;
-  if (mask.roundTL) {
-    ctx.fillStyle = getStratumPalette(neighborAt(tx, ty - 1)).fill;
-    ctx.fillRect(px, py, half, half);
-  }
-  if (mask.roundTR) {
-    ctx.fillStyle = getStratumPalette(neighborAt(tx, ty - 1)).fill;
-    ctx.fillRect(px + half, py, half, half);
-  }
-  if (mask.roundBR) {
-    ctx.fillStyle = getStratumPalette(neighborAt(tx, ty + 1)).fill;
-    ctx.fillRect(px + half, py + half, half, half);
-  }
-  if (mask.roundBL) {
-    ctx.fillStyle = getStratumPalette(neighborAt(tx, ty + 1)).fill;
-    ctx.fillRect(px, py + half, half, half);
-  }
 
-  const r = Math.round(s * palette.cornerRadiusRatio);
-  const rTL = mask.roundTL ? r : 0;
-  const rTR = mask.roundTR ? r : 0;
-  const rBR = mask.roundBR ? r : 0;
-  const rBL = mask.roundBL ? r : 0;
-
-  // 2. Main unified stratum fill with rounded organic outer corners
-  traceRoundedTilePath(ctx, px, py, s, rTL, rTR, rBR, rBL);
-  ctx.fillStyle = palette.fill;
-  ctx.fill();
-
-  // 3. Demarcation & Stratigraphic Thickness ONLY along outer zone boundaries
-  ctx.save();
-  traceRoundedTilePath(ctx, px, py, s, rTL, rTR, rBR, rBL);
-  ctx.clip();
-
-  drawSparseOrganicTerrainDetail(ctx, mask.centerKind, tx, ty, px, py, s);
-
-  // Sunlit NW upper rim highlight along North & West zone boundaries
-  if (!mask.sameN || !mask.sameW || rTL > 0) {
-    ctx.strokeStyle = palette.lipHighlight;
-    ctx.lineWidth = 1.6;
-    ctx.beginPath();
-    if (!mask.sameW) {
-      ctx.moveTo(px + 0.8, py + s - rBL);
-      ctx.lineTo(px + 0.8, py + rTL);
-    }
-    if (rTL > 0) {
-      ctx.moveTo(px + 0.8, py + rTL);
-      ctx.quadraticCurveTo(px + 0.8, py + 0.8, px + rTL, py + 0.8);
-    }
-    if (!mask.sameN) {
-      ctx.moveTo(px + rTL, py + 0.8);
-      ctx.lineTo(px + s - rTR, py + 0.8);
-    }
-    ctx.stroke();
-  }
-
-  // Physical layer thickness shadow lip along South & East zone boundaries
-  if (!mask.sameS || !mask.sameE || rBR > 0 || rTR > 0 || rBL > 0) {
-    ctx.strokeStyle = palette.lipShadow;
-    ctx.lineWidth = palette.thicknessPx;
-    ctx.beginPath();
-    if (!mask.sameE) {
-      ctx.moveTo(px + s - 1, py + rTR);
-      ctx.lineTo(px + s - 1, py + s - rBR);
-    }
-    if (rBR > 0) {
-      ctx.moveTo(px + s - 1, py + s - rBR);
-      ctx.quadraticCurveTo(px + s - 1, py + s - 1, px + s - rBR, py + s - 1);
-    }
-    if (!mask.sameS) {
-      ctx.moveTo(px + s - rBR, py + s - 1);
-      ctx.lineTo(px + rBL, py + s - 1);
-    }
-    if (rTR > 0) {
-      ctx.moveTo(px + s - rTR, py + 1);
-      ctx.quadraticCurveTo(px + s - 1, py + 1, px + s - 1, py + rTR);
-    }
-    if (rBL > 0) {
-      ctx.moveTo(px + rBL, py + s - 1);
-      ctx.quadraticCurveTo(px + 1, py + s - 1, px + 1, py + s - rBL);
-    }
-    ctx.stroke();
-  }
-
-  // Concave inner corner fillets + diagonal inter-layer bridges so layer transitions are diagonal without staircase steps
   const nKind = neighborAt(tx, ty - 1);
   const eKind = neighborAt(tx + 1, ty);
   const sKind = neighborAt(tx, ty + 1);
   const wKind = neighborAt(tx - 1, ty);
-  const centerPriority = getTerrainVisualPriority(mask.centerKind);
+  const neKind = neighborAt(tx + 1, ty - 1);
+  const seKind = neighborAt(tx + 1, ty + 1);
+  const swKind = neighborAt(tx - 1, ty + 1);
+  const nwKind = neighborAt(tx - 1, ty - 1);
 
-  // Diagonal bridges when two adjacent cardinal neighbors belong to a higher stratum (eliminates 90° staircase)
-  if (nKind === wKind && nKind !== mask.centerKind && getTerrainVisualPriority(nKind) > centerPriority) {
-    const bridgePal = getStratumPalette(nKind);
-    const br = Math.round(s * bridgePal.cornerRadiusRatio);
+  const centerPriority = getTerrainVisualPriority(mask.centerKind);
+  const pN = getTerrainVisualPriority(nKind);
+  const pE = getTerrainVisualPriority(eKind);
+  const pS = getTerrainVisualPriority(sKind);
+  const pW = getTerrainVisualPriority(wKind);
+  const pNE = getTerrainVisualPriority(neKind);
+  const pSE = getTerrainVisualPriority(seKind);
+  const pSW = getTerrainVisualPriority(swKind);
+  const pNW = getTerrainVisualPriority(nwKind);
+
+  const lowN = pN < centerPriority;
+  const lowE = pE < centerPriority;
+  const lowS = pS < centerPriority;
+  const lowW = pW < centerPriority;
+
+  const half = s * 0.5;
+  const r = Math.round(s * palette.cornerRadiusRatio);
+  // Only round convex outer corners when BOTH adjacent cardinal neighbors are lower strata
+  const rTL = lowN && lowW ? r : 0;
+  const rTR = lowN && lowE ? r : 0;
+  const rBR = lowS && lowE ? r : 0;
+  const rBL = lowS && lowW ? r : 0;
+
+  // 1. Fill underlying geological stratum beneath rounded convex corners
+  const underPalette = getStratumPalette(mask.underlyingKind);
+  ctx.fillStyle = underPalette.fill;
+  ctx.fillRect(px, py, s, s);
+
+  if (rTL > 0) {
+    ctx.fillStyle = getStratumPalette(pN >= pW ? nKind : wKind).fill;
+    ctx.fillRect(px, py, half, half);
+  }
+  if (rTR > 0) {
+    ctx.fillStyle = getStratumPalette(pN >= pE ? nKind : eKind).fill;
+    ctx.fillRect(px + half, py, half, half);
+  }
+  if (rBR > 0) {
+    ctx.fillStyle = getStratumPalette(pS >= pE ? sKind : eKind).fill;
+    ctx.fillRect(px + half, py + half, half, half);
+  }
+  if (rBL > 0) {
+    ctx.fillStyle = getStratumPalette(pS >= pW ? sKind : wKind).fill;
+    ctx.fillRect(px, py + half, half, half);
+  }
+
+  // 2. Main unified stratum fill with smooth diagonal convex corners
+  traceRoundedTilePath(ctx, px, py, s, rTL, rTR, rBR, rBL);
+  ctx.fillStyle = palette.fill;
+  ctx.fill();
+
+  // 3. Organic ground details & single-contour stratigraphic borders
+  ctx.save();
+  traceRoundedTilePath(ctx, px, py, s, rTL, rTR, rBR, rBL);
+  ctx.clip();
+  drawSparseOrganicTerrainDetail(ctx, mask.centerKind, tx, ty, px, py, s);
+  ctx.restore();
+
+  const k = 0.22;
+
+  // Suppress half-edges where the adjacent lower tile draws a concave corner bridge of >= centerPriority
+  const nX0 = rTL > 0 || pNW >= centerPriority ? px + half : px;
+  const nX1 = rTR > 0 || pNE >= centerPriority ? px + half : px + s;
+  const wY0 = rTL > 0 || pNW >= centerPriority ? py + half : py;
+  const wY1 = rBL > 0 || pSW >= centerPriority ? py + half : py + s;
+  const eY0 = rTR > 0 || pNE >= centerPriority ? py + half : py;
+  const eY1 = rBR > 0 || pSE >= centerPriority ? py + half : py + s;
+  const sX0 = rBL > 0 || pSW >= centerPriority ? px + half : px;
+  const sX1 = rBR > 0 || pSE >= centerPriority ? px + half : px + s;
+
+  // Sunlit NW upper rim highlight ONLY on exposed higher-stratum North/West edges & TL convex chamfer
+  if ((lowW && wY1 > wY0) || (lowN && nX1 > nX0) || rTL > 0) {
+    ctx.strokeStyle = palette.lipHighlight;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    if (lowW && wY1 > wY0) {
+      ctx.moveTo(px + 0.7, wY1);
+      ctx.lineTo(px + 0.7, wY0);
+    }
+    if (rTL > 0) {
+      ctx.moveTo(px + 0.7, py + rTL);
+      ctx.quadraticCurveTo(px + rTL * k, py + rTL * k, px + rTL, py + 0.7);
+    }
+    if (lowN && nX1 > nX0) {
+      ctx.moveTo(nX0, py + 0.7);
+      ctx.lineTo(nX1, py + 0.7);
+    }
+    ctx.stroke();
+  }
+
+  // Physical layer thickness shadow lip ONLY on exposed higher-stratum South/East edges & TR/BR/BL convex chamfers
+  if ((lowE && eY1 > eY0) || (lowS && sX1 > sX0) || rTR > 0 || rBR > 0 || rBL > 0) {
+    ctx.strokeStyle = palette.lipShadow;
+    ctx.lineWidth = palette.thicknessPx * 0.85;
+    ctx.beginPath();
+    if (lowE && eY1 > eY0) {
+      ctx.moveTo(px + s - 0.8, eY0);
+      ctx.lineTo(px + s - 0.8, eY1);
+    }
+    if (rBR > 0) {
+      ctx.moveTo(px + s - 0.8, py + s - rBR);
+      ctx.quadraticCurveTo(
+        px + s - rBR * k,
+        py + s - rBR * k,
+        px + s - rBR,
+        py + s - 0.8
+      );
+    }
+    if (lowS && sX1 > sX0) {
+      ctx.moveTo(sX1, py + s - 0.8);
+      ctx.lineTo(sX0, py + s - 0.8);
+    }
+    if (rTR > 0) {
+      ctx.moveTo(px + s - rTR, py + 0.8);
+      ctx.quadraticCurveTo(px + s - rTR * k, py + rTR * k, px + s - 0.8, py + rTR);
+    }
+    if (rBL > 0) {
+      ctx.moveTo(px + rBL, py + s - 0.8);
+      ctx.quadraticCurveTo(px + rBL * k, py + s - rBL * k, px + 0.8, py + s - rBL);
+    }
+    ctx.stroke();
+  }
+
+  // 4. Concave corner bridges when two adjacent cardinal neighbors belong to a higher stratum
+  // Drawn outside clip() with matching k=0.22 curvature so convex and concave segments form one continuous diagonal line
+  if (pN > centerPriority && pW > centerPriority) {
+    const bridgeKind = pN <= pW ? nKind : wKind;
+    const bridgePal = getStratumPalette(bridgeKind);
+    const br = half;
     ctx.fillStyle = bridgePal.fill;
     ctx.beginPath();
     ctx.moveTo(px, py);
     ctx.lineTo(px + br, py);
-    ctx.quadraticCurveTo(px + br * 0.32, py + br * 0.32, px, py + br);
+    ctx.quadraticCurveTo(px + br * k, py + br * k, px, py + br);
     ctx.closePath();
     ctx.fill();
     ctx.strokeStyle = bridgePal.lipShadow;
-    ctx.lineWidth = bridgePal.thicknessPx;
+    ctx.lineWidth = bridgePal.thicknessPx * 0.85;
     ctx.beginPath();
     ctx.moveTo(px + br, py);
-    ctx.quadraticCurveTo(px + br * 0.32, py + br * 0.32, px, py + br);
+    ctx.quadraticCurveTo(px + br * k, py + br * k, px, py + br);
     ctx.stroke();
   }
-  if (nKind === eKind && nKind !== mask.centerKind && getTerrainVisualPriority(nKind) > centerPriority) {
-    const bridgePal = getStratumPalette(nKind);
-    const br = Math.round(s * bridgePal.cornerRadiusRatio);
+  if (pN > centerPriority && pE > centerPriority) {
+    const bridgeKind = pN <= pE ? nKind : eKind;
+    const bridgePal = getStratumPalette(bridgeKind);
+    const br = half;
     ctx.fillStyle = bridgePal.fill;
     ctx.beginPath();
     ctx.moveTo(px + s, py);
     ctx.lineTo(px + s - br, py);
-    ctx.quadraticCurveTo(px + s - br * 0.32, py + br * 0.32, px + s, py + br);
+    ctx.quadraticCurveTo(px + s - br * k, py + br * k, px + s, py + br);
     ctx.closePath();
     ctx.fill();
     ctx.strokeStyle = bridgePal.lipShadow;
-    ctx.lineWidth = bridgePal.thicknessPx;
+    ctx.lineWidth = bridgePal.thicknessPx * 0.85;
     ctx.beginPath();
     ctx.moveTo(px + s - br, py);
-    ctx.quadraticCurveTo(px + s - br * 0.32, py + br * 0.32, px + s, py + br);
+    ctx.quadraticCurveTo(px + s - br * k, py + br * k, px + s, py + br);
     ctx.stroke();
   }
-  if (sKind === eKind && sKind !== mask.centerKind && getTerrainVisualPriority(sKind) > centerPriority) {
-    const bridgePal = getStratumPalette(sKind);
-    const br = Math.round(s * bridgePal.cornerRadiusRatio);
+  if (pS > centerPriority && pE > centerPriority) {
+    const bridgeKind = pS <= pE ? sKind : eKind;
+    const bridgePal = getStratumPalette(bridgeKind);
+    const br = half;
     ctx.fillStyle = bridgePal.fill;
     ctx.beginPath();
     ctx.moveTo(px + s, py + s);
     ctx.lineTo(px + s - br, py + s);
-    ctx.quadraticCurveTo(px + s - br * 0.32, py + s - br * 0.32, px + s, py + s - br);
+    ctx.quadraticCurveTo(px + s - br * k, py + s - br * k, px + s, py + s - br);
     ctx.closePath();
     ctx.fill();
     ctx.strokeStyle = bridgePal.lipHighlight;
-    ctx.lineWidth = 1.6;
+    ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.moveTo(px + s - br, py + s);
-    ctx.quadraticCurveTo(px + s - br * 0.32, py + s - br * 0.32, px + s, py + s - br);
+    ctx.quadraticCurveTo(px + s - br * k, py + s - br * k, px + s, py + s - br);
     ctx.stroke();
   }
-  if (sKind === wKind && sKind !== mask.centerKind && getTerrainVisualPriority(sKind) > centerPriority) {
-    const bridgePal = getStratumPalette(sKind);
-    const br = Math.round(s * bridgePal.cornerRadiusRatio);
+  if (pS > centerPriority && pW > centerPriority) {
+    const bridgeKind = pS <= pW ? sKind : wKind;
+    const bridgePal = getStratumPalette(bridgeKind);
+    const br = half;
     ctx.fillStyle = bridgePal.fill;
     ctx.beginPath();
     ctx.moveTo(px, py + s);
     ctx.lineTo(px + br, py + s);
-    ctx.quadraticCurveTo(px + br * 0.32, py + s - br * 0.32, px, py + s - br);
+    ctx.quadraticCurveTo(px + br * k, py + s - br * k, px, py + s - br);
     ctx.closePath();
     ctx.fill();
     ctx.strokeStyle = bridgePal.lipShadow;
-    ctx.lineWidth = bridgePal.thicknessPx;
+    ctx.lineWidth = bridgePal.thicknessPx * 0.85;
     ctx.beginPath();
     ctx.moveTo(px + br, py + s);
-    ctx.quadraticCurveTo(px + br * 0.32, py + s - br * 0.32, px, py + s - br);
+    ctx.quadraticCurveTo(px + br * k, py + s - br * k, px, py + s - br);
     ctx.stroke();
   }
-
-  ctx.restore();
 }
 
 function getOrBuildStaticTerrainCache(
@@ -1297,6 +1337,61 @@ function drawConnectedWallEntity(
 }
 
 /**
+ * Renders a high-contrast vertical storage fill gauge ("jauge verticale") on Refinery and Silo structures.
+ */
+function drawVerticalStorageGauge(
+  ctx: CanvasRenderingContext2D,
+  gx: number,
+  gy: number,
+  gw: number,
+  gh: number,
+  fillRatio: number
+): void {
+  const clamped = Math.max(0, Math.min(1, fillRatio));
+  const innerH = Math.max(2, gh - 2);
+  const filledH = innerH * clamped;
+  const fillTopY = gy + gh - 1 - filledH;
+
+  // Armored dark gauge housing
+  ctx.fillStyle = "rgba(7, 11, 18, 0.92)";
+  ctx.fillRect(gx, gy, gw, gh);
+  ctx.strokeStyle = "#64748b";
+  ctx.lineWidth = 1.1;
+  ctx.strokeRect(gx, gy, gw, gh);
+
+  // Luminous vertical liquid/crystal bar rising from bottom
+  if (filledH > 0.5) {
+    const vGrad = ctx.createLinearGradient(gx, gy + gh - 1, gx, gy + 1);
+    if (clamped >= 0.85) {
+      vGrad.addColorStop(0, "#d97706");
+      vGrad.addColorStop(0.55, "#f59e0b");
+      vGrad.addColorStop(1, "#fef08a");
+    } else {
+      vGrad.addColorStop(0, "#059669");
+      vGrad.addColorStop(0.55, "#10b981");
+      vGrad.addColorStop(1, "#6ee7b7");
+    }
+    ctx.fillStyle = vGrad;
+    ctx.fillRect(gx + 1, fillTopY, Math.max(1.5, gw - 2), filledH);
+
+    // Bright meniscus line at top of fluid column
+    ctx.fillStyle = "#ecfdf5";
+    ctx.fillRect(gx + 1, fillTopY, Math.max(1.5, gw - 2), 1.3);
+  }
+
+  // Graduated horizontal tick marks at 25%, 50%, 75%
+  ctx.strokeStyle = "rgba(226, 232, 240, 0.55)";
+  ctx.lineWidth = 0.8;
+  ctx.beginPath();
+  for (const frac of [0.25, 0.5, 0.75]) {
+    const ty = gy + gh * frac;
+    ctx.moveTo(gx + 0.8, ty);
+    ctx.lineTo(gx + gw - 0.8, ty);
+  }
+  ctx.stroke();
+}
+
+/**
  * Renders scaffolding & a cyan assembly progress bar on floor slabs and walls while a Constructor Bot builds them.
  */
 function drawConstructionProgressOverlay(
@@ -1649,8 +1744,18 @@ function drawBuildingLiveAnimation(
       ctx.arc(px + bw * 0.88, py + bh * (0.3 + i * 0.2), 2.0, 0, Math.PI * 2);
       ctx.fill();
     }
+
+    // Prominent vertical storage fill gauge (jauge verticale) on the Refinery storage tower
+    drawVerticalStorageGauge(
+      ctx,
+      px + bw * 0.72,
+      py + bh * 0.16,
+      7,
+      bh * 0.68,
+      storageFillRatio
+    );
   } else if (ent.kind === "SILO") {
-    // Fill-level dependent luminescent emerald glow & level gauge on Silo
+    // Fill-level dependent luminescent emerald glow & vertical fill gauge on Silo
     const fillClamped = Math.max(0.05, Math.min(1, storageFillRatio));
     const siloGlowR = (6 + fillClamped * 14) * (0.9 + pulse * 0.14);
     const sGrad = ctx.createRadialGradient(cx, cy, 1, cx, cy, siloGlowR);
@@ -1662,13 +1767,15 @@ function drawBuildingLiveAnimation(
     ctx.arc(cx, cy, siloGlowR, 0, Math.PI * 2);
     ctx.fill();
 
-    // Dynamic vertical fill bar inside Silo sight-glass
-    const gaugeH = bh * 0.48;
-    const filledH = gaugeH * fillClamped;
-    ctx.fillStyle = "#091526";
-    ctx.fillRect(cx - 2.5, cy - gaugeH * 0.5, 5, gaugeH);
-    ctx.fillStyle = fillClamped > 0.85 ? "#34d399" : "#10b981";
-    ctx.fillRect(cx - 1.6, cy + gaugeH * 0.5 - filledH, 3.2, filledH);
+    // High-contrast vertical fill gauge (jauge verticale) on Silo
+    drawVerticalStorageGauge(
+      ctx,
+      cx - 3.2,
+      py + bh * 0.14,
+      6.4,
+      bh * 0.72,
+      storageFillRatio
+    );
   } else if (ent.kind === "TECH_CENTER") {
     // Rotating quantum ring & pulsing violet/cyan core
     const qR = minDim * 0.22;
@@ -1799,6 +1906,27 @@ function drawUnitLiveAnimation(
       ctx.arc(sweep, -s * 0.58, 2.4 + pulse * 1.6, 0, Math.PI * 2);
       ctx.fillStyle = "#a7f3d0";
       ctx.fill();
+    } else if (ent.stateLabel === "UNLOADING") {
+      // Active ore discharge chute stream from rear dump-bed (+Y) into Refinery hopper
+      const streamPhase = (frameNowMs * 0.012) % 1;
+      ctx.strokeStyle = "#34d399";
+      ctx.lineWidth = 2.4;
+      ctx.beginPath();
+      ctx.moveTo(-3.2, s * 0.28);
+      ctx.lineTo(-1.2, s * 0.58);
+      ctx.moveTo(3.2, s * 0.28);
+      ctx.lineTo(1.2, s * 0.58);
+      ctx.stroke();
+
+      for (let i = 0; i < 3; i++) {
+        const t = (streamPhase + i * 0.33) % 1;
+        const pyDrop = s * (0.26 + t * 0.36);
+        const pxDrop = Math.sin(frameNowMs * 0.02 + i * 2.1) * 2.2;
+        ctx.beginPath();
+        ctx.arc(pxDrop, pyDrop, 1.8 + (1 - t) * 1.0, 0, Math.PI * 2);
+        ctx.fillStyle = i % 2 === 0 ? "#6ee7b7" : "#facc15";
+        ctx.fill();
+      }
     }
   } else if (ent.kind === "CONSTRUCTOR_BOT" && ent.stateLabel === "BUILDING") {
     // Oscillating cyan/amber robotic welding arc while assembling slabs or walls

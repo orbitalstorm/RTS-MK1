@@ -15,6 +15,7 @@ import {
   BattlefieldVfxManager,
   computeCraterFadeAlpha,
   CRATER_LIFETIME_MS,
+  HARVESTER_NUGGET_DROP_INTERVAL_MS,
   ORE_NUGGET_LIFETIME_MS,
 } from "../src/renderer/vfx-manager";
 import {
@@ -30,9 +31,13 @@ import {
   EDGE_SCROLL_MARGIN_PX,
   EDGE_SCROLL_MAX_SPEED_PX,
   getTimedConstructionTicks,
+  HARVESTER_MAX_LOAD,
+  HARVESTER_UNLOAD_PER_TICK,
   interpolateAngleIndex16,
   interpolateEntityPose,
   isFoundationTerrainKind,
+  MAP_HEIGHT_TILES,
+  MAP_WIDTH_TILES,
   requiresStoneOrConcreteFoundation,
   resolveTouchTapAction,
   SPRITE_ATLAS_SCALE,
@@ -85,7 +90,7 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
     ]);
 
     const initialSnapshot = sim.getFullSnapshot();
-    expect(initialSnapshot.mapWidth).toBe(48);
+    expect(initialSnapshot.mapWidth).toBe(MAP_WIDTH_TILES);
     expect(initialSnapshot.entities.length).toBeGreaterThanOrEqual(12);
 
     // Run 35 ticks and verify delta schema & sequential tickId
@@ -284,7 +289,7 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
   });
 
   it("v1.2.0 — supports Game Juice camera shake, shortest-arc 16-angle interpolation, and 2x Hi-DPI sprite scale", () => {
-    expect(APP_VERSION).toBe("1.6.0");
+    expect(APP_VERSION).toBe("1.7.0");
     expect(SPRITE_ATLAS_SCALE).toBe(2);
 
     // Zero trauma produces zero offset
@@ -497,7 +502,7 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
 
     const grassTileX = 2;
     const grassTileY = 25;
-    const grassIdx = grassTileY * 48 + grassTileX;
+    const grassIdx = grassTileY * sim.width + grassTileX;
     sim.terrainGrid[grassIdx] = TERRAIN_KIND.GRASS;
 
     // First shell hit degrades Grass (4) -> Dirt (0)
@@ -573,7 +578,7 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
     for (let t = 0; t < 40; t++) {
       sim.stepTick();
     }
-    expect(sim.terrainGrid[5 * 48 + 9]).toBe(TERRAIN_KIND.CONCRETE_SLAB);
+    expect(sim.terrainGrid[5 * sim.width + 9]).toBe(TERRAIN_KIND.CONCRETE_SLAB);
 
     // 6. 2-Minute AI Attack Grace Period (2400 ticks = 120s)
     expect(AI_ATTACK_GRACE_PERIOD_TICKS).toBe(2400);
@@ -687,7 +692,7 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
     // 2. Ground force-fire (COMMAND_ATTACK_GROUND): unit fires at a specific ground tile even without an enemy
     const targetGroundX = 16;
     const targetGroundY = 18;
-    sim.terrainGrid[targetGroundY * 48 + targetGroundX] = TERRAIN_KIND.GRASS;
+    sim.terrainGrid[targetGroundY * sim.width + targetGroundX] = TERRAIN_KIND.GRASS;
     sim.issueAttackGroundCommand("p1", [p1Tank.id], targetGroundX, targetGroundY);
     expect(sim.getEntity(p1Tank.id)!.combat?.groundTarget).toEqual({
       x: targetGroundX,
@@ -701,7 +706,7 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
       )
     ).toBe(true);
     // Grass tile blasted by ground fire degrades to Dirt
-    expect(sim.terrainGrid[targetGroundY * 48 + targetGroundX]).toBe(TERRAIN_KIND.DIRT);
+    expect(sim.terrainGrid[targetGroundY * sim.width + targetGroundX]).toBe(TERRAIN_KIND.DIRT);
 
     // 3. Building repair (COMMAND_REPAIR_BUILDING & stepBuildingRepairs)
     const p1Yard = sim
@@ -732,9 +737,9 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
     for (let t = 0; t < 90; t++) {
       sim.stepTick();
     }
-    expect(sim.terrainGrid[5 * 48 + 8]).toBe(TERRAIN_KIND.CONCRETE_SLAB);
-    expect(sim.terrainGrid[5 * 48 + 9]).toBe(TERRAIN_KIND.CONCRETE_SLAB);
-    expect(sim.terrainGrid[5 * 48 + 10]).toBe(TERRAIN_KIND.CONCRETE_SLAB);
+    expect(sim.terrainGrid[5 * sim.width + 8]).toBe(TERRAIN_KIND.CONCRETE_SLAB);
+    expect(sim.terrainGrid[5 * sim.width + 9]).toBe(TERRAIN_KIND.CONCRETE_SLAB);
+    expect(sim.terrainGrid[5 * sim.width + 10]).toBe(TERRAIN_KIND.CONCRETE_SLAB);
 
     // Continuous placement of SANDBAG_WALL & CONCRETE_WALL
     expect(sim.issuePlaceBuilding("p1", "DEFENSE", "SANDBAG_WALL", 11, 6)).toBe(true);
@@ -815,7 +820,7 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
     }
 
     for (let dx = 0; dx < 4; dx++) {
-      expect(sim.terrainGrid[13 * 48 + (8 + dx)]).toBe(TERRAIN_KIND.CONCRETE_SLAB);
+      expect(sim.terrainGrid[13 * sim.width + (8 + dx)]).toBe(TERRAIN_KIND.CONCRETE_SLAB);
     }
 
     // 2. Progressive fade-out and disappearance of black ground impact stains (craters)
@@ -832,7 +837,7 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
     expect(alphaExpired).toBe(0);
 
     // 3. Degraded terrain stratum (Grass -> Dirt -> Stone) never reverts back to Grass over time
-    const impactTileIdx = 20 * 48 + 20;
+    const impactTileIdx = 20 * sim.width + 20;
     sim.terrainGrid[impactTileIdx] = TERRAIN_KIND.GRASS;
     expect(sim.degradeTerrainAtImpact(20, 20, "SHELL", false)).toBe(true);
     expect(sim.terrainGrid[impactTileIdx]).toBe(TERRAIN_KIND.DIRT);
@@ -874,7 +879,7 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
     expect(getTimedConstructionTicks("CONCRETE_WALL")).toBeGreaterThan(0);
 
     // Place a Concrete Wall at (10, 8) and a Concrete Slab at (10, 9): they are NOT built instantaneously
-    const slabIdx = 9 * 48 + 10;
+    const slabIdx = 9 * sim.width + 10;
     sim.terrainGrid[slabIdx] = TERRAIN_KIND.DIRT;
     expect(sim.issuePlaceBuilding("p1", "DEFENSE", "CONCRETE_WALL", 10, 8)).toBe(true);
     expect(sim.issuePlaceBuilding("p1", "BUILDING", "CONCRETE_SLAB", 10, 9)).toBe(true);
@@ -921,7 +926,7 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
     // Set footprint (11..12, 10..11) to GRASS / DIRT -> placement MUST be rejected
     for (let dy = 0; dy < 2; dy++) {
       for (let dx = 0; dx < 2; dx++) {
-        sim.terrainGrid[(10 + dy) * 48 + (11 + dx)] = dy === 0 ? TERRAIN_KIND.GRASS : TERRAIN_KIND.DIRT;
+        sim.terrainGrid[(10 + dy) * sim.width + (11 + dx)] = dy === 0 ? TERRAIN_KIND.GRASS : TERRAIN_KIND.DIRT;
       }
     }
     expect(sim.issuePlaceBuilding("p1", "BUILDING", "POWER_PLANT", 11, 10)).toBe(false);
@@ -969,5 +974,84 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
     vfx.maybeSpawnHarvesterOreTrail("harv_1", 12.6, 12, 4, 350, true, 1300);
     expect(vfx.getActiveCounts().oreNuggets).toBe(1);
     expect(ORE_NUGGET_LIFETIME_MS).toBeGreaterThan(2000);
+  });
+
+  it("v1.7.0 — enlarges the map to 72x72, places ore fields further from base spawns, enforces timed Refinery ore unloading, and reduces Harvester nugget drop rate", () => {
+    const sim = new RtsSimulation("test_v170_map_and_unloading", [
+      { playerId: "p1", commanderName: "Alpha", faction: "GDI", isAi: false },
+      { playerId: "p2", commanderName: "Beta", faction: "NOD", isAi: false },
+    ]);
+
+    // 1. Enlarged map dimensions (72x72 = 5,184 tiles)
+    expect(MAP_WIDTH_TILES).toBe(72);
+    expect(MAP_HEIGHT_TILES).toBe(72);
+    expect(sim.width).toBe(72);
+    expect(sim.height).toBe(72);
+    expect(sim.terrainGrid.length).toBe(72 * 72);
+
+    // 2. Ore patches are positioned further away from the base spawn (5, 5) to require early field expeditions
+    let minOreDistFromSpawn = Infinity;
+    for (let y = 0; y < sim.height; y++) {
+      for (let x = 0; x < sim.width; x++) {
+        if ((sim.oreGrid[y * sim.width + x] ?? 0) > 0) {
+          const dist = Math.hypot(x - 6, y - 6);
+          if (dist < minOreDistFromSpawn) {
+            minOreDistFromSpawn = dist;
+          }
+        }
+      }
+    }
+    expect(minOreDistFromSpawn).toBeGreaterThanOrEqual(11);
+
+    // 3. Timed ore unloading at the Refinery (UNLOADING state over multiple ticks instead of instant 1-tick dump)
+    expect(HARVESTER_UNLOAD_PER_TICK).toBe(25);
+    const harv = sim
+      .getAllEntities()
+      .find((e) => e.ownerId === "p1" && e.entityType === "UNIT" && e.kind === "HARVESTER")!;
+    const refinery = sim
+      .getAllEntities()
+      .find((e) => e.ownerId === "p1" && e.entityType === "BUILDING" && e.kind === "REFINERY")!;
+    expect(harv).toBeDefined();
+    expect(refinery).toBeDefined();
+
+    // Load Harvester with 500 ore and place it at the Refinery unloading dock (5, 10)
+    harv.harvester!.cargoOre = HARVESTER_MAX_LOAD;
+    harv.harvester!.state = "RETURNING_TO_REFINERY";
+    harv.stateLabel = "RETURNING";
+    harv.transform.x = refinery.transform.x;
+    harv.transform.y = refinery.transform.y + refinery.building!.footprintH;
+
+    const creditsBefore = sim.getPlayerState("p1")!.credits;
+
+    // First tick at dock transitions Harvester into UNLOADING without dumping cargo instantaneously
+    sim.stepTick();
+    expect(harv.harvester!.state).toBe("UNLOADING");
+    expect(harv.stateLabel).toBe("UNLOADING");
+    expect(harv.harvester!.cargoOre).toBe(HARVESTER_MAX_LOAD);
+
+    // Next 5 ticks unload 5 * 25 = 125 ore progressively
+    for (let t = 0; t < 5; t++) {
+      sim.stepTick();
+    }
+    expect(harv.harvester!.state).toBe("UNLOADING");
+    expect(harv.harvester!.cargoOre).toBe(HARVESTER_MAX_LOAD - 5 * HARVESTER_UNLOAD_PER_TICK);
+    expect(sim.getPlayerState("p1")!.credits).toBe(creditsBefore + 5 * HARVESTER_UNLOAD_PER_TICK);
+
+    // Remaining 15 ticks complete the 500-ore unload and return Harvester to IDLE
+    for (let t = 0; t < 15; t++) {
+      sim.stepTick();
+    }
+    expect(harv.harvester!.cargoOre).toBe(0);
+    expect(harv.harvester!.state).toBe("IDLE");
+    expect(sim.getPlayerState("p1")!.credits).toBe(creditsBefore + HARVESTER_MAX_LOAD);
+
+    // 4. Slightly reduced Harvester nugget drop rate (680ms interval)
+    expect(HARVESTER_NUGGET_DROP_INTERVAL_MS).toBe(680);
+    const vfx = new BattlefieldVfxManager();
+    vfx.maybeSpawnHarvesterOreTrail("harv_rate", 10, 10, 4, 400, true, 1000);
+    vfx.maybeSpawnHarvesterOreTrail("harv_rate", 10.5, 10, 4, 400, true, 1500);
+    expect(vfx.getActiveCounts().oreNuggets).toBe(1);
+    vfx.maybeSpawnHarvesterOreTrail("harv_rate", 11.0, 10, 4, 400, true, 1700);
+    expect(vfx.getActiveCounts().oreNuggets).toBe(2);
   });
 });

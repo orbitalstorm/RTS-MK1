@@ -24,6 +24,8 @@ import {
   BUILDING_LIST,
   FACTIONS,
   isRepeatableBuildingKind,
+  MAP_HEIGHT_TILES,
+  MAP_WIDTH_TILES,
   UNITS,
   UNIT_LIST,
   ZOOM_LEVELS,
@@ -112,7 +114,7 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
     if (rect.width <= 0 || rect.height <= 0) return;
     const relX = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
     const relY = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
-    onMinimapClickTile(Math.floor(relX * 48), Math.floor(relY * 48));
+    onMinimapClickTile(Math.floor(relX * MAP_WIDTH_TILES), Math.floor(relY * MAP_HEIGHT_TILES));
   }
 
   function handleMinimapPointer(e: React.MouseEvent<HTMLCanvasElement>): void {

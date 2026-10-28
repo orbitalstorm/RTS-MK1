@@ -11,6 +11,7 @@ import {
   getTimedConstructionTicks,
   HARVESTER_LOAD_PER_TICK,
   HARVESTER_MAX_LOAD,
+  HARVESTER_UNLOAD_PER_TICK,
   isFoundationTerrainKind,
   isRepeatableBuildingKind,
   MAP_HEIGHT_TILES,
@@ -201,15 +202,24 @@ export class RtsSimulation {
     const terrainGrid = new Array<number>(total).fill(TERRAIN_KIND.GRASS);
     const oreGrid = new Array<number>(total).fill(0);
 
+    const midX = this.width * 0.5 - 0.5;
+    const midY = this.height * 0.5 - 0.5;
+    const ridgeLeft = Math.floor(this.width * 0.5) - 2;
+    const ridgeRight = Math.floor(this.width * 0.5) + 1;
+    const ridgeTopStart = Math.floor(this.height * 0.34);
+    const ridgeTopEnd = Math.floor(this.height * 0.42);
+    const ridgeBotStart = Math.floor(this.height * 0.58);
+    const ridgeBotEnd = Math.floor(this.height * 0.66);
+
     // Organic Earth/Soil (TERRE = 0) & Stone/Bedrock (PIERRE = 1) zones + central tactical ridges
     for (let y = 0; y < this.height; y++) {
       for (let x = 0; x < this.width; x++) {
         const idx = y * this.width + x;
 
         // Organic earth transition corridor along the diagonal tactical valley & central basin
-        const distCenter = Math.hypot(x - 23.5, y - 23.5);
-        const wave = Math.sin(x * 0.28) * 1.8 + Math.cos(y * 0.28) * 1.8;
-        if (distCenter + wave <= 11.5 || Math.abs(x - y) <= 3.2) {
+        const distCenter = Math.hypot(x - midX, y - midY);
+        const wave = Math.sin(x * 0.24) * 2.2 + Math.cos(y * 0.24) * 2.2;
+        if (distCenter + wave <= 15.5 || Math.abs(x - y) <= 3.8) {
           terrainGrid[idx] = TERRAIN_KIND.DIRT;
         }
 
@@ -219,36 +229,40 @@ export class RtsSimulation {
         const distNE = Math.hypot(x - (this.width - 8.5), y - 7.5);
         const distSW = Math.hypot(x - 7.5, y - (this.height - 8.5));
         const minCornerDist = Math.min(distNW, distSE, distNE, distSW);
-        if (minCornerDist <= 7.2) {
+        if (minCornerDist <= 7.8) {
           terrainGrid[idx] = TERRAIN_KIND.STONE;
-        } else if (minCornerDist <= 9.5) {
+        } else if (minCornerDist <= 10.6) {
           terrainGrid[idx] = TERRAIN_KIND.DIRT;
         }
 
         // Central canyon ridges (leaving wide tactical passes)
         if (
-          (x === 22 || x === 25) &&
-          ((y >= 16 && y <= 20) || (y >= 27 && y <= 31))
+          (x === ridgeLeft || x === ridgeRight) &&
+          ((y >= ridgeTopStart && y <= ridgeTopEnd) || (y >= ridgeBotStart && y <= ridgeBotEnd))
         ) {
           terrainGrid[idx] = TERRAIN_KIND.CLIFF; // impassable ridge
         }
       }
     }
 
-    // Rich ore patches near each spawn and high-yield central Tiberium/Spice basin
-    // Surrounded by an organic exposed earth (DIRT = 0) halo
+    // Ore patches positioned further away from the base spawns to require early field expeditions,
+    // plus high-yield contested mid-map and central Tiberium/Spice basins.
+    const centerTileX = Math.floor(this.width * 0.5);
+    const centerTileY = Math.floor(this.height * 0.5);
     const oreCenters = [
-      { cx: 14, cy: 7, radius: 3, amount: 650 },
-      { cx: 7, cy: 14, radius: 3, amount: 650 },
-      { cx: this.width - 15, cy: this.height - 8, radius: 3, amount: 650 },
-      { cx: this.width - 8, cy: this.height - 15, radius: 3, amount: 650 },
-      { cx: 24, cy: 24, radius: 4, amount: 900 },
-      { cx: 14, cy: 34, radius: 3, amount: 750 },
-      { cx: 34, cy: 14, radius: 3, amount: 750 },
+      { cx: 21, cy: 10, radius: 3, amount: 700 },
+      { cx: 10, cy: 21, radius: 3, amount: 700 },
+      { cx: this.width - 22, cy: this.height - 11, radius: 3, amount: 700 },
+      { cx: this.width - 11, cy: this.height - 22, radius: 3, amount: 700 },
+      { cx: centerTileX, cy: centerTileY, radius: 4, amount: 950 },
+      { cx: 22, cy: this.height - 22, radius: 3, amount: 800 },
+      { cx: this.width - 22, cy: 22, radius: 3, amount: 800 },
+      { cx: centerTileX, cy: 18, radius: 3, amount: 750 },
+      { cx: centerTileX, cy: this.height - 18, radius: 3, amount: 750 },
     ];
 
     for (const patch of oreCenters) {
-      const haloRadius = patch.radius + 1;
+      const haloRadius = patch.radius + 2;
       for (let dy = -haloRadius; dy <= haloRadius; dy++) {
         for (let dx = -haloRadius; dx <= haloRadius; dx++) {
           const d2 = dx * dx + dy * dy;
@@ -261,7 +275,7 @@ export class RtsSimulation {
             const distSE = Math.hypot(tx - (this.width - 8.5), ty - (this.height - 8.5));
             const distNE = Math.hypot(tx - (this.width - 8.5), ty - 7.5);
             const distSW = Math.hypot(tx - 7.5, ty - (this.height - 8.5));
-            if (Math.min(distNW, distSE, distNE, distSW) <= 5.4) continue;
+            if (Math.min(distNW, distSE, distNE, distSW) <= 9.0) continue;
             if (d2 <= patch.radius * patch.radius) {
               terrainGrid[idx] = TERRAIN_KIND.ORE;
               oreGrid[idx] = patch.amount;
@@ -1400,19 +1414,8 @@ export class RtsSimulation {
         );
 
         if (distToFootprint <= 1.55) {
-          const spaceLeft = Math.max(0, player.maxStorage - player.credits);
-          const deposited = Math.min(spaceLeft, harv.cargoOre);
-          player.credits += deposited;
-          player.harvestedTotal += harv.cargoOre;
-          if (deposited < harv.cargoOre && !player.silosAlertSent) {
-            player.silosAlertSent = true;
-            this.pushAcoustic("EVA_SILOS_NEEDED", ref.transform.x, ref.transform.y, player.playerId);
-          } else if (player.credits < player.maxStorage * 0.9) {
-            player.silosAlertSent = false;
-          }
-          harv.cargoOre = 0;
-          harv.state = "IDLE";
-          ent.stateLabel = "IDLE";
+          harv.state = "UNLOADING";
+          ent.stateLabel = "UNLOADING";
           nav.path = [];
           nav.pathIndex = 0;
           nav.waitTicks = 0;
@@ -1447,6 +1450,52 @@ export class RtsSimulation {
           );
           nav.pathIndex = 0;
           nav.waitTicks = nav.path.length === 0 ? 8 : 0;
+        }
+      } else if (harv.state === "UNLOADING") {
+        const ref = this.findNearestRefinery(ent.ownerId, ent.transform.x, ent.transform.y);
+        if (!ref || !ref.building) {
+          harv.state = "IDLE";
+          ent.stateLabel = "IDLE";
+          ent.dirty = true;
+          continue;
+        }
+
+        const unloadChunk = Math.min(harv.cargoOre, HARVESTER_UNLOAD_PER_TICK);
+        if (unloadChunk > 0) {
+          const spaceLeft = Math.max(0, player.maxStorage - player.credits);
+          const deposited = Math.min(spaceLeft, unloadChunk);
+          player.credits += deposited;
+          player.harvestedTotal += unloadChunk;
+          if (deposited < unloadChunk && !player.silosAlertSent) {
+            player.silosAlertSent = true;
+            this.pushAcoustic("EVA_SILOS_NEEDED", ref.transform.x, ref.transform.y, player.playerId);
+          } else if (player.credits < player.maxStorage * 0.9) {
+            player.silosAlertSent = false;
+          }
+          harv.cargoOre -= unloadChunk;
+          ent.dirty = true;
+
+          if (this.tickCounter % 4 === 0) {
+            this.pushVisualEffect(
+              "HARVEST_SPARKS",
+              ent.transform.x,
+              ent.transform.y,
+              0.5,
+              0,
+              ent.faction
+            );
+          }
+        }
+
+        if (harv.cargoOre <= 0) {
+          harv.cargoOre = 0;
+          harv.state = "IDLE";
+          ent.stateLabel = "IDLE";
+          nav.path = [];
+          nav.pathIndex = 0;
+          nav.waitTicks = 0;
+          ent.dirty = true;
+          this.pushAcoustic("CREDITS_TICK", ref.transform.x, ref.transform.y, player.playerId);
         }
       }
     }
