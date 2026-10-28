@@ -78,6 +78,9 @@ function canPlaceBuildingOnGrid(
       if (st.terrainGrid[idx] === 2) {
         return false;
       }
+      if (buildingKind === "CONCRETE_SLAB" && st.terrainGrid[idx] === 5) {
+        return false;
+      }
     }
   }
 
@@ -90,7 +93,7 @@ function canPlaceBuildingOnGrid(
       const bSpec = BUILDINGS[ent.kind as BuildingKind];
       const overlapsX = tileX < ent.x + bSpec.footprintW && tileX + spec.footprintW > ent.x;
       const overlapsY = tileY < ent.y + bSpec.footprintH && tileY + spec.footprintH > ent.y;
-      if (overlapsX && overlapsY) {
+      if (buildingKind !== "CONCRETE_SLAB" && overlapsX && overlapsY) {
         return false;
       }
       if (ent.ownerId === st.playerId) {

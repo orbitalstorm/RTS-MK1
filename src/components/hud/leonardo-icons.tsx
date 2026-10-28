@@ -267,6 +267,13 @@ export const ProductionItemVectorIcon = React.memo(function ProductionItemVector
           </>
         )}
 
+        {itemKind === "CONCRETE_SLAB" && (
+          <>
+            <polygon points="14,12 50,12 54,16 54,48 50,52 14,52 10,48 10,16" fill="#525e6e" stroke={pColor} strokeWidth="1.8" />
+            <rect x="16" y="18" width="32" height="28" rx="2" fill="#64748b" stroke="#334155" strokeWidth="1.4" />
+          </>
+        )}
+
         {itemKind === "GUARD_TOWER" && (
           <>
             <polygon points="20,18 44,18 48,24 48,48 16,48 16,24" fill={sColor} stroke={pColor} strokeWidth="1.8" />
@@ -414,6 +421,17 @@ export const ProductionItemVectorIcon = React.memo(function ProductionItemVector
             <circle cx="44" cy="20" r="3" fill="#38bdf8" />
             <circle cx="20" cy="44" r="3" fill="#38bdf8" />
             <circle cx="44" cy="44" r="3" fill="#38bdf8" />
+          </>
+        )}
+
+        {itemKind === "CONCRETE_SLAB" && (
+          <>
+            <line x1="16" y1="32" x2="48" y2="32" stroke="#1e293b" strokeWidth="1.6" />
+            <line x1="32" y1="18" x2="32" y2="46" stroke="#1e293b" strokeWidth="1.6" />
+            <circle cx="20" cy="22" r="2" fill="#cbd5e1" />
+            <circle cx="44" cy="22" r="2" fill="#cbd5e1" />
+            <circle cx="20" cy="42" r="2" fill="#cbd5e1" />
+            <circle cx="44" cy="42" r="2" fill="#cbd5e1" />
           </>
         )}
 

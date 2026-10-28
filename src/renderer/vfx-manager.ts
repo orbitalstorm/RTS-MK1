@@ -59,11 +59,11 @@ export interface ActiveProjectile {
   lastSmokeMs: number;
 }
 
-const MAX_CRATERS = 48;
+const MAX_CRATERS = 160;
 const MAX_EXPLOSIONS = 64;
 const MAX_PARTICLES = 320;
 const MAX_PROJECTILES = 96;
-const CRATER_LIFETIME_MS = 18_000;
+const CRATER_LIFETIME_MS = 180_000;
 const MAX_SEEN_IDS = 256;
 
 function worldTileToIndex(tileX: number, tileY: number): number {
@@ -207,18 +207,22 @@ export class BattlefieldVfxManager {
     radiusPx: number,
     nowMs: number
   ): void {
-    // 1. Persistent Scorch Crater on ground-scorching explosions
+    // 1. Persistent Scorch Crater & Impact Stain (tache d'impact) on projectile hits & explosions
     if (
       kind === "BUILDING_DEMOLITION" ||
       kind === "UNIT_EXPLOSION" ||
-      kind === "ROCKET_EXPLOSION"
+      kind === "ROCKET_EXPLOSION" ||
+      kind === "SHELL_IMPACT" ||
+      kind === "LASER_BURN"
     ) {
       const craterRadius =
         kind === "BUILDING_DEMOLITION"
           ? Math.max(22, radiusPx * 0.65)
           : kind === "UNIT_EXPLOSION"
             ? Math.max(14, radiusPx * 0.55)
-            : Math.max(10, radiusPx * 0.45);
+            : kind === "ROCKET_EXPLOSION"
+              ? Math.max(11, radiusPx * 0.48)
+              : Math.max(8, radiusPx * 0.42);
       this.addCrater(worldPxX, worldPxY, tileIdx, craterRadius, nowMs);
     }
 
@@ -444,8 +448,22 @@ export class BattlefieldVfxManager {
       // Outer scorched soot ring (zero CanvasGradient allocation)
       ctx.beginPath();
       ctx.arc(crater.worldPxX, crater.worldPxY, crater.radiusPx, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(24, 24, 27, 0.55)";
+      ctx.fillStyle = "rgba(24, 20, 16, 0.58)";
       ctx.fill();
+
+      // Organic impact splatter stains (taches d'impact) around the blast point
+      const baseAngle = crater.seed * Math.PI * 2;
+      for (let sIdx = 0; sIdx < 3; sIdx++) {
+        const ang = baseAngle + sIdx * 2.15;
+        const dist = crater.radiusPx * (0.68 + sIdx * 0.14);
+        const splatX = crater.worldPxX + Math.cos(ang) * dist;
+        const splatY = crater.worldPxY + Math.sin(ang) * dist;
+        const splatR = Math.max(2.2, crater.radiusPx * (0.28 - sIdx * 0.05));
+        ctx.beginPath();
+        ctx.arc(splatX, splatY, splatR, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(18, 15, 12, 0.65)";
+        ctx.fill();
+      }
 
       // Inner deep blast pit
       ctx.beginPath();

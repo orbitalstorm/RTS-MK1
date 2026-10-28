@@ -10,6 +10,7 @@ export type BuildingKind =
   | "WAR_FACTORY"
   | "RADAR_DOME"
   | "TECH_CENTER"
+  | "CONCRETE_SLAB"
   | "GUARD_TOWER"
   | "SAM_SITE"
   | "OBELISK";
@@ -74,7 +75,7 @@ export interface UnitSpec {
   description: string;
 }
 
-export const APP_VERSION = "1.3.1";
+export const APP_VERSION = "1.4.0";
 export const SIM_TICK_RATE_HZ = 20;
 export const SIM_TICK_MS = 50;
 export const MAP_WIDTH_TILES = 48;
@@ -82,6 +83,153 @@ export const MAP_HEIGHT_TILES = 48;
 export const TILE_PIXEL_SIZE = 32;
 export const SPRITE_ATLAS_SCALE = 2; // 64px per tile internal vector rasterization for crisp 2x zoom
 export const BASE_BUILD_RADIUS_TILES = 16;
+export const AI_ATTACK_GRACE_PERIOD_SECONDS = 120; // 2 minutes opening grace period before any enemy AI attack
+export const AI_ATTACK_GRACE_PERIOD_TICKS = AI_ATTACK_GRACE_PERIOD_SECONDS * SIM_TICK_RATE_HZ; // 2400 ticks
+export const UNIT_SPAWN_PROTECTION_TICKS = 20; // 1.0s (20 ticks at 20 Hz) spawn protection cooldown during which a newly created unit cannot be targeted
+
+export const TERRAIN_KIND = {
+  DIRT: 0, // Terre / Sol aride (sous l'herbe)
+  STONE: 1, // Pierre / Socle rocheux (sous la terre)
+  CLIFF: 2, // Falaise / Crête infranchissable
+  ORE: 3, // Gisement de minerai
+  GRASS: 4, // Herbe / Prairie naturelle (couche superficielle organique)
+  CONCRETE_SLAB: 5, // Dalle de béton armé posée par le joueur
+} as const;
+export type TerrainKindCode = (typeof TERRAIN_KIND)[keyof typeof TERRAIN_KIND];
+
+export interface TerrainNeighborMask {
+  centerKind: number;
+  underlyingKind: number;
+  sameN: boolean;
+  sameE: boolean;
+  sameS: boolean;
+  sameW: boolean;
+  sameNE: boolean;
+  sameSE: boolean;
+  sameSW: boolean;
+  sameNW: boolean;
+  roundTL: boolean;
+  roundTR: boolean;
+  roundBR: boolean;
+  roundBL: boolean;
+  concaveTL: boolean;
+  concaveTR: boolean;
+  concaveBR: boolean;
+  concaveBL: boolean;
+  isInterior: boolean;
+}
+
+/**
+ * Normalizes a terrainGrid code for base-ground rendering: dynamic ore (3) rests on a dirt/earth (0) bed.
+ */
+export function normalizeBaseTerrainKind(rawKind: number): number {
+  return rawKind === TERRAIN_KIND.ORE ? TERRAIN_KIND.DIRT : rawKind;
+}
+
+/**
+ * Returns the geological stratum directly underneath `kind`.
+ * Grass (4) -> Dirt (0) -> Stone (1). Concrete Slab (5) -> Stone (1).
+ */
+export function getUnderlyingTerrainKind(kind: number): number {
+  const norm = normalizeBaseTerrainKind(kind);
+  if (norm === TERRAIN_KIND.GRASS) return TERRAIN_KIND.DIRT;
+  if (norm === TERRAIN_KIND.DIRT) return TERRAIN_KIND.STONE;
+  if (norm === TERRAIN_KIND.CONCRETE_SLAB) return TERRAIN_KIND.STONE;
+  return TERRAIN_KIND.STONE;
+}
+
+/**
+ * Returns the layer thickness (impact wear threshold) before a terrain layer deteriorates into the underlying stratum.
+ */
+export function getTerrainLayerThickness(kind: number): number {
+  if (kind === TERRAIN_KIND.GRASS) return 1;
+  if (kind === TERRAIN_KIND.DIRT) return 2;
+  if (kind === TERRAIN_KIND.CONCRETE_SLAB) return 3;
+  return Infinity;
+}
+
+/**
+ * Deteriorates a terrain layer by one geological step when blasted by projectiles:
+ * Grass (4) -> Dirt (0) -> Stone (1). Concrete Slab (5) -> Stone (1).
+ */
+export function degradeTerrainLayer(currentKind: number): number {
+  if (currentKind === TERRAIN_KIND.GRASS) return TERRAIN_KIND.DIRT;
+  if (currentKind === TERRAIN_KIND.DIRT) return TERRAIN_KIND.STONE;
+  if (currentKind === TERRAIN_KIND.CONCRETE_SLAB) return TERRAIN_KIND.STONE;
+  return currentKind;
+}
+
+/**
+ * Computes the 8-neighbor auto-tiling & organic corner rounding mask for tile `(tx, ty)`.
+ * Identical neighboring tiles share `same* = true` so no internal borders or seams are drawn inside a contiguous zone,
+ * while outer corners (`!sameA && !sameB`) are rounded organically.
+ */
+export function computeTerrainNeighborMask(
+  terrainGrid: readonly number[],
+  tx: number,
+  ty: number,
+  width = MAP_WIDTH_TILES,
+  height = MAP_HEIGHT_TILES
+): TerrainNeighborMask {
+  const centerKind = normalizeBaseTerrainKind(terrainGrid[ty * width + tx] ?? 0);
+  const at = (x: number, y: number): number => {
+    if (x < 0 || y < 0 || x >= width || y >= height) return centerKind;
+    return normalizeBaseTerrainKind(terrainGrid[y * width + x] ?? 0);
+  };
+
+  const n = at(tx, ty - 1);
+  const e = at(tx + 1, ty);
+  const s = at(tx, ty + 1);
+  const w = at(tx - 1, ty);
+  const ne = at(tx + 1, ty - 1);
+  const se = at(tx + 1, ty + 1);
+  const sw = at(tx - 1, ty + 1);
+  const nw = at(tx - 1, ty - 1);
+
+  const sameN = n === centerKind;
+  const sameE = e === centerKind;
+  const sameS = s === centerKind;
+  const sameW = w === centerKind;
+  const sameNE = ne === centerKind;
+  const sameSE = se === centerKind;
+  const sameSW = sw === centerKind;
+  const sameNW = nw === centerKind;
+
+  const roundTL = !sameN && !sameW;
+  const roundTR = !sameN && !sameE;
+  const roundBR = !sameS && !sameE;
+  const roundBL = !sameS && !sameW;
+
+  const concaveTL = sameN && sameW && !sameNW;
+  const concaveTR = sameN && sameE && !sameNE;
+  const concaveBR = sameS && sameE && !sameSE;
+  const concaveBL = sameS && sameW && !sameSW;
+
+  const isInterior =
+    sameN && sameE && sameS && sameW && sameNE && sameSE && sameSW && sameNW;
+
+  return {
+    centerKind,
+    underlyingKind: getUnderlyingTerrainKind(centerKind),
+    sameN,
+    sameE,
+    sameS,
+    sameW,
+    sameNE,
+    sameSE,
+    sameSW,
+    sameNW,
+    roundTL,
+    roundTR,
+    roundBR,
+    roundBL,
+    concaveTL,
+    concaveTR,
+    concaveBR,
+    concaveBL,
+    isInterior,
+  };
+}
 export const ZOOM_LEVELS = [1, 1.25, 1.5, 1.75, 2] as const;
 export type ZoomLevel = (typeof ZOOM_LEVELS)[number];
 export const EDGE_SCROLL_MARGIN_PX = 36;
@@ -474,6 +622,24 @@ export const BUILDINGS: Record<BuildingKind, BuildingSpec> = {
     attackCooldownTicks: 0,
     prerequisites: ["WAR_FACTORY", "RADAR_DOME"],
     description: "Débloque le Char Mammouth lourd et l'Obélisque Laser haute énergie.",
+  },
+  CONCRETE_SLAB: {
+    kind: "CONCRETE_SLAB",
+    name: "Dalle de Béton",
+    category: "BUILDING",
+    cost: 25,
+    buildTimeTicks: 10,
+    maxHp: 300,
+    powerDelta: 0,
+    sightRadius: 2,
+    footprintW: 1,
+    footprintH: 1,
+    storageCapacity: 0,
+    attackRange: 0,
+    attackDamage: 0,
+    attackCooldownTicks: 0,
+    prerequisites: ["CONSTRUCTION_YARD"],
+    description: "Pave le sol avec une dalle de béton armé (1×1) unifiée, stabilisant la zone et résistant aux impacts.",
   },
   GUARD_TOWER: {
     kind: "GUARD_TOWER",

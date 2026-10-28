@@ -2,6 +2,7 @@ import {
   FACTIONS,
   MAP_HEIGHT_TILES,
   MAP_WIDTH_TILES,
+  TERRAIN_KIND,
   TILE_PIXEL_SIZE,
 } from "../shared/constants";
 import type { EntityState } from "../shared/schemas/deltas";
@@ -41,14 +42,14 @@ let cachedCompositeOreSig = 0;
 let cachedCompositeExploredSize = -1;
 
 function computeTerrainSignature(grid: readonly number[]): number {
-  let hash = grid.length | 0;
-  const step = Math.max(1, Math.floor(grid.length / 64));
-  for (let i = 0; i < grid.length; i += step) {
+  let hash = 2166136261;
+  for (let i = 0; i < grid.length; i++) {
     const raw = grid[i] ?? 0;
     const normalized = raw === 3 ? 0 : raw;
-    hash = ((hash << 5) - hash + normalized) | 0;
+    hash ^= normalized;
+    hash = Math.imul(hash, 16777619);
   }
-  return hash;
+  return hash | 0;
 }
 
 function computeOrePresenceSignature(oreGrid: readonly number[]): number {
@@ -117,7 +118,7 @@ function getOrBuildMinimapTerrainCache(
   const scaleY = height / MAP_HEIGHT_TILES;
   const cellH = Math.ceil(scaleY);
 
-  offCtx.fillStyle = "#1e1b16";
+  offCtx.fillStyle = "#33261a";
   offCtx.fillRect(0, 0, width, height);
 
   for (let y = 0; y < MAP_HEIGHT_TILES; y++) {
@@ -125,8 +126,15 @@ function getOrBuildMinimapTerrainCache(
     for (let x = 0; x < MAP_WIDTH_TILES; x++) {
       const idx = rowOffset + x;
       const t = terrainGrid[idx] ?? 0;
-      if (t === 0 || t === 3) continue; // Base sand color already filled (#1e1b16); dynamic ore drawn in composite layer
-      offCtx.fillStyle = t === 2 ? "#475569" : "#334155";
+      if (t === TERRAIN_KIND.DIRT || t === TERRAIN_KIND.ORE) continue; // Base dirt color already filled (#33261a); dynamic ore drawn in composite layer
+      offCtx.fillStyle =
+        t === TERRAIN_KIND.GRASS
+          ? "#274225"
+          : t === TERRAIN_KIND.CONCRETE_SLAB
+            ? "#64748b"
+            : t === TERRAIN_KIND.CLIFF
+              ? "#475569"
+              : "#334155";
       offCtx.fillRect(x * scaleX, y * scaleY, Math.ceil(scaleX), cellH);
     }
   }
@@ -325,12 +333,16 @@ export function renderMinimapRadar(input: MinimapRenderInput): void {
         const t = terrainGrid[idx] ?? 0;
         if (ore > 0) {
           ctx.fillStyle = "#16a34a";
-        } else if (t === 2) {
+        } else if (t === TERRAIN_KIND.GRASS) {
+          ctx.fillStyle = "#274225";
+        } else if (t === TERRAIN_KIND.CONCRETE_SLAB) {
+          ctx.fillStyle = "#64748b";
+        } else if (t === TERRAIN_KIND.CLIFF) {
           ctx.fillStyle = "#475569";
-        } else if (t === 1) {
+        } else if (t === TERRAIN_KIND.STONE) {
           ctx.fillStyle = "#334155";
         } else {
-          ctx.fillStyle = "#1e1b16";
+          ctx.fillStyle = "#33261a";
         }
         ctx.fillRect(x * scaleX, y * scaleY, cellW, cellH);
       }

@@ -1,13 +1,18 @@
 import {
+  AI_ATTACK_GRACE_PERIOD_TICKS,
   BASE_BUILD_RADIUS_TILES,
   BASE_STORAGE_CAPACITY,
   BUILDINGS,
+  degradeTerrainLayer,
   FACTIONS,
+  getTerrainLayerThickness,
   HARVESTER_LOAD_PER_TICK,
   HARVESTER_MAX_LOAD,
   MAP_HEIGHT_TILES,
   MAP_WIDTH_TILES,
   STARTING_CREDITS,
+  TERRAIN_KIND,
+  UNIT_SPAWN_PROTECTION_TICKS,
   UNITS,
   type BuildingKind,
   type FactionId,
@@ -23,6 +28,7 @@ import {
   type OreTileDelta,
   type PlayerEconomyDelta,
   type ProjectileVisual,
+  type TerrainTileDelta,
   type TickDelta,
   type VisualEffectEvent,
   type VisualEffectKind,
@@ -87,6 +93,7 @@ export class RtsSimulation {
   public readonly width: number = MAP_WIDTH_TILES;
   public readonly height: number = MAP_HEIGHT_TILES;
   public readonly terrainGrid: number[];
+  public readonly terrainDamageGrid: number[];
   public readonly oreGrid: number[];
 
   private tickCounter = 0;
@@ -100,6 +107,7 @@ export class RtsSimulation {
   private createdThisTick: string[] = [];
   private destroyedThisTick: string[] = [];
   private oreUpdatesThisTick: Map<number, OreTileDelta> = new Map();
+  private terrainUpdatesThisTick: Map<number, TerrainTileDelta> = new Map();
   private projectilesThisTick: ProjectileVisual[] = [];
   private visualEffectsThisTick: VisualEffectEvent[] = [];
   private acousticEventsThisTick: AcousticEvent[] = [];
@@ -109,6 +117,7 @@ export class RtsSimulation {
     this.lobbyId = lobbyId;
     const { terrainGrid, oreGrid } = this.generateDeterministicTerrain();
     this.terrainGrid = terrainGrid;
+    this.terrainDamageGrid = new Array<number>(this.width * this.height).fill(0);
     this.oreGrid = oreGrid;
     this.reservationGrid = new SpatialReservationGrid(this.width, this.height, this.terrainGrid);
     this.pathfinder = new AStarPathfinder(this.width, this.height);
@@ -182,30 +191,43 @@ export class RtsSimulation {
 
   private generateDeterministicTerrain(): { terrainGrid: number[]; oreGrid: number[] } {
     const total = this.width * this.height;
-    const terrainGrid = new Array<number>(total).fill(0);
+    // Start with lush natural grassland (HERBE = 4) across the battlefield
+    const terrainGrid = new Array<number>(total).fill(TERRAIN_KIND.GRASS);
     const oreGrid = new Array<number>(total).fill(0);
 
-    // Rock plateaus around bases & center tactical ridges
+    // Organic Earth/Soil (TERRE = 0) & Stone/Bedrock (PIERRE = 1) zones + central tactical ridges
     for (let y = 0; y < this.height; y++) {
       for (let x = 0; x < this.width; x++) {
         const idx = y * this.width + x;
-        if (
-          (x >= 2 && x <= 14 && y >= 2 && y <= 14) ||
-          (x >= this.width - 15 && x <= this.width - 3 && y >= this.height - 15 && y <= this.height - 3)
-        ) {
-          terrainGrid[idx] = 1; // buildable rock
+
+        // Organic earth transition corridor along the diagonal tactical valley & central basin
+        const distCenter = Math.hypot(x - 23.5, y - 23.5);
+        const wave = Math.sin(x * 0.28) * 1.8 + Math.cos(y * 0.28) * 1.8;
+        if (distCenter + wave <= 11.5 || Math.abs(x - y) <= 3.2) {
+          terrainGrid[idx] = TERRAIN_KIND.DIRT;
         }
+
+        // Organic rounded stone plateaus around base command areas
+        const distNW = Math.hypot(x - 7.5, y - 7.5);
+        const distSE = Math.hypot(x - (this.width - 8.5), y - (this.height - 8.5));
+        if (distNW <= 6.2 || distSE <= 6.2) {
+          terrainGrid[idx] = TERRAIN_KIND.STONE;
+        } else if (distNW <= 8.5 || distSE <= 8.5) {
+          terrainGrid[idx] = TERRAIN_KIND.DIRT;
+        }
+
         // Central canyon ridges (leaving wide tactical passes)
         if (
           (x === 22 || x === 25) &&
           ((y >= 16 && y <= 20) || (y >= 27 && y <= 31))
         ) {
-          terrainGrid[idx] = 2; // impassable ridge
+          terrainGrid[idx] = TERRAIN_KIND.CLIFF; // impassable ridge
         }
       }
     }
 
     // Rich ore patches near each spawn and high-yield central Tiberium/Spice basin
+    // Surrounded by an organic exposed earth (DIRT = 0) halo
     const oreCenters = [
       { cx: 14, cy: 7, radius: 3, amount: 650 },
       { cx: 7, cy: 14, radius: 3, amount: 650 },
@@ -217,17 +239,23 @@ export class RtsSimulation {
     ];
 
     for (const patch of oreCenters) {
-      for (let dy = -patch.radius; dy <= patch.radius; dy++) {
-        for (let dx = -patch.radius; dx <= patch.radius; dx++) {
-          if (dx * dx + dy * dy <= patch.radius * patch.radius) {
-            const tx = patch.cx + dx;
-            const ty = patch.cy + dy;
-            if (tx >= 1 && ty >= 1 && tx < this.width - 1 && ty < this.height - 1) {
-              const idx = ty * this.width + tx;
-              if (terrainGrid[idx] !== 2) {
-                terrainGrid[idx] = 3;
-                oreGrid[idx] = patch.amount;
-              }
+      const haloRadius = patch.radius + 1;
+      for (let dy = -haloRadius; dy <= haloRadius; dy++) {
+        for (let dx = -haloRadius; dx <= haloRadius; dx++) {
+          const d2 = dx * dx + dy * dy;
+          const tx = patch.cx + dx;
+          const ty = patch.cy + dy;
+          if (tx >= 1 && ty >= 1 && tx < this.width - 1 && ty < this.height - 1) {
+            const idx = ty * this.width + tx;
+            if (terrainGrid[idx] === TERRAIN_KIND.CLIFF) continue;
+            if (d2 <= patch.radius * patch.radius) {
+              terrainGrid[idx] = TERRAIN_KIND.ORE;
+              oreGrid[idx] = patch.amount;
+            } else if (
+              d2 <= haloRadius * haloRadius &&
+              terrainGrid[idx] === TERRAIN_KIND.GRASS
+            ) {
+              terrainGrid[idx] = TERRAIN_KIND.DIRT;
             }
           }
         }
@@ -274,6 +302,7 @@ export class RtsSimulation {
       entityType: "BUILDING",
       kind,
       sightRadius: spec.sightRadius,
+      spawnProtectionTicks: 0,
       stateLabel: "IDLE",
       transform: {
         x: tileX,
@@ -331,6 +360,7 @@ export class RtsSimulation {
       entityType: "UNIT",
       kind,
       sightRadius: spec.sightRadius,
+      spawnProtectionTicks: UNIT_SPAWN_PROTECTION_TICKS,
       stateLabel: "IDLE",
       transform: {
         x: tileX,
@@ -436,6 +466,7 @@ export class RtsSimulation {
   ): void {
     const target = this.entities.get(targetEntityId);
     if (!target || target.ownerId === playerId) return;
+    if (target.entityType === "UNIT" && target.spawnProtectionTicks > 0) return;
 
     for (const id of entityIds) {
       const ent = this.entities.get(id);
@@ -490,6 +521,51 @@ export class RtsSimulation {
     const spec = BUILDINGS[buildingKind];
     if (!this.isWithinBaseBuildRadius(playerId, tileX, tileY, spec.footprintW, spec.footprintH)) {
       return false;
+    }
+
+    // Concrete Slab (DALLE_BETON) paves the terrain tile directly without blocking unit navigation or future building construction
+    if (buildingKind === "CONCRETE_SLAB") {
+      if (!this.reservationGrid.inBounds(tileX, tileY)) return false;
+      const idx = tileY * this.width + tileX;
+      if (
+        this.terrainGrid[idx] === TERRAIN_KIND.CLIFF ||
+        this.terrainGrid[idx] === TERRAIN_KIND.CONCRETE_SLAB
+      ) {
+        return false;
+      }
+      for (const ent of this.entities.values()) {
+        if (
+          ent.entityType === "UNIT" &&
+          ent.ownerId !== playerId &&
+          Math.round(ent.transform.x) === tileX &&
+          Math.round(ent.transform.y) === tileY
+        ) {
+          return false;
+        }
+      }
+
+      this.terrainGrid[idx] = TERRAIN_KIND.CONCRETE_SLAB;
+      this.terrainDamageGrid[idx] = 0;
+      if ((this.oreGrid[idx] ?? 0) > 0) {
+        this.oreGrid[idx] = 0;
+        this.oreUpdatesThisTick.set(idx, {
+          tileX,
+          tileY,
+          oreAmount: 0,
+        });
+      }
+      this.terrainUpdatesThisTick.set(idx, {
+        tileX,
+        tileY,
+        terrainKind: TERRAIN_KIND.CONCRETE_SLAB,
+      });
+
+      slot.activeItem = null;
+      slot.ticksElapsed = 0;
+      slot.ticksRequired = 0;
+      slot.readyToPlace = false;
+      this.pushAcoustic("EVA_BUILDING_DEPLOYED", tileX, tileY, playerId);
+      return true;
     }
 
     // Check terrain & static buildings first; relocate any friendly mobile units standing on the footprint
@@ -624,6 +700,13 @@ export class RtsSimulation {
     const prevTickId = this.tickCounter;
     this.tickCounter++;
 
+    for (const ent of this.entities.values()) {
+      if (ent.spawnProtectionTicks > 0) {
+        ent.spawnProtectionTicks--;
+        ent.dirty = true;
+      }
+    }
+
     this.rebuildSpatialReservations();
     this.recomputeAllPlayerEconomies();
 
@@ -663,6 +746,7 @@ export class RtsSimulation {
       updated: updatedStates,
       destroyedIds: [...this.destroyedThisTick],
       oreUpdates: Array.from(this.oreUpdatesThisTick.values()),
+      terrainUpdates: Array.from(this.terrainUpdatesThisTick.values()),
       players: Array.from(this.players.values()).map((p) => this.serializePlayerEconomy(p)),
       projectiles: [...this.projectilesThisTick],
       visualEffects: [...this.visualEffectsThisTick],
@@ -674,6 +758,7 @@ export class RtsSimulation {
     this.createdThisTick = [];
     this.destroyedThisTick = [];
     this.oreUpdatesThisTick.clear();
+    this.terrainUpdatesThisTick.clear();
     this.projectilesThisTick = [];
     this.visualEffectsThisTick = [];
     this.acousticEventsThisTick = [];
@@ -952,7 +1037,12 @@ export class RtsSimulation {
         );
         this.oreGrid[idx] = available - amount;
         if (this.oreGrid[idx] === 0) {
-          this.terrainGrid[idx] = 0;
+          this.terrainGrid[idx] = TERRAIN_KIND.DIRT;
+          this.terrainUpdatesThisTick.set(idx, {
+            tileX: tx,
+            tileY: ty,
+            terrainKind: TERRAIN_KIND.DIRT,
+          });
         }
         harv.cargoOre += amount;
         ent.dirty = true;
@@ -1169,7 +1259,11 @@ export class RtsSimulation {
       }
 
       let target = combat.targetEntityId ? this.entities.get(combat.targetEntityId) : undefined;
-      if (!target || target.ownerId === ent.ownerId) {
+      if (
+        !target ||
+        target.ownerId === ent.ownerId ||
+        (target.entityType === "UNIT" && target.spawnProtectionTicks > 0)
+      ) {
         combat.targetEntityId = null;
         target = this.findNearestEnemyInRange(ent, combat.attackRange);
         if (target) {
@@ -1284,6 +1378,9 @@ export class RtsSimulation {
           this.pushVisualEffect("SHELL_IMPACT", tx, ty, 0.45, 0, ent.faction);
         }
 
+        // Degrade terrain strata at projectile impact point (Grass -> Dirt -> Stone)
+        this.degradeTerrainAtImpact(tx, ty, weaponStyle, false);
+
         const soundKind =
           weaponStyle === "LASER"
             ? "LASER_BEAM"
@@ -1301,6 +1398,7 @@ export class RtsSimulation {
         }
 
         if (target.health.hp <= 0) {
+          this.degradeTerrainAtImpact(tx, ty, weaponStyle, true);
           this.pushVisualEffect(
             target.entityType === "BUILDING" ? "BUILDING_DEMOLITION" : "UNIT_EXPLOSION",
             tx,
@@ -1364,6 +1462,8 @@ export class RtsSimulation {
         }
       }
 
+      const inGracePeriod = this.tickCounter < AI_ATTACK_GRACE_PERIOD_TICKS;
+
       if (p.lowPower) {
         this.issueStartProduction(p.playerId, "BUILDING", "POWER_PLANT");
       } else if (!ownedKinds.has("BARRACKS")) {
@@ -1374,15 +1474,18 @@ export class RtsSimulation {
         this.issueStartProduction(p.playerId, "BUILDING", "RADAR_DOME");
       }
 
-      if (ownedKinds.has("BARRACKS") && p.credits >= 400) {
-        this.issueStartProduction(p.playerId, "INFANTRY", "ROCKET_SOLDIER");
-      }
-      if (ownedKinds.has("WAR_FACTORY") && p.credits >= 800) {
-        this.issueStartProduction(p.playerId, "VEHICLE", "MEDIUM_TANK");
+      // During the 2-minute opening grace period, cap AI defensive garrison so it does not amass an overwhelming deathball
+      if (!inGracePeriod || idleCombatUnits.length < 4) {
+        if (ownedKinds.has("BARRACKS") && p.credits >= 400) {
+          this.issueStartProduction(p.playerId, "INFANTRY", "ROCKET_SOLDIER");
+        }
+        if (ownedKinds.has("WAR_FACTORY") && p.credits >= 800) {
+          this.issueStartProduction(p.playerId, "VEHICLE", "MEDIUM_TANK");
+        }
       }
 
-      // Launch periodic attack wave when 5+ combat units are idle
-      if (idleCombatUnits.length >= 5) {
+      // Launch periodic attack wave ONLY after the 2-minute (2400-tick) opening grace period has elapsed
+      if (!inGracePeriod && idleCombatUnits.length >= 5) {
         const enemyTarget = this.findAnyEnemyEntity(p.playerId);
         if (enemyTarget) {
           this.issueAttackCommand(p.playerId, idleCombatUnits, enemyTarget.id);
@@ -1538,11 +1641,58 @@ export class RtsSimulation {
     return best;
   }
 
+  public degradeTerrainAtImpact(
+    worldX: number,
+    worldY: number,
+    weaponStyle: ProjectileVisual["weaponStyle"],
+    isHeavyExplosion = false
+  ): boolean {
+    const tileX = Math.max(0, Math.min(this.width - 1, Math.round(worldX)));
+    const tileY = Math.max(0, Math.min(this.height - 1, Math.round(worldY)));
+    const idx = tileY * this.width + tileX;
+
+    if ((this.oreGrid[idx] ?? 0) > 0) {
+      return false;
+    }
+
+    const curKind = this.terrainGrid[idx] ?? TERRAIN_KIND.DIRT;
+    if (curKind === TERRAIN_KIND.CLIFF || curKind === TERRAIN_KIND.STONE) {
+      return false;
+    }
+
+    const wearDelta = isHeavyExplosion
+      ? 2
+      : weaponStyle === "ROCKET" || weaponStyle === "LASER" || weaponStyle === "SHELL"
+        ? 1
+        : 0.5;
+
+    const nextWear = (this.terrainDamageGrid[idx] ?? 0) + wearDelta;
+    const thickness = getTerrainLayerThickness(curKind);
+
+    if (nextWear >= thickness) {
+      this.terrainDamageGrid[idx] = 0;
+      const nextKind = degradeTerrainLayer(curKind);
+      if (nextKind !== curKind) {
+        this.terrainGrid[idx] = nextKind;
+        this.terrainUpdatesThisTick.set(idx, {
+          tileX,
+          tileY,
+          terrainKind: nextKind,
+        });
+        return true;
+      }
+    } else {
+      this.terrainDamageGrid[idx] = nextWear;
+    }
+    return false;
+  }
+
   private findNearestEnemyInRange(attacker: EcsEntity, range: number): EcsEntity | undefined {
     let best: EcsEntity | undefined;
     let bestDist = range;
     for (const ent of this.entities.values()) {
       if (ent.ownerId === attacker.ownerId) continue;
+      if (ent.entityType === "UNIT" && ent.spawnProtectionTicks > 0) continue;
       const tx =
         ent.entityType === "BUILDING" && ent.building
           ? ent.transform.x + (ent.building.footprintW - 1) * 0.5
@@ -1567,7 +1717,10 @@ export class RtsSimulation {
       }
     }
     for (const ent of this.entities.values()) {
-      if (ent.ownerId !== ownerId) return ent;
+      if (ent.ownerId !== ownerId) {
+        if (ent.entityType === "UNIT" && ent.spawnProtectionTicks > 0) continue;
+        return ent;
+      }
     }
     return undefined;
   }
@@ -1634,6 +1787,7 @@ export class RtsSimulation {
       angleIndex: ent.transform.angleIndex,
       turretAngleIndex: ent.transform.turretAngleIndex,
       cargoOre: ent.harvester ? ent.harvester.cargoOre : 0,
+      spawnProtectionTicks: ent.spawnProtectionTicks,
       stateLabel: ent.stateLabel,
     };
   }

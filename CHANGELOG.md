@@ -2,6 +2,21 @@
 
 All notable changes to **RTS-MK1** (`https://rts-mk1.orbital8.cloud`) follow strict non-reusable `v1.x.y` versioning.
 
+## [v1.4.0] — 2026-10-28
+
+### Added
+- **Unified Organic Multi-Layer Terrain & Projectile Stratigraphic Deterioration (`src/shared/constants/index.ts`, `src/shared/schemas/deltas.ts`, `src/engine/simulation.ts`, `src/renderer/world-renderer.ts`, `src/renderer/minimap-renderer.ts`, `src/renderer/vfx-manager.ts`, `src/store/game-store.ts`)**:
+  - Replaced repeated per-tile textured squares with **continuous, unified geological surfaces** (`HERBE = 4`, `TERRE = 0`, `PIERRE = 1`, `FALAISE = 2`, `MINERAI = 3`, `DALLE_BETON = 5`) that have zero internal seams inside contiguous zones and draw stratigraphic thickness bevels (`lipShadow` / `lipHighlight`) only along outer zone boundaries (`computeTerrainNeighborMask`).
+  - Added **organic convex & concave corner rounding** (`quadraticCurveTo`) on natural terrain zone boundaries so each stratum reveals the true underlying geological layer beneath its rounded corners (`Herbe` -> `Terre` -> `Pierre`).
+  - Added **multi-layer ground thickness & projectile deterioration** (`degradeTerrainAtImpact`, `TerrainTileDeltaSchema` in `TickDelta`): projectile impacts and explosions progressively strip surface layers (`Herbe` -> `Terre` -> `Pierre`) and leave persistent multi-splatter **impact stains (`taches d'impact`)** (`SHELL_IMPACT`, `LASER_BURN`, `ROCKET_EXPLOSION`, `UNIT_EXPLOSION`, `BUILDING_DEMOLITION`).
+  - Added incremental `3×3` neighborhood `OffscreenCanvas` terrain cache updates so live ground deterioration and concrete paving run in `< 0.05 ms` without rebuilding the full `1536×1536` surface.
+- **2-Minute Opening Grace Period (`AI_ATTACK_GRACE_PERIOD_TICKS = 2400`) (`src/shared/constants/index.ts`, `src/engine/simulation.ts`)**:
+  - Enforced a strict **2-minute (120s / 2,400 ticks)** opening truce before any AI offensive attack wave is dispatched, while capping early AI garrison build-up during the grace period.
+- **1-Second Unit Creation Target-Immunity Cooldown (`UNIT_SPAWN_PROTECTION_TICKS = 20`) (`src/shared/constants/index.ts`, `src/shared/schemas/deltas.ts`, `src/engine/ecs/types.ts`, `src/engine/simulation.ts`, `src/renderer/world-renderer.ts`)**:
+  - Added a **1.0-second (20 ticks at 20 Hz)** spawn protection cooldown on newly created units during which enemy units and turrets cannot target or lock onto them, rendered with a cyan tactical shield ring & countdown arc.
+- **Buildable Concrete Slab Tiles (`CONCRETE_SLAB` / `Dalle de Béton`) (`src/shared/constants/index.ts`, `src/shared/schemas/commands.ts`, `src/engine/simulation.ts`, `src/components/hud/leonardo-icons.tsx`, `src/renderer/generator/leonardo-vector-art.ts`, `src/app/game/[lobbyId]/page.tsx`)**:
+  - Added `CONCRETE_SLAB` ("Dalle de Béton", `1×1`, `25 cr`) in the `BUILDING` ("Base") production tab, allowing players to pave unified reinforced concrete foundations that merge seamlessly with adjacent slabs while remaining passable and buildable.
+
 ## [v1.3.1] — 2026-10-28
 
 ### Fixed

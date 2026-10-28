@@ -11,19 +11,26 @@ import {
 import { RtsSimulation } from "../src/engine/simulation";
 import { LobbyManager } from "../src/server/lobby-manager";
 import { TacticalCamera } from "../src/renderer/camera";
+import { BattlefieldVfxManager } from "../src/renderer/vfx-manager";
 import {
+  AI_ATTACK_GRACE_PERIOD_TICKS,
   APP_VERSION,
+  BUILDINGS,
   CAMERA_SHAKE_MAX_OFFSET_PX,
   computeCameraShakeOffset,
   computeDistanceAttenuatedShakeTrauma,
   computeEdgeScrollVelocity,
+  computeTerrainNeighborMask,
+  degradeTerrainLayer,
   EDGE_SCROLL_MARGIN_PX,
   EDGE_SCROLL_MAX_SPEED_PX,
   interpolateAngleIndex16,
   interpolateEntityPose,
   resolveTouchTapAction,
   SPRITE_ATLAS_SCALE,
+  TERRAIN_KIND,
   TOUCH_INTERACTION_MODES,
+  UNIT_SPAWN_PROTECTION_TICKS,
   WATCHDOG_DISCONNECT_TIMEOUT_MS,
   ZOOM_LEVELS,
 } from "../src/shared/constants";
@@ -268,7 +275,7 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
   });
 
   it("v1.2.0 — supports Game Juice camera shake, shortest-arc 16-angle interpolation, and 2x Hi-DPI sprite scale", () => {
-    expect(APP_VERSION).toBe("1.3.1");
+    expect(APP_VERSION).toBe("1.4.0");
     expect(SPRITE_ATLAS_SCALE).toBe(2);
 
     // Zero trauma produces zero offset
@@ -443,5 +450,131 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
     for (const h of harvesters) {
       expect(h.harvester).toBeDefined();
     }
+  });
+
+  it("v1.4.0 — supports multi-layer organic terrain degradation, rounded zone neighbor masks, 2-minute AI grace period, 1s unit spawn protection, and Concrete Slab paving", () => {
+    // 1. Stratigraphic degradation chain: Grass (4) -> Dirt (0) -> Stone (1)
+    expect(degradeTerrainLayer(TERRAIN_KIND.GRASS)).toBe(TERRAIN_KIND.DIRT);
+    expect(degradeTerrainLayer(TERRAIN_KIND.DIRT)).toBe(TERRAIN_KIND.STONE);
+    expect(degradeTerrainLayer(TERRAIN_KIND.CONCRETE_SLAB)).toBe(TERRAIN_KIND.STONE);
+    expect(degradeTerrainLayer(TERRAIN_KIND.STONE)).toBe(TERRAIN_KIND.STONE);
+
+    // 2. Unified zone interior vs organic rounded corner mask
+    const testGrid = new Array<number>(16).fill(TERRAIN_KIND.DIRT);
+    // Create a 2x2 Grass zone at bottom-right (x=2..3, y=2..3) of a 4x4 grid
+    testGrid[2 * 4 + 2] = TERRAIN_KIND.GRASS;
+    testGrid[2 * 4 + 3] = TERRAIN_KIND.GRASS;
+    testGrid[3 * 4 + 2] = TERRAIN_KIND.GRASS;
+    testGrid[3 * 4 + 3] = TERRAIN_KIND.GRASS;
+
+    const cornerMask = computeTerrainNeighborMask(testGrid, 2, 2, 4, 4);
+    expect(cornerMask.centerKind).toBe(TERRAIN_KIND.GRASS);
+    expect(cornerMask.underlyingKind).toBe(TERRAIN_KIND.DIRT);
+    expect(cornerMask.roundTL).toBe(true);
+    expect(cornerMask.roundBR).toBe(false);
+    expect(cornerMask.sameE).toBe(true);
+    expect(cornerMask.sameS).toBe(true);
+    expect(cornerMask.isInterior).toBe(false);
+
+    const interiorMask = computeTerrainNeighborMask(testGrid, 0, 0, 4, 4);
+    expect(interiorMask.isInterior).toBe(true);
+    expect(interiorMask.roundTL).toBe(false);
+
+    // 3. Simulation projectile ground degradation (Grass -> Dirt -> Stone) + impact stains
+    const sim = new RtsSimulation("test_v140", [
+      { playerId: "p1", commanderName: "Alpha", faction: "GDI", isAi: false },
+      { playerId: "p2", commanderName: "Beta", faction: "NOD", isAi: true },
+    ]);
+
+    const grassTileX = 2;
+    const grassTileY = 25;
+    const grassIdx = grassTileY * 48 + grassTileX;
+    sim.terrainGrid[grassIdx] = TERRAIN_KIND.GRASS;
+
+    // First shell hit degrades Grass (4) -> Dirt (0)
+    expect(sim.degradeTerrainAtImpact(grassTileX, grassTileY, "SHELL", false)).toBe(true);
+    expect(sim.terrainGrid[grassIdx]).toBe(TERRAIN_KIND.DIRT);
+
+    // Two subsequent shell hits on Dirt (0) degrade Dirt (0) -> Stone (1)
+    expect(sim.degradeTerrainAtImpact(grassTileX, grassTileY, "SHELL", false)).toBe(false);
+    expect(sim.degradeTerrainAtImpact(grassTileX, grassTileY, "SHELL", false)).toBe(true);
+    expect(sim.terrainGrid[grassIdx]).toBe(TERRAIN_KIND.STONE);
+
+    const deltaAfterImpact = sim.stepTick();
+    expect(
+      deltaAfterImpact.terrainUpdates.some(
+        (u) => u.tileX === grassTileX && u.tileY === grassTileY && u.terrainKind === TERRAIN_KIND.STONE
+      )
+    ).toBe(true);
+
+    // Impact stain creation on SHELL_IMPACT & LASER_BURN
+    const vfx = new BattlefieldVfxManager();
+    const cam = new TacticalCamera();
+    vfx.ingestTickEvents(
+      [
+        {
+          id: "stain_1",
+          effectKind: "SHELL_IMPACT",
+          worldX: 12,
+          worldY: 12,
+          radiusTiles: 0.8,
+          shakeIntensity: 0.1,
+          faction: "GDI",
+        },
+      ],
+      [],
+      cam,
+      1000
+    );
+    expect(vfx.getActiveCounts().craters).toBe(1);
+
+    // 4. Unit Spawn Protection Cooldown (1.0s = 20 ticks target-acquisition immunity)
+    expect(UNIT_SPAWN_PROTECTION_TICKS).toBe(20);
+    const freshUnit = sim.createUnitEntity("p1", "GDI", "RIFLE_INFANTRY", 12, 8);
+    expect(freshUnit.spawnProtectionTicks).toBe(UNIT_SPAWN_PROTECTION_TICKS);
+
+    const enemyTank = sim
+      .getAllEntities()
+      .find((e) => e.ownerId === "p2" && e.entityType === "UNIT" && e.kind === "MEDIUM_TANK")!;
+    expect(enemyTank).toBeDefined();
+
+    // Cannot target newly created unit while spawnProtectionTicks > 0
+    sim.issueAttackCommand("p2", [enemyTank.id], freshUnit.id);
+    expect(enemyTank.combat?.targetEntityId).toBeNull();
+
+    // Advance 20 ticks (1.0s) so spawn protection expires
+    for (let t = 0; t < UNIT_SPAWN_PROTECTION_TICKS; t++) {
+      sim.stepTick();
+    }
+    expect(sim.getEntity(freshUnit.id)?.spawnProtectionTicks).toBe(0);
+
+    // Now targetable
+    sim.issueAttackCommand("p2", [enemyTank.id], freshUnit.id);
+    expect(enemyTank.combat?.targetEntityId).toBe(freshUnit.id);
+
+    // 5. Concrete Slab (Dalle de Béton) production and terrain paving
+    expect(BUILDINGS.CONCRETE_SLAB).toBeDefined();
+    expect(BUILDINGS.CONCRETE_SLAB.category).toBe("BUILDING");
+    expect(sim.issueStartProduction("p1", "BUILDING", "CONCRETE_SLAB")).toBe(true);
+    for (let t = 0; t < 12; t++) {
+      sim.stepTick();
+    }
+    expect(sim.getPlayerState("p1")?.queues.BUILDING.readyToPlace).toBe(true);
+    expect(sim.issuePlaceBuilding("p1", "BUILDING", "CONCRETE_SLAB", 9, 5)).toBe(true);
+    expect(sim.terrainGrid[5 * 48 + 9]).toBe(TERRAIN_KIND.CONCRETE_SLAB);
+
+    // 6. 2-Minute AI Attack Grace Period (2400 ticks = 120s)
+    expect(AI_ATTACK_GRACE_PERIOD_TICKS).toBe(2400);
+    const graceSim = new RtsSimulation("test_grace_2m", [
+      { playerId: "p1", commanderName: "Alpha", faction: "GDI", isAi: false },
+      { playerId: "p2", commanderName: "Beta", faction: "NOD", isAi: true },
+    ]);
+    for (let t = 0; t < 500; t++) {
+      graceSim.stepTick();
+    }
+    const attackingAiUnits = graceSim
+      .getAllEntities()
+      .filter((e) => e.ownerId === "p2" && e.entityType === "UNIT" && e.stateLabel === "ATTACKING");
+    expect(attackingAiUnits.length).toBe(0);
   });
 });

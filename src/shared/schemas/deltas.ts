@@ -19,6 +19,7 @@ export const EntityStateSchema = z.object({
   angleIndex: z.number().int().min(0).max(15), // 0..15 (16 orientations)
   turretAngleIndex: z.number().int().min(0).max(15),
   cargoOre: z.number().min(0).default(0),
+  spawnProtectionTicks: z.number().int().min(0).default(0),
   stateLabel: z.enum(["IDLE", "MOVING", "HARVESTING", "RETURNING", "ATTACKING"]).default("IDLE"),
 });
 
@@ -26,6 +27,12 @@ export const OreTileDeltaSchema = z.object({
   tileX: z.number().int().min(0),
   tileY: z.number().int().min(0),
   oreAmount: z.number().int().min(0),
+});
+
+export const TerrainTileDeltaSchema = z.object({
+  tileX: z.number().int().min(0),
+  tileY: z.number().int().min(0),
+  terrainKind: z.number().int().min(0).max(5),
 });
 
 export const ProductionQueueSlotSchema = z.object({
@@ -122,6 +129,7 @@ export const TickDeltaSchema = z.object({
   updated: z.array(EntityStateSchema),
   destroyedIds: z.array(z.string().min(1)),
   oreUpdates: z.array(OreTileDeltaSchema),
+  terrainUpdates: z.array(TerrainTileDeltaSchema).default([]),
   players: z.array(PlayerEconomyDeltaSchema),
   projectiles: z.array(ProjectileVisualSchema),
   visualEffects: z.array(VisualEffectEventSchema).default([]),
@@ -136,7 +144,7 @@ export const FullSnapshotSchema = z.object({
   tickId: z.number().int().min(0),
   mapWidth: z.number().int().positive(),
   mapHeight: z.number().int().positive(),
-  terrainGrid: z.array(z.number().int().min(0).max(3)), // 0=sand/dirt, 1=rock, 2=ridge(blocked), 3=ore
+  terrainGrid: z.array(z.number().int().min(0).max(5)), // 0=dirt/earth, 1=stone, 2=cliff(blocked), 3=ore, 4=grass, 5=concrete_slab
   oreGrid: z.array(z.number().int().min(0)),
   entities: z.array(EntityStateSchema),
   players: z.array(PlayerEconomyDeltaSchema),
@@ -147,6 +155,7 @@ export const FullSnapshotSchema = z.object({
 
 export type EntityState = z.infer<typeof EntityStateSchema>;
 export type OreTileDelta = z.infer<typeof OreTileDeltaSchema>;
+export type TerrainTileDelta = z.infer<typeof TerrainTileDeltaSchema>;
 export type ProductionQueueSlot = z.infer<typeof ProductionQueueSlotSchema>;
 export type PlayerEconomyDelta = z.infer<typeof PlayerEconomyDeltaSchema>;
 export type AcousticEvent = z.infer<typeof AcousticEventSchema>;

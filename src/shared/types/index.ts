@@ -3,6 +3,7 @@ export type {
   ClientMessage,
   EntityState,
   OreTileDelta,
+  TerrainTileDelta,
   ProductionQueueSlot,
   PlayerEconomyDelta,
   AcousticEvent,

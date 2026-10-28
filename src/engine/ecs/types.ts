@@ -56,6 +56,7 @@ export interface EcsEntity {
   entityType: "BUILDING" | "UNIT";
   kind: BuildingKind | UnitKind;
   sightRadius: number;
+  spawnProtectionTicks: number;
   stateLabel: "IDLE" | "MOVING" | "HARVESTING" | "RETURNING" | "ATTACKING";
   transform: TransformComponent;
   health: HealthComponent;

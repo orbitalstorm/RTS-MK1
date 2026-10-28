@@ -1,9 +1,13 @@
 import {
   BUILDINGS,
+  computeTerrainNeighborMask,
   FACTIONS,
   MAP_HEIGHT_TILES,
   MAP_WIDTH_TILES,
+  normalizeBaseTerrainKind,
+  TERRAIN_KIND,
   TILE_PIXEL_SIZE,
+  UNIT_SPAWN_PROTECTION_TICKS,
   interpolateAngleIndex16,
   type BuildingKind,
   type FactionId,
@@ -55,16 +59,257 @@ let cachedTerrainSurface: CacheSurface | null = null;
 let cachedTerrainCtx: CacheContext | null = null;
 let cachedTerrainAtlas: ProceduralSpriteAtlas | null = null;
 let cachedTerrainSignature = 0;
+let cachedNormalizedGrid: Int8Array | null = null;
+
+interface StratumPalette {
+  fill: string;
+  lipShadow: string;
+  lipHighlight: string;
+  cornerRadiusRatio: number;
+  thicknessPx: number;
+}
+
+const STRATUM_PALETTES: Record<number, StratumPalette> = {
+  [TERRAIN_KIND.DIRT]: {
+    fill: "#463525",
+    lipShadow: "#281c12",
+    lipHighlight: "#614a35",
+    cornerRadiusRatio: 0.36,
+    thicknessPx: 2.4,
+  },
+  [TERRAIN_KIND.STONE]: {
+    fill: "#333c48",
+    lipShadow: "#1d232b",
+    lipHighlight: "#4b5869",
+    cornerRadiusRatio: 0.32,
+    thicknessPx: 1.8,
+  },
+  [TERRAIN_KIND.CLIFF]: {
+    fill: "#1a212b",
+    lipShadow: "#090c12",
+    lipHighlight: "#64748b",
+    cornerRadiusRatio: 0.3,
+    thicknessPx: 3.5,
+  },
+  [TERRAIN_KIND.GRASS]: {
+    fill: "#2f4f2d",
+    lipShadow: "#1b301a",
+    lipHighlight: "#467342",
+    cornerRadiusRatio: 0.38,
+    thicknessPx: 3.0,
+  },
+  [TERRAIN_KIND.CONCRETE_SLAB]: {
+    fill: "#525e6e",
+    lipShadow: "#28303d",
+    lipHighlight: "#8292a8",
+    cornerRadiusRatio: 0.18,
+    thicknessPx: 2.2,
+  },
+};
+
+function getStratumPalette(kind: number): StratumPalette {
+  const norm = normalizeBaseTerrainKind(kind);
+  return STRATUM_PALETTES[norm] ?? STRATUM_PALETTES[TERRAIN_KIND.DIRT]!;
+}
 
 function computeBaseTerrainSignature(grid: readonly number[]): number {
-  let hash = grid.length | 0;
-  const step = Math.max(1, Math.floor(grid.length / 64));
-  for (let i = 0; i < grid.length; i += step) {
-    const raw = grid[i] ?? 0;
-    const baseKind = raw === 3 ? 0 : raw;
-    hash = ((hash << 5) - hash + baseKind) | 0;
+  let hash = 2166136261;
+  for (let i = 0; i < grid.length; i++) {
+    const baseKind = normalizeBaseTerrainKind(grid[i] ?? 0);
+    hash ^= baseKind;
+    hash = Math.imul(hash, 16777619);
   }
-  return hash;
+  return hash | 0;
+}
+
+function traceRoundedTilePath(
+  ctx: CacheContext,
+  x: number,
+  y: number,
+  s: number,
+  rTL: number,
+  rTR: number,
+  rBR: number,
+  rBL: number
+): void {
+  ctx.beginPath();
+  ctx.moveTo(x + rTL, y);
+  ctx.lineTo(x + s - rTR, y);
+  if (rTR > 0) {
+    ctx.quadraticCurveTo(x + s, y, x + s, y + rTR);
+  }
+  ctx.lineTo(x + s, y + s - rBR);
+  if (rBR > 0) {
+    ctx.quadraticCurveTo(x + s, y + s, x + s - rBR, y + s);
+  }
+  ctx.lineTo(x + rBL, y + s);
+  if (rBL > 0) {
+    ctx.quadraticCurveTo(x, y + s, x, y + s - rBL);
+  }
+  ctx.lineTo(x, y + rTL);
+  if (rTL > 0) {
+    ctx.quadraticCurveTo(x, y, x + rTL, y);
+  }
+  ctx.closePath();
+}
+
+/**
+ * Renders a single tile `(tx, ty)` as part of a continuous, unified geological stratum.
+ * - Interior tiles (`mask.isInterior === true`) are filled as a pure solid surface with zero borders or repeated textures.
+ * - Zone boundaries (`!sameN/E/S/W`) display stratigraphic thickness lips and rounded organic corners (`quadraticCurveTo`),
+ *   revealing the underlying geological layer beneath rounded outer corners.
+ */
+function drawUnifiedOrganicTerrainCell(
+  ctx: CacheContext,
+  terrainGrid: readonly number[],
+  tx: number,
+  ty: number,
+  s: number
+): void {
+  const px = tx * s;
+  const py = ty * s;
+  const mask = computeTerrainNeighborMask(terrainGrid, tx, ty, MAP_WIDTH_TILES, MAP_HEIGHT_TILES);
+  const palette = getStratumPalette(mask.centerKind);
+
+  if (mask.isInterior) {
+    ctx.fillStyle = palette.fill;
+    ctx.fillRect(px, py, s, s);
+    return;
+  }
+
+  // 1. Fill underlying geological stratum beneath rounded outer corners
+  const underPalette = getStratumPalette(mask.underlyingKind);
+  ctx.fillStyle = underPalette.fill;
+  ctx.fillRect(px, py, s, s);
+
+  // Also blend corner background with the exact adjacent neighbor when two neighboring sides share a stratum
+  const neighborAt = (nx: number, ny: number): number => {
+    const cx = Math.max(0, Math.min(MAP_WIDTH_TILES - 1, nx));
+    const cy = Math.max(0, Math.min(MAP_HEIGHT_TILES - 1, ny));
+    return normalizeBaseTerrainKind(terrainGrid[cy * MAP_WIDTH_TILES + cx] ?? 0);
+  };
+  const half = s * 0.5;
+  if (mask.roundTL) {
+    ctx.fillStyle = getStratumPalette(neighborAt(tx, ty - 1)).fill;
+    ctx.fillRect(px, py, half, half);
+  }
+  if (mask.roundTR) {
+    ctx.fillStyle = getStratumPalette(neighborAt(tx, ty - 1)).fill;
+    ctx.fillRect(px + half, py, half, half);
+  }
+  if (mask.roundBR) {
+    ctx.fillStyle = getStratumPalette(neighborAt(tx, ty + 1)).fill;
+    ctx.fillRect(px + half, py + half, half, half);
+  }
+  if (mask.roundBL) {
+    ctx.fillStyle = getStratumPalette(neighborAt(tx, ty + 1)).fill;
+    ctx.fillRect(px, py + half, half, half);
+  }
+
+  const r = Math.round(s * palette.cornerRadiusRatio);
+  const rTL = mask.roundTL ? r : 0;
+  const rTR = mask.roundTR ? r : 0;
+  const rBR = mask.roundBR ? r : 0;
+  const rBL = mask.roundBL ? r : 0;
+
+  // 2. Main unified stratum fill with rounded organic outer corners
+  traceRoundedTilePath(ctx, px, py, s, rTL, rTR, rBR, rBL);
+  ctx.fillStyle = palette.fill;
+  ctx.fill();
+
+  // 3. Demarcation & Stratigraphic Thickness ONLY along outer zone boundaries
+  ctx.save();
+  traceRoundedTilePath(ctx, px, py, s, rTL, rTR, rBR, rBL);
+  ctx.clip();
+
+  // Sunlit NW upper rim highlight along North & West zone boundaries
+  if (!mask.sameN || !mask.sameW || rTL > 0) {
+    ctx.strokeStyle = palette.lipHighlight;
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    if (!mask.sameW) {
+      ctx.moveTo(px + 0.8, py + s - rBL);
+      ctx.lineTo(px + 0.8, py + rTL);
+    }
+    if (rTL > 0) {
+      ctx.moveTo(px + 0.8, py + rTL);
+      ctx.quadraticCurveTo(px + 0.8, py + 0.8, px + rTL, py + 0.8);
+    }
+    if (!mask.sameN) {
+      ctx.moveTo(px + rTL, py + 0.8);
+      ctx.lineTo(px + s - rTR, py + 0.8);
+    }
+    ctx.stroke();
+  }
+
+  // Physical layer thickness shadow lip along South & East zone boundaries
+  if (!mask.sameS || !mask.sameE || rBR > 0 || rTR > 0 || rBL > 0) {
+    ctx.strokeStyle = palette.lipShadow;
+    ctx.lineWidth = palette.thicknessPx;
+    ctx.beginPath();
+    if (!mask.sameE) {
+      ctx.moveTo(px + s - 1, py + rTR);
+      ctx.lineTo(px + s - 1, py + s - rBR);
+    }
+    if (rBR > 0) {
+      ctx.moveTo(px + s - 1, py + s - rBR);
+      ctx.quadraticCurveTo(px + s - 1, py + s - 1, px + s - rBR, py + s - 1);
+    }
+    if (!mask.sameS) {
+      ctx.moveTo(px + s - rBR, py + s - 1);
+      ctx.lineTo(px + rBL, py + s - 1);
+    }
+    if (rTR > 0) {
+      ctx.moveTo(px + s - rTR, py + 1);
+      ctx.quadraticCurveTo(px + s - 1, py + 1, px + s - 1, py + rTR);
+    }
+    if (rBL > 0) {
+      ctx.moveTo(px + rBL, py + s - 1);
+      ctx.quadraticCurveTo(px + 1, py + s - 1, px + 1, py + s - rBL);
+    }
+    ctx.stroke();
+  }
+
+  // Concave inner corner fillets so interior bends of a zone are also smoothly rounded
+  const innerR = Math.max(4, Math.round(r * 0.45));
+  if (mask.concaveTL) {
+    ctx.fillStyle = getStratumPalette(neighborAt(tx - 1, ty - 1)).fill;
+    ctx.beginPath();
+    ctx.moveTo(px, py);
+    ctx.lineTo(px + innerR, py);
+    ctx.quadraticCurveTo(px, py, px, py + innerR);
+    ctx.closePath();
+    ctx.fill();
+  }
+  if (mask.concaveTR) {
+    ctx.fillStyle = getStratumPalette(neighborAt(tx + 1, ty - 1)).fill;
+    ctx.beginPath();
+    ctx.moveTo(px + s, py);
+    ctx.lineTo(px + s - innerR, py);
+    ctx.quadraticCurveTo(px + s, py, px + s, py + innerR);
+    ctx.closePath();
+    ctx.fill();
+  }
+  if (mask.concaveBR) {
+    ctx.fillStyle = getStratumPalette(neighborAt(tx + 1, ty + 1)).fill;
+    ctx.beginPath();
+    ctx.moveTo(px + s, py + s);
+    ctx.lineTo(px + s - innerR, py + s);
+    ctx.quadraticCurveTo(px + s, py + s, px + s, py + s - innerR);
+    ctx.closePath();
+    ctx.fill();
+  }
+  if (mask.concaveBL) {
+    ctx.fillStyle = getStratumPalette(neighborAt(tx - 1, ty + 1)).fill;
+    ctx.beginPath();
+    ctx.moveTo(px, py + s);
+    ctx.lineTo(px + innerR, py + s);
+    ctx.quadraticCurveTo(px, py + s, px, py + s - innerR);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  ctx.restore();
 }
 
 function getOrBuildStaticTerrainCache(
@@ -84,7 +329,9 @@ function getOrBuildStaticTerrainCache(
     return cachedTerrainSurface;
   }
 
+  let isFreshSurface = false;
   if (!cachedTerrainSurface || !cachedTerrainCtx) {
+    isFreshSurface = true;
     try {
       if (typeof OffscreenCanvas !== "undefined") {
         cachedTerrainSurface = new OffscreenCanvas(WORLD_TOTAL_PIXELS_W, WORLD_TOTAL_PIXELS_H);
@@ -109,16 +356,50 @@ function getOrBuildStaticTerrainCache(
   cachedTerrainCtx.imageSmoothingQuality = "high";
 
   const s = TILE_PIXEL_SIZE;
+  const total = MAP_WIDTH_TILES * MAP_HEIGHT_TILES;
+
+  // Incremental 3x3 neighborhood update when a few tiles degrade or are paved with Concrete Slabs
+  if (!isFreshSurface && cachedTerrainAtlas === atlas && cachedNormalizedGrid?.length === total) {
+    const dirtyTiles = new Set<number>();
+    for (let i = 0; i < total; i++) {
+      const norm = normalizeBaseTerrainKind(terrainGrid[i] ?? 0);
+      if (cachedNormalizedGrid[i] !== norm) {
+        cachedNormalizedGrid[i] = norm;
+        const cx = i % MAP_WIDTH_TILES;
+        const cy = Math.floor(i / MAP_WIDTH_TILES);
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const nx = cx + dx;
+            const ny = cy + dy;
+            if (nx >= 0 && ny >= 0 && nx < MAP_WIDTH_TILES && ny < MAP_HEIGHT_TILES) {
+              dirtyTiles.add(ny * MAP_WIDTH_TILES + nx);
+            }
+          }
+        }
+      }
+    }
+
+    if (dirtyTiles.size > 0 && dirtyTiles.size <= 64) {
+      for (const idx of dirtyTiles) {
+        const tx = idx % MAP_WIDTH_TILES;
+        const ty = Math.floor(idx / MAP_WIDTH_TILES);
+        drawUnifiedOrganicTerrainCell(cachedTerrainCtx, terrainGrid, tx, ty, s);
+      }
+      cachedTerrainSignature = sig;
+      return cachedTerrainSurface;
+    }
+  }
+
+  if (!cachedNormalizedGrid || cachedNormalizedGrid.length !== total) {
+    cachedNormalizedGrid = new Int8Array(total);
+  }
+  for (let i = 0; i < total; i++) {
+    cachedNormalizedGrid[i] = normalizeBaseTerrainKind(terrainGrid[i] ?? 0);
+  }
+
   for (let ty = 0; ty < MAP_HEIGHT_TILES; ty++) {
     for (let tx = 0; tx < MAP_WIDTH_TILES; tx++) {
-      const idx = ty * MAP_WIDTH_TILES + tx;
-      const rawKind = terrainGrid[idx] ?? 0;
-      // Render underlying static sand (0) beneath dynamic ore (3) so ore depletion never rebuilds this 1536x1536 surface
-      const baseKind = rawKind === 3 ? 0 : rawKind;
-      const bmp = atlas.terrainTiles.get(baseKind);
-      if (bmp) {
-        cachedTerrainCtx.drawImage(bmp, tx * s, ty * s, s, s);
-      }
+      drawUnifiedOrganicTerrainCell(cachedTerrainCtx, terrainGrid, tx, ty, s);
     }
   }
 
@@ -192,11 +473,7 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
         continue;
       }
       if (!staticTerrainCache) {
-        const tKind = terrainGrid[idx] ?? 0;
-        const bmp = atlas.terrainTiles.get(tKind === 3 ? 0 : tKind);
-        if (bmp) {
-          ctx.drawImage(bmp, tx * s, ty * s, s, s);
-        }
+        drawUnifiedOrganicTerrainCell(ctx, terrainGrid, tx, ty, s);
       }
       if (oreBmp && (oreGrid[idx] ?? 0) > 0) {
         ctx.drawImage(oreBmp, tx * s, ty * s, s, s);
@@ -270,6 +547,30 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
       const turretBmp = atlas.unitTurrets.get(`${ent.faction}:${ent.kind}:${turretAngle}`);
       if (turretBmp) {
         ctx.drawImage(turretBmp, px, py, s, s);
+      }
+
+      // Spawn protection cooldown shield effect (1s target-immunity ring on newly created units)
+      if ((ent.spawnProtectionTicks ?? 0) > 0) {
+        const protRatio = Math.max(
+          0,
+          Math.min(1, (ent.spawnProtectionTicks ?? 0) / UNIT_SPAWN_PROTECTION_TICKS)
+        );
+        const cx = px + s * 0.5;
+        const cy = py + s * 0.5;
+        const shieldR = s * 0.46;
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(cx, cy, shieldR, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(56, 189, 248, 0.18)";
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.arc(cx, cy, shieldR, -Math.PI * 0.5, -Math.PI * 0.5 + Math.PI * 2 * protRatio);
+        ctx.strokeStyle = "#38bdf8";
+        ctx.lineWidth = 2.2;
+        ctx.stroke();
+        ctx.restore();
       }
 
       if (ent.hp < ent.maxHp * 0.55) {

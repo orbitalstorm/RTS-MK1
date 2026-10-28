@@ -329,14 +329,15 @@ export function drawLeonardoTerrainTile(
     ctx.lineTo(48 * u, 32 * u);
     ctx.stroke();
   } else {
-    // kind === 3: Rich Crystalline Tiberium / Spice Deposit
-    // Dark fractured mineral bed
-    const bedGrad = ctx.createRadialGradient(s * 0.5, s * 0.5, 4 * u, s * 0.5, s * 0.5, s * 0.65);
-    bedGrad.addColorStop(0, "#132a20");
-    bedGrad.addColorStop(0.55, "#1f1d16");
-    bedGrad.addColorStop(1, "#181510");
+    // kind === 3: Rich Crystalline Tiberium / Spice Deposit (Organic transparent radial bed so crystals blend seamlessly onto unified ground)
+    const bedGrad = ctx.createRadialGradient(s * 0.5, s * 0.5, 4 * u, s * 0.5, s * 0.5, s * 0.46);
+    bedGrad.addColorStop(0, "rgba(19, 42, 32, 0.78)");
+    bedGrad.addColorStop(0.65, "rgba(31, 29, 22, 0.42)");
+    bedGrad.addColorStop(1, "rgba(24, 21, 16, 0)");
+    ctx.beginPath();
+    ctx.arc(s * 0.5, s * 0.5, s * 0.46, 0, Math.PI * 2);
     ctx.fillStyle = bedGrad;
-    ctx.fillRect(0, 0, s, s);
+    ctx.fill();
 
     // Tectonic ground fractures glowing with subsurface emerald energy
     ctx.strokeStyle = "rgba(16, 185, 129, 0.35)";
@@ -850,6 +851,28 @@ export function drawLeonardoBuilding(
     ctx.fill();
     ctx.strokeStyle = "#38bdf8";
     ctx.lineWidth = 2 * u;
+    ctx.stroke();
+  } else if (kind === "CONCRETE_SLAB") {
+    // Heavy Reinforced Concrete Foundation Slab (Dalle de Béton Armé)
+    traceChamferedRect(ctx, w * 0.08, h * 0.08, w * 0.84, h * 0.84, 6 * u);
+    const slabGrad = ctx.createLinearGradient(0, 0, w, h);
+    slabGrad.addColorStop(0, "#64748b");
+    slabGrad.addColorStop(0.5, "#525e6e");
+    slabGrad.addColorStop(1, "#334155");
+    ctx.fillStyle = slabGrad;
+    ctx.fill();
+    ctx.strokeStyle = fSpec.primaryColor;
+    ctx.lineWidth = 1.6 * u;
+    ctx.stroke();
+
+    // Structural expansion seam & anchor bolts
+    ctx.strokeStyle = "rgba(15, 23, 42, 0.45)";
+    ctx.lineWidth = 1.1 * u;
+    ctx.beginPath();
+    ctx.moveTo(w * 0.16, cy);
+    ctx.lineTo(w * 0.84, cy);
+    ctx.moveTo(cx, h * 0.16);
+    ctx.lineTo(cx, h * 0.84);
     ctx.stroke();
   } else if (kind === "GUARD_TOWER") {
     // Octagonal Concrete/Steel Casemate

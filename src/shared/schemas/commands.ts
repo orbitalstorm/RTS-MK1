@@ -12,6 +12,7 @@ export const BuildingKindSchema = z.enum([
   "WAR_FACTORY",
   "RADAR_DOME",
   "TECH_CENTER",
+  "CONCRETE_SLAB",
   "GUARD_TOWER",
   "SAM_SITE",
   "OBELISK",

@@ -416,6 +416,13 @@ function applyDelta(
     }
   }
 
+  if (delta.terrainUpdates && delta.terrainUpdates.length > 0) {
+    for (const t of delta.terrainUpdates) {
+      const idx = t.tileY * MAP_WIDTH_TILES + t.tileX;
+      st.terrainGrid[idx] = t.terrainKind;
+    }
+  }
+
   const prevMyEcon = st.playersEconomy.get(st.playerId);
   for (const p of delta.players) {
     st.playersEconomy.set(p.playerId, p);
