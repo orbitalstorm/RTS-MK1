@@ -25,13 +25,13 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.web
-    image: rts-mk1-web:v1.11.1
+    image: rts-mk1-web:v1.12.0
     container_name: rts-mk1-web
     restart: unless-stopped
     user: "node"
     environment:
       - NODE_ENV=production
-      - APP_VERSION=1.11.1
+      - APP_VERSION=1.12.0
       - PORT=4300
       - WEB_PORT=4300
       - PROJECT_NAME=RTS-MK1
@@ -59,13 +59,13 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.ws
-    image: rts-mk1-ws:v1.11.1
+    image: rts-mk1-ws:v1.12.0
     container_name: rts-mk1-ws
     restart: unless-stopped
     user: "node"
     environment:
       - NODE_ENV=production
-      - APP_VERSION=1.11.1
+      - APP_VERSION=1.12.0
       - WS_PORT=4301
       - PROJECT_NAME=RTS-MK1
       - PUBLIC_DNS_DOMAIN=rts-mk1.orbital8.cloud

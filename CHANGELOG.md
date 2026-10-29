@@ -2,6 +2,25 @@
 
 All notable changes to **RTS-MK1** (`https://rts-mk1.orbital8.cloud`) follow strict non-reusable `v1.x.y` versioning.
 
+## [v1.12.0] — 2026-10-29
+
+### Added & Changed
+- **High-Precision Hybrid Graphics Overhaul — Option 3 (`src/components/hud/leonardo-icons.tsx`, `src/renderer/generator/atlas-generator.ts`, `src/renderer/generator/leonardo-vector-art.ts`, `src/renderer/world-renderer.ts`)**:
+  - **Lot 1 — Full-Bleed 3/4 Isometric HUD Cameos (25 Icons) & Multi-Layered Faction Emblems**:
+    - Redesigned all 15 buildings and 10 units in `ProductionItemVectorIcon` to fill the `viewBox="4 4 56 56"` frame with a 3/4 isometric tactical cameo projection (`hullGradId`, `shadeGradId`, `base-shadow`, and detailed sub-assemblies).
+    - Replaced top-down circular infantry icons (`RIFLE_INFANTRY`, `ROCKET_SOLDIER`, `ENGINEER`) with distinct 3/4 bust portraits featuring beveled shoulder armor, optical visor helmets, pulse rifles, shoulder-mounted AT rocket launchers, and plasma cutting torches.
+    - Enriched `FactionVectorEmblem` (`GDI`, `NOD`, `ORDOS`) with multi-layered heraldic reliefs (12-tooth orbital gear & 3-tier golden feathers for GDI, 5-segment cybernetic scorpion tail & faceted ruby sting for NOD, twin caduceus serpents & crossed cryogenic gimbal rings for ORDOS).
+  - **Lot 2 — Fixed World-Space North-West Sun Lighting Across All 16 Angles & Individual Infantry Squad Rotation**:
+    - Passed `angleIndex` (`0..15`) into `drawLeonardoUnitBody` and `drawLeonardoUnitTurret` with world-to-local sun vector projection (`toLocalSunVector`, `createWorldSunLinearGradient`, `drawWorldSpaceNwSpecularArc`), locking ground drop shadows to South-East and specular highlights to North-West in world space regardless of hull or turret orientation.
+    - Updated 3-soldier infantry squads (`RIFLE_INFANTRY`, `ROCKET_SOLDIER`, `ENGINEER`) to counter-rotate the triangle formation in world space while rotating each soldier individually on their own axis (`ctx.rotate(radians)`).
+  - **Lot 3 — 16-Angle Rotating Defense Turrets (`GUARD_TOWER`, `SAM_SITE`) & Dynamic `HARVESTER` Ore Bed**:
+    - Added `buildingTurrets: Map<string, ImageBitmap>` to `ProceduralSpriteAtlas` (with `ImageBitmap.close()` cleanup in `dispose()`) and separated defense bases from rotating 16-angle turrets (`drawLeonardoBuildingTurret`) rendered at `ent.transform.turretAngle` in `world-renderer.ts`.
+    - Rendered the `HARVESTER` rear cargo bay (`benne`) empty in the static atlas and dynamically drew a progressive emerald crystal bed (`0%` to `100%` load, 1–7 faceted crystal clusters, side level gauges, and glow) in `drawUnitLiveAnimation` based on `ent.cargoOre / HARVESTER_MAX_LOAD`.
+  - **Lot 4 — Differentiated Building Foundations, 3-Stage Construction Animations & Atlas Memory Cleanup**:
+    - Replaced uniform concrete base plates with function-specific and faction-themed foundations (`drawDifferentiatedBuildingFoundation` & `drawFactionFoundationMotifs`) for all 15 buildings.
+    - Upgraded `drawConstructionProgressOverlay` into 3 visual stages (`0–33%` excavated footing & laser grid, `34–66%` X-truss steel framing & animated electric welding arcs, `67–99%` armor plating, calibration laser sweep & beacon power-up).
+    - Removed unused `atlas.terrainTiles` generation in `atlas-generator.ts`.
+
 ## [v1.11.1] — 2026-10-29
 
 ### Fixed & Changed
