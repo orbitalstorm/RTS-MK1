@@ -16,6 +16,18 @@ import {
   type MatchRecord,
   type UpsertProfileRequest,
 } from "../../shared/schemas/profile";
+import {
+  VECTOR_ASSET_ELEMENTS,
+  VectorVariantsMutationRequestSchema,
+  VectorVariantsStateSchema,
+  createInitialVectorVariantsState,
+  setActiveVectorVariantConfig,
+  summarizeVectorVariantsState,
+  synthesizeNewLeonardoVariantProposal,
+  type VectorVariantProposal,
+  type VectorVariantsMutationRequest,
+  type VectorVariantsState,
+} from "../../shared/schemas/vector-variants";
 import type { FactionId } from "../../shared/constants";
 
 let dbInstance: DatabaseSync | null = null;
@@ -30,6 +42,13 @@ function getCustomMapsDir(): string {
   const dir = path.join(path.dirname(dbPath), "custom-maps");
   fs.mkdirSync(dir, { recursive: true });
   return dir;
+}
+
+function getVectorVariantsFilePath(): string {
+  const dbPath = resolveDbPath();
+  const dir = path.join(path.dirname(dbPath), "vector-variants");
+  fs.mkdirSync(dir, { recursive: true });
+  return path.join(dir, "state.json");
 }
 
 function saveCustomMapToStatement(db: DatabaseSync, doc: CustomMapDocument): CustomMapSummary {
@@ -175,6 +194,13 @@ function getDb(): DatabaseSync {
       tree_count INTEGER NOT NULL,
       entity_count INTEGER NOT NULL,
       rules_valid INTEGER NOT NULL DEFAULT 1,
+      payload_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS vector_variants_state (
+      config_id TEXT PRIMARY KEY,
+      revision INTEGER NOT NULL,
       payload_json TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -553,4 +579,261 @@ export function deleteCustomMapById(mapId: string): boolean {
     // Ignore file cleanup errors
   }
   return res.changes > 0;
+}
+
+function normalizeVectorVariantsStateCompleteness(state: VectorVariantsState): VectorVariantsState {
+  const initial = createInitialVectorVariantsState();
+  const mergedCatalog: Record<string, VectorVariantProposal[]> = { ...state.catalog };
+  const mergedActive: Record<string, string> = {
+    ...initial.activeVariants,
+    ...state.activeVariants,
+  };
+
+  for (const descriptor of VECTOR_ASSET_ELEMENTS) {
+    const key = descriptor.assetKey;
+    const baseList = initial.catalog[key] ?? [];
+    const currentList = mergedCatalog[key] ?? [];
+    const existingIds = new Set(currentList.map((p) => p.variantId));
+    const combined = [...currentList];
+    for (const bp of baseList) {
+      if (!existingIds.has(bp.variantId)) {
+        combined.push(bp);
+      }
+    }
+    combined.sort((a, b) => a.versionNumber - b.versionNumber);
+    mergedCatalog[key] = combined;
+    if (
+      !mergedActive[key] ||
+      !combined.some((p) => p.variantId === mergedActive[key])
+    ) {
+      mergedActive[key] = combined[0]?.variantId ?? "v1_classic_mk1";
+    }
+  }
+
+  return VectorVariantsStateSchema.parse({
+    ...state,
+    activeVariants: mergedActive,
+    catalog: mergedCatalog,
+  });
+}
+
+function readVectorVariantsStateFromDisk(): VectorVariantsState | null {
+  try {
+    const filePath = getVectorVariantsFilePath();
+    if (!fs.existsSync(filePath)) return null;
+    const raw = fs.readFileSync(filePath, "utf8");
+    const parsed = VectorVariantsStateSchema.safeParse(JSON.parse(raw));
+    if (!parsed.success) return null;
+    return normalizeVectorVariantsStateCompleteness(parsed.data);
+  } catch {
+    return null;
+  }
+}
+
+export function saveVectorVariantsState(state: VectorVariantsState): VectorVariantsState {
+  const db = getDb();
+  const validated = normalizeVectorVariantsStateCompleteness(state);
+
+  db.prepare(`
+    INSERT INTO vector_variants_state (config_id, revision, payload_json, updated_at)
+    VALUES ('global', ?, ?, ?)
+    ON CONFLICT(config_id) DO UPDATE SET
+      revision = excluded.revision,
+      payload_json = excluded.payload_json,
+      updated_at = excluded.updated_at
+  `).run(validated.revision, JSON.stringify(validated), validated.updatedAt);
+
+  try {
+    fs.writeFileSync(
+      getVectorVariantsFilePath(),
+      JSON.stringify(validated, null, 2),
+      "utf8"
+    );
+  } catch {
+    // Ignore disk write failure in read-only test environments
+  }
+
+  setActiveVectorVariantConfig(validated);
+  return validated;
+}
+
+export function getVectorVariantsState(): VectorVariantsState {
+  const db = getDb();
+  const row = db
+    .prepare("SELECT payload_json FROM vector_variants_state WHERE config_id = 'global'")
+    .get() as { payload_json: string } | undefined;
+
+  let dbState: VectorVariantsState | null = null;
+  if (row) {
+    try {
+      const parsed = VectorVariantsStateSchema.safeParse(JSON.parse(row.payload_json));
+      if (parsed.success) {
+        dbState = normalizeVectorVariantsStateCompleteness(parsed.data);
+      }
+    } catch {
+      dbState = null;
+    }
+  }
+
+  const diskState = readVectorVariantsStateFromDisk();
+
+  if (dbState && diskState) {
+    if (
+      diskState.revision > dbState.revision ||
+      (diskState.revision === dbState.revision && diskState.updatedAt > dbState.updatedAt)
+    ) {
+      return saveVectorVariantsState(diskState);
+    }
+    if (dbState.revision > diskState.revision) {
+      return saveVectorVariantsState(dbState);
+    }
+    setActiveVectorVariantConfig(dbState);
+    return dbState;
+  }
+
+  if (diskState) {
+    return saveVectorVariantsState(diskState);
+  }
+
+  if (dbState) {
+    return saveVectorVariantsState(dbState);
+  }
+
+  const initial = createInitialVectorVariantsState();
+  return saveVectorVariantsState(initial);
+}
+
+export function mutateVectorVariantsState(rawRequest: VectorVariantsMutationRequest): {
+  state: VectorVariantsState;
+  newlyCreated: VectorVariantProposal[];
+  summary: ReturnType<typeof summarizeVectorVariantsState>;
+} {
+  const req = VectorVariantsMutationRequestSchema.parse(rawRequest);
+  const current = getVectorVariantsState();
+  const now = new Date().toISOString();
+  const newlyCreated: VectorVariantProposal[] = [];
+
+  if (req.action === "SAVE_SELECTIONS") {
+    const nextActive: Record<string, string> = { ...current.activeVariants };
+    for (const [assetKey, variantId] of Object.entries(req.activeVariants)) {
+      const list = current.catalog[assetKey] ?? [];
+      if (list.some((p) => p.variantId === variantId)) {
+        nextActive[assetKey] = variantId;
+      }
+    }
+    const nextState = saveVectorVariantsState({
+      ...current,
+      revision: current.revision + 1,
+      updatedAt: now,
+      activeVariants: nextActive,
+    });
+    return {
+      state: nextState,
+      newlyCreated,
+      summary: summarizeVectorVariantsState(nextState),
+    };
+  }
+
+  if (req.action === "SELECT_SINGLE_VARIANT") {
+    const list = current.catalog[req.assetKey] ?? [];
+    const exists = list.some((p) => p.variantId === req.variantId);
+    if (!exists) {
+      throw new Error(`Variante '${req.variantId}' introuvable pour '${req.assetKey}'.`);
+    }
+    const nextState = saveVectorVariantsState({
+      ...current,
+      revision: current.revision + 1,
+      updatedAt: now,
+      activeVariants: {
+        ...current.activeVariants,
+        [req.assetKey]: req.variantId,
+      },
+    });
+    return {
+      state: nextState,
+      newlyCreated,
+      summary: summarizeVectorVariantsState(nextState),
+    };
+  }
+
+  if (req.action === "RESET_TO_DEFAULT") {
+    const nextActive: Record<string, string> = { ...current.activeVariants };
+    const targets = VECTOR_ASSET_ELEMENTS.filter((el) => {
+      if (req.targetScope === "ASSET") return el.assetKey === req.assetKey;
+      if (req.targetScope === "CATEGORY") return el.category === req.category;
+      return true;
+    });
+    for (const el of targets) {
+      const firstId = current.catalog[el.assetKey]?.[0]?.variantId ?? "v1_classic_mk1";
+      nextActive[el.assetKey] = firstId;
+    }
+    const nextState = saveVectorVariantsState({
+      ...current,
+      revision: current.revision + 1,
+      updatedAt: now,
+      activeVariants: nextActive,
+    });
+    return {
+      state: nextState,
+      newlyCreated,
+      summary: summarizeVectorVariantsState(nextState),
+    };
+  }
+
+  // PROPOSE_NEW_VARIANTS
+  const targets = VECTOR_ASSET_ELEMENTS.filter((el) => {
+    if (req.targetScope === "ASSET") {
+      return el.assetKey === (req.assetKey ?? "BUILDING:CONSTRUCTION_YARD");
+    }
+    if (req.targetScope === "CATEGORY") {
+      return el.category === (req.category ?? "BUILDING");
+    }
+    return true;
+  });
+
+  const nextCatalog: Record<string, VectorVariantProposal[]> = { ...current.catalog };
+  const nextActive: Record<string, string> = { ...current.activeVariants };
+
+  for (const descriptor of targets) {
+    const existingForAsset = [...(nextCatalog[descriptor.assetKey] ?? [])];
+    const maxVersion = existingForAsset.reduce(
+      (max, p) => (p.versionNumber > max ? p.versionNumber : max),
+      4
+    );
+
+    const createdForDescriptor: VectorVariantProposal[] = [];
+    for (let i = 0; i < req.count; i += 1) {
+      const nextVersionNumber = maxVersion + 1 + i;
+      const proposal = synthesizeNewLeonardoVariantProposal({
+        descriptor,
+        nextVersionNumber,
+        styleArchetype: req.styleArchetype,
+        directivePrompt: req.directivePrompt,
+      });
+      existingForAsset.push(proposal);
+      createdForDescriptor.push(proposal);
+      newlyCreated.push(proposal);
+    }
+
+    nextCatalog[descriptor.assetKey] = existingForAsset;
+
+    if (req.autoSelectNewest && createdForDescriptor.length > 0) {
+      nextActive[descriptor.assetKey] =
+        createdForDescriptor[createdForDescriptor.length - 1]!.variantId;
+    }
+  }
+
+  const nextState = saveVectorVariantsState({
+    ...current,
+    revision: current.revision + 1,
+    updatedAt: now,
+    activeVariants: nextActive,
+    catalog: nextCatalog,
+  });
+
+  return {
+    state: nextState,
+    newlyCreated,
+    summary: summarizeVectorVariantsState(nextState),
+  };
 }

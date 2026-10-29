@@ -24,6 +24,10 @@ import {
 import { generateRandomMapSeed, normalizeMapSeed } from "../../shared/map-generator";
 import type { CustomMapSummary } from "../../shared/schemas/custom-map";
 import type { ClientMessage } from "../../shared/schemas/commands";
+import {
+  setActiveVectorVariantConfig,
+  type VectorVariantsState,
+} from "../../shared/schemas/vector-variants";
 import { useRtsGameStore } from "../../store/game-store";
 import { FactionVectorEmblem } from "../hud/leonardo-icons";
 import { Badge, Button, Card } from "../ui/primitives";
@@ -121,6 +125,18 @@ export function PortalCommandCenter() {
     setCommanderIdentity(pid, cname, fac);
     connectWebSocket();
     void fetchSavedMaps();
+    if (typeof fetch === "function") {
+      void fetch("/api/vector-variants", { cache: "no-store" })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data: { state?: VectorVariantsState } | null) => {
+          if (data?.state) {
+            setActiveVectorVariantConfig(data.state);
+          }
+        })
+        .catch(() => {
+          // Keep default vector variants on error
+        });
+    }
   }, [connectWebSocket, fetchSavedMaps, setCommanderIdentity]);
 
   useEffect(() => {

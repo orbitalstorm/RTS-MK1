@@ -1,9 +1,42 @@
 import {
   FACTIONS,
+  TERRAIN_KIND,
   type BuildingKind,
   type FactionId,
+  type TreeKind,
   type UnitKind,
 } from "../../shared/constants";
+import {
+  getActiveBuildingVariant,
+  getActiveTerrainVariantByNumericKind,
+  getActiveTreeVariant,
+  getActiveUnitVariant,
+  type EnergyCoreHue,
+  type VectorVariantProposal,
+} from "../../shared/schemas/vector-variants";
+
+function resolveEnergyHueColors(
+  hue: EnergyCoreHue,
+  factionPrimary: string,
+  factionSecondary: string
+): { core: string; glow: string; rim: string } {
+  if (hue === "CYAN_PLASMA") {
+    return { core: "#38bdf8", glow: "rgba(56, 189, 248, 0.42)", rim: "#e0f2fe" };
+  }
+  if (hue === "AMBER_THERMAL") {
+    return { core: "#f59e0b", glow: "rgba(245, 158, 11, 0.42)", rim: "#fef08a" };
+  }
+  if (hue === "EMERALD_TIBERIUM") {
+    return { core: "#10b981", glow: "rgba(16, 185, 129, 0.42)", rim: "#a7f3d0" };
+  }
+  if (hue === "CRIMSON_LASER") {
+    return { core: "#ef4444", glow: "rgba(239, 68, 68, 0.42)", rim: "#fecaca" };
+  }
+  if (hue === "VIOLET_QUANTUM") {
+    return { core: "#a855f7", glow: "rgba(168, 85, 247, 0.42)", rim: "#f3e8ff" };
+  }
+  return { core: factionPrimary, glow: factionSecondary, rim: "#f8fafc" };
+}
 
 export type VectorDrawingContext =
   | OffscreenCanvasRenderingContext2D
@@ -180,15 +213,139 @@ function drawWorldSpaceNwSpecularArc(
 }
 
 /**
- * 1. High-Precision Vector Terrain Tile Renderer
+ * 1. High-Precision Vector Terrain Tile Renderer (Supports all 10 TERRAIN_KINDs + Leonardo Variants)
  */
 export function drawLeonardoTerrainTile(
   ctx: VectorDrawingContext,
   kind: number,
-  sizePx: number
+  sizePx: number,
+  variantOverride?: VectorVariantProposal
 ): void {
   const s = sizePx;
   const u = s / 64; // Normalized unit scale relative to 64px high-DPI tile
+  const activeVariant =
+    variantOverride ?? getActiveTerrainVariantByNumericKind(kind);
+  const dna = activeVariant.dna;
+  const isCustomVariant = activeVariant.variantId !== "v1_classic_mk1";
+
+  if (kind === TERRAIN_KIND.GRASS) {
+    const grassGrad = ctx.createLinearGradient(0, 0, s, s);
+    grassGrad.addColorStop(0, dna.terrainFillHex);
+    grassGrad.addColorStop(1, dna.terrainLipShadowHex);
+    ctx.fillStyle = grassGrad;
+    ctx.fillRect(0, 0, s, s);
+
+    // Botanical grass blade clusters
+    const tufts: ReadonlyArray<[number, number, number]> = [
+      [16 * u, 20 * u, 1.0],
+      [44 * u, 26 * u, 1.15],
+      [26 * u, 48 * u, 0.95],
+      [48 * u, 50 * u, 1.05],
+    ];
+    for (const [gx, gy, sc] of tufts) {
+      ctx.fillStyle = "rgba(8, 20, 10, 0.45)";
+      ctx.beginPath();
+      ctx.ellipse(gx, gy + 1.5 * u, 4.5 * u * sc, 2 * u * sc, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.strokeStyle = dna.terrainLipHighlightHex;
+      ctx.lineWidth = 1.6 * u;
+      ctx.beginPath();
+      ctx.moveTo(gx - 2 * u * sc, gy + 1 * u);
+      ctx.lineTo(gx - 5 * u * sc, gy - 6 * u * sc);
+      ctx.moveTo(gx, gy + 1 * u);
+      ctx.lineTo(gx + 0.5 * u * sc, gy - 8 * u * sc);
+      ctx.moveTo(gx + 2 * u * sc, gy + 1 * u);
+      ctx.lineTo(gx + 5 * u * sc, gy - 5.5 * u * sc);
+      ctx.stroke();
+
+      if (dna.terrainGeometryStyle === "CRYSTALLINE_PRISM" || dna.terrainGeometryStyle === "ORGANIC_LUSH") {
+        ctx.fillStyle = dna.terrainSecondaryHex;
+        ctx.beginPath();
+        ctx.arc(gx + 0.5 * u, gy - 7 * u * sc, 1.5 * u, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    if (isCustomVariant) {
+      drawTerrainVariantOverlayMotif(ctx, s, u, activeVariant);
+    }
+    return;
+  }
+
+  if (kind === TERRAIN_KIND.CONCRETE_SLAB) {
+    const slabGrad = ctx.createLinearGradient(0, 0, s, s);
+    slabGrad.addColorStop(0, dna.terrainFillHex);
+    slabGrad.addColorStop(1, dna.terrainLipShadowHex);
+    ctx.fillStyle = slabGrad;
+    ctx.fillRect(0, 0, s, s);
+
+    traceChamferedRect(ctx, 4 * u, 4 * u, s - 8 * u, s - 8 * u, 6 * u * dna.armorChamferScale);
+    ctx.strokeStyle = dna.terrainLipHighlightHex;
+    ctx.lineWidth = 1.6 * u;
+    ctx.stroke();
+
+    drawCornerRivets(ctx, 5 * u, 5 * u, s - 10 * u, s - 10 * u, 5 * u, 2 * u);
+
+    if (dna.terrainGeometryStyle === "STRATIFIED_HEX") {
+      drawHazardStripes(ctx, 14 * u, s - 11 * u, s - 28 * u, 4.5 * u, 4 * u);
+    } else if (dna.terrainGeometryStyle === "CRYSTALLINE_PRISM") {
+      ctx.strokeStyle = dna.terrainSecondaryHex;
+      ctx.lineWidth = 1.4 * u;
+      ctx.beginPath();
+      ctx.moveTo(12 * u, s * 0.5);
+      ctx.lineTo(s - 12 * u, s * 0.5);
+      ctx.moveTo(s * 0.5, 12 * u);
+      ctx.lineTo(s * 0.5, s - 12 * u);
+      ctx.stroke();
+    }
+    return;
+  }
+
+  if (kind === TERRAIN_KIND.SILVER_ORE) {
+    const bgGrad = ctx.createLinearGradient(0, 0, s, s);
+    bgGrad.addColorStop(0, "#1e293b");
+    bgGrad.addColorStop(1, "#0f172a");
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, s, s);
+
+    // Massive faceted silver boulder
+    ctx.beginPath();
+    ctx.moveTo(s * 0.14, s * 0.82);
+    ctx.lineTo(s * 0.08, s * 0.42);
+    ctx.lineTo(s * 0.28, s * 0.12);
+    ctx.lineTo(s * 0.72, s * 0.1);
+    ctx.lineTo(s * 0.92, s * 0.44);
+    ctx.lineTo(s * 0.82, s * 0.86);
+    ctx.closePath();
+    const rockGrad = ctx.createLinearGradient(0, 0, s, s);
+    rockGrad.addColorStop(0, dna.terrainFillHex);
+    rockGrad.addColorStop(1, dna.terrainLipShadowHex);
+    ctx.fillStyle = rockGrad;
+    ctx.fill();
+    ctx.strokeStyle = dna.terrainLipHighlightHex;
+    ctx.lineWidth = 1.8 * u;
+    ctx.stroke();
+
+    const nuggets: ReadonlyArray<[number, number, number]> = [
+      [0.32, 0.34, 5 * u],
+      [0.64, 0.28, 5.8 * u],
+      [0.48, 0.52, 6.8 * u],
+      [0.28, 0.66, 4.8 * u],
+      [0.7, 0.64, 5.2 * u],
+    ];
+    for (const [nx, ny, nr] of nuggets) {
+      ctx.beginPath();
+      ctx.arc(s * nx, s * ny, nr, 0, Math.PI * 2);
+      ctx.fillStyle = dna.terrainLipHighlightHex;
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.arc(s * nx - nr * 0.25, s * ny - nr * 0.25, nr * 0.5, 0, Math.PI * 2);
+      ctx.fillStyle = dna.terrainSecondaryHex;
+      ctx.fill();
+    }
+    return;
+  }
 
   if (kind === 0) {
     // Arid tactical desert: deep ochre/amber gradient, Bezier dune strata, angular pebbles with cast shadows & warm highlights
@@ -483,7 +640,7 @@ export function drawLeonardoTerrainTile(
       ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
       ctx.fill();
 
-      // Main hexagonal prism body (#10b981 -> #22c55e)
+      // Main hexagonal prism body
       ctx.beginPath();
       ctx.moveTo(0, -c.len * 0.65);
       ctx.lineTo(c.w, -c.len * 0.25);
@@ -493,23 +650,23 @@ export function drawLeonardoTerrainTile(
       ctx.lineTo(-c.w, -c.len * 0.25);
       ctx.closePath();
       const cGrad = ctx.createLinearGradient(-c.w, -c.len * 0.6, c.w, c.len * 0.6);
-      cGrad.addColorStop(0, "#34d399");
-      cGrad.addColorStop(0.5, "#10b981");
-      cGrad.addColorStop(1, "#047857");
+      cGrad.addColorStop(0, isCustomVariant ? dna.terrainSecondaryHex : "#34d399");
+      cGrad.addColorStop(0.5, isCustomVariant ? dna.terrainFillHex : "#10b981");
+      cGrad.addColorStop(1, isCustomVariant ? dna.terrainLipShadowHex : "#047857");
       ctx.fillStyle = cGrad;
       ctx.fill();
-      ctx.strokeStyle = "#064e3b";
+      ctx.strokeStyle = isCustomVariant ? dna.terrainLipShadowHex : "#064e3b";
       ctx.lineWidth = 0.9 * u;
       ctx.stroke();
 
-      // Left sunlit specular facet (#86efac)
+      // Left sunlit specular facet
       ctx.beginPath();
       ctx.moveTo(0, -c.len * 0.65);
       ctx.lineTo(0, c.len * 0.6);
       ctx.lineTo(-c.w * 0.85, c.len * 0.45);
       ctx.lineTo(-c.w, -c.len * 0.25);
       ctx.closePath();
-      ctx.fillStyle = "#22c55e";
+      ctx.fillStyle = isCustomVariant ? dna.terrainSecondaryHex : "#22c55e";
       ctx.fill();
 
       // Incandescent core & crisp top facet highlight
@@ -519,12 +676,87 @@ export function drawLeonardoTerrainTile(
       ctx.lineTo(0, c.len * 0.15);
       ctx.lineTo(-c.w * 0.55, -c.len * 0.2);
       ctx.closePath();
-      ctx.fillStyle = "#86efac";
+      ctx.fillStyle = isCustomVariant ? dna.terrainLipHighlightHex : "#86efac";
       ctx.fill();
 
       ctx.restore();
     }
   }
+
+  if (isCustomVariant && kind !== TERRAIN_KIND.ORE) {
+    drawTerrainVariantOverlayMotif(ctx, s, u, activeVariant);
+  }
+}
+
+function drawTerrainVariantOverlayMotif(
+  ctx: VectorDrawingContext,
+  s: number,
+  u: number,
+  variant: VectorVariantProposal
+): void {
+  const dna = variant.dna;
+  ctx.save();
+
+  // Subtle variant palette wash so the tile reflects the variant's stratum colors
+  ctx.globalAlpha = 0.34;
+  ctx.fillStyle = dna.terrainFillHex;
+  ctx.fillRect(0, 0, s, s);
+  ctx.globalAlpha = 1;
+
+  if (dna.terrainGeometryStyle === "STRATIFIED_HEX") {
+    ctx.strokeStyle = dna.terrainLipHighlightHex;
+    ctx.lineWidth = 1.3 * u;
+    traceChamferedRect(ctx, 8 * u, 8 * u, s - 16 * u, s - 16 * u, 8 * u);
+    ctx.stroke();
+
+    ctx.fillStyle = dna.terrainSecondaryHex;
+    ctx.beginPath();
+    ctx.arc(16 * u, 16 * u, 2.2 * u, 0, Math.PI * 2);
+    ctx.arc(s - 16 * u, s - 16 * u, 2.2 * u, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (dna.terrainGeometryStyle === "CRYSTALLINE_PRISM") {
+    ctx.fillStyle = dna.terrainSecondaryHex;
+    const pts: ReadonlyArray<[number, number, number]> = [
+      [18 * u, 22 * u, 4 * u],
+      [44 * u, 18 * u, 3.5 * u],
+      [36 * u, 46 * u, 4.5 * u],
+    ];
+    for (const [px, py, pr] of pts) {
+      ctx.beginPath();
+      ctx.moveTo(px, py - pr);
+      ctx.lineTo(px + pr * 0.75, py);
+      ctx.lineTo(px, py + pr);
+      ctx.lineTo(px - pr * 0.75, py);
+      ctx.closePath();
+      ctx.fill();
+    }
+  } else if (dna.terrainGeometryStyle === "ARID_FRACTURED") {
+    ctx.strokeStyle = dna.terrainLipShadowHex;
+    ctx.lineWidth = 1.4 * u;
+    ctx.beginPath();
+    ctx.moveTo(8 * u, 26 * u);
+    ctx.lineTo(28 * u, 18 * u);
+    ctx.lineTo(54 * u, 30 * u);
+    ctx.moveTo(14 * u, 48 * u);
+    ctx.lineTo(36 * u, 40 * u);
+    ctx.lineTo(52 * u, 52 * u);
+    ctx.stroke();
+
+    ctx.strokeStyle = dna.terrainSecondaryHex;
+    ctx.lineWidth = 1.0 * u;
+    ctx.beginPath();
+    ctx.moveTo(8 * u, 24.5 * u);
+    ctx.lineTo(28 * u, 16.5 * u);
+    ctx.stroke();
+  } else if (dna.terrainGeometryStyle === "ORGANIC_LUSH") {
+    ctx.fillStyle = dna.terrainLipHighlightHex;
+    ctx.beginPath();
+    ctx.ellipse(22 * u, 30 * u, 6 * u, 3.2 * u, 0.25, 0, Math.PI * 2);
+    ctx.ellipse(44 * u, 42 * u, 5 * u, 2.8 * u, -0.3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.restore();
 }
 
 /**
@@ -979,13 +1211,15 @@ export function drawLeonardoBuilding(
   faction: FactionId,
   kind: BuildingKind,
   w: number,
-  h: number
+  h: number,
+  variantOverride?: VectorVariantProposal
 ): void {
   const fSpec = FACTIONS[faction];
   const minDim = Math.min(w, h);
   const u = minDim / 64; // Proportional scale unit
   const cx = w * 0.5;
   const cy = h * 0.5;
+  const activeVariant = variantOverride ?? getActiveBuildingVariant(kind);
 
   // ============================================================================
   // LAYER 1: DIFFERENTIATED FOUNDATION & CAST SHADOW (Lot 4.1)
@@ -1677,6 +1911,154 @@ export function drawLeonardoBuilding(
     }
     ctx.stroke();
   }
+
+  // ============================================================================
+  // LAYER 5: LEONARDO VARIANT EVOLUTION OVERLAY (V2, V3, V4, V5+)
+  // ============================================================================
+  if (activeVariant.variantId !== "v1_classic_mk1") {
+    drawBuildingVariantEvolutionLayer(ctx, faction, kind, w, h, u, activeVariant);
+  }
+}
+
+function drawBuildingVariantEvolutionLayer(
+  ctx: VectorDrawingContext,
+  faction: FactionId,
+  kind: BuildingKind,
+  w: number,
+  h: number,
+  u: number,
+  variant: VectorVariantProposal
+): void {
+  const fSpec = FACTIONS[faction];
+  const dna = variant.dna;
+  const cx = w * 0.5;
+  const cy = h * 0.5;
+  const minDim = Math.min(w, h);
+  const energy = resolveEnergyHueColors(
+    dna.energyCoreHue,
+    fSpec.primaryColor,
+    fSpec.secondaryColor
+  );
+
+  ctx.save();
+
+  // 1. Silhouette / Perimeter Bastion Sponsons
+  if (dna.silhouetteProfile === "WIDENED_HEAVY" || dna.silhouetteProfile === "OCTAGONAL_BEVEL") {
+    const sponsonW = 5.5 * u;
+    const sponsonH = h * 0.44;
+    ctx.fillStyle = "#1e293b";
+    ctx.strokeStyle = fSpec.primaryColor;
+    ctx.lineWidth = 1.6 * u;
+    ctx.fillRect(1.5 * u, cy - sponsonH * 0.5, sponsonW, sponsonH);
+    ctx.strokeRect(1.5 * u, cy - sponsonH * 0.5, sponsonW, sponsonH);
+    ctx.fillRect(w - 1.5 * u - sponsonW, cy - sponsonH * 0.5, sponsonW, sponsonH);
+    ctx.strokeRect(w - 1.5 * u - sponsonW, cy - sponsonH * 0.5, sponsonW, sponsonH);
+  } else if (dna.silhouetteProfile === "ANGULAR_STEALTH") {
+    // 4 Stealth Corner Deflector Vanes
+    ctx.strokeStyle = energy.core;
+    ctx.lineWidth = 2.0 * u;
+    const inset = 6 * u;
+    const span = 12 * u;
+    ctx.beginPath();
+    ctx.moveTo(inset, inset + span);
+    ctx.lineTo(inset + span, inset);
+    ctx.moveTo(w - inset, inset + span);
+    ctx.lineTo(w - inset - span, inset);
+    ctx.moveTo(inset, h - inset - span);
+    ctx.lineTo(inset + span, h - inset);
+    ctx.moveTo(w - inset, h - inset - span);
+    ctx.lineTo(w - inset - span, h - inset);
+    ctx.stroke();
+  }
+
+  // 2. Hazard Striping Evolution
+  if (dna.hazardStripeMode === "DOUBLE_CHEVRON") {
+    drawHazardStripes(ctx, w * 0.18, 4 * u, w * 0.64, 4.2 * u, 3.8 * u);
+    drawHazardStripes(ctx, w * 0.18, h - 8.2 * u, w * 0.64, 4.2 * u, 3.8 * u);
+  } else if (dna.hazardStripeMode === "PERIMETER_WARNING") {
+    ctx.strokeStyle = "#facc15";
+    ctx.lineWidth = 1.6 * u;
+    ctx.setLineDash([4 * u, 3 * u]);
+    traceChamferedRect(ctx, 5 * u, 5 * u, w - 10 * u, h - 10 * u, 6 * u * dna.armorChamferScale);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // 3. Superstructure Architectural Upgrades
+  if (dna.superstructureStyle === "REACTIVE_ERA_BLOCKS") {
+    // Explosive-Reactive Armor (ERA) casemate tiles along N/S flanks
+    const blockCount = Math.max(3, Math.floor(w / (18 * u)));
+    const blockW = (w * 0.68) / blockCount;
+    for (let i = 0; i < blockCount; i++) {
+      const bx = w * 0.16 + i * blockW;
+      ctx.fillStyle = i % 2 === 0 ? fSpec.primaryColor : "#334155";
+      ctx.strokeStyle = "#0f172a";
+      ctx.lineWidth = 1.1 * u;
+      ctx.fillRect(bx + 1 * u, 9 * u, blockW - 2 * u, 5.5 * u);
+      ctx.strokeRect(bx + 1 * u, 9 * u, blockW - 2 * u, 5.5 * u);
+    }
+  } else if (dna.superstructureStyle === "DUAL_REACTOR" || dna.superstructureStyle === "CRYO_CONDUITS") {
+    // Glowing Energy Conduit Pipes & Central Plasma Ring
+    const ringR = minDim * 0.19;
+    ctx.strokeStyle = energy.core;
+    ctx.lineWidth = 2.0 * u;
+    ctx.beginPath();
+    ctx.moveTo(8 * u, cy);
+    ctx.lineTo(cx - ringR, cy);
+    ctx.moveTo(cx + ringR, cy);
+    ctx.lineTo(w - 8 * u, cy);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, ringR, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(9, 13, 22, 0.78)";
+    ctx.fill();
+    ctx.strokeStyle = energy.core;
+    ctx.lineWidth = 2.2 * u;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, ringR * 0.52, 0, Math.PI * 2);
+    ctx.fillStyle = energy.core;
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(cx - ringR * 0.15, cy - ringR * 0.15, ringR * 0.22, 0, Math.PI * 2);
+    ctx.fillStyle = energy.rim;
+    ctx.fill();
+  } else if (dna.superstructureStyle === "COMMAND_ANTENNA" || dna.superstructureStyle === "SOLAR_VANES") {
+    // Telemetry Radar Mast & Solar Radiator Vanes at NE corner
+    const ax = w - 16 * u;
+    const ay = 16 * u;
+    ctx.fillStyle = "#0f172a";
+    ctx.strokeStyle = energy.core;
+    ctx.lineWidth = 1.5 * u;
+    ctx.beginPath();
+    ctx.arc(ax, ay, 7 * u, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.strokeStyle = energy.rim;
+    ctx.lineWidth = 1.4 * u;
+    ctx.beginPath();
+    ctx.moveTo(ax - 5 * u, ay - 5 * u);
+    ctx.lineTo(ax + 5 * u, ay + 5 * u);
+    ctx.moveTo(ax + 5 * u, ay - 5 * u);
+    ctx.lineTo(ax - 5 * u, ay + 5 * u);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(ax, ay, 2.2 * u, 0, Math.PI * 2);
+    ctx.fillStyle = energy.core;
+    ctx.fill();
+  }
+
+  // 4. Heavy Bolted Corner Rivets if HEAVY_BOLTED
+  if (dna.rivetDensity === "HEAVY_BOLTED" && kind !== "SANDBAG_WALL") {
+    drawCornerRivets(ctx, 6 * u, 6 * u, w - 12 * u, h - 12 * u, 4 * u, 2.3 * u);
+  }
+
+  ctx.restore();
 }
 
 /**
@@ -1689,13 +2071,23 @@ export function drawLeonardoBuildingTurret(
   kind: BuildingKind,
   w: number,
   h: number,
-  angleIndex = 0
+  angleIndex = 0,
+  variantOverride?: VectorVariantProposal
 ): void {
   if (kind !== "GUARD_TOWER" && kind !== "SAM_SITE") {
     return;
   }
 
+  const activeVariant = variantOverride ?? getActiveBuildingVariant(kind);
+  const dna = activeVariant.dna;
+  const isCustomVariant = activeVariant.variantId !== "v1_classic_mk1";
+  const bScale = dna.barrelLengthScale;
   const fSpec = FACTIONS[faction];
+  const energy = resolveEnergyHueColors(
+    dna.energyCoreHue,
+    fSpec.primaryColor,
+    fSpec.secondaryColor
+  );
   const minDim = Math.min(w, h);
   const u = minDim / 64;
   const cx = w * 0.5;
@@ -1713,23 +2105,23 @@ export function drawLeonardoBuildingTurret(
     ctx.beginPath();
     ctx.arc(shadowVec.x, shadowVec.y, minDim * 0.22, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillRect(-5.5 * u + shadowVec.x, -h * 0.44 + shadowVec.y, 11 * u, h * 0.36);
+    ctx.fillRect(-5.5 * u + shadowVec.x, -h * 0.44 * bScale + shadowVec.y, 11 * u, h * 0.36 * bScale);
 
     // 2. Twin Rotary 30mm Vulcan Cannon Barrels & Cooling Jackets (-Y is aim vector)
     for (const bx of [-5.2 * u, 2.0 * u]) {
       // Barrel thermal cooling jacket
       ctx.fillStyle = "#475569";
-      ctx.fillRect(bx - 0.6 * u, -h * 0.32, 4.4 * u, h * 0.18);
+      ctx.fillRect(bx - 0.6 * u, -h * 0.32 * bScale, 4.4 * u, h * 0.18 * bScale);
       // Multi-barrel rotary cluster
       ctx.fillStyle = "#e2e8f0";
-      ctx.fillRect(bx, -h * 0.44, 3.2 * u, h * 0.36);
+      ctx.fillRect(bx, -h * 0.44 * bScale, 3.2 * u, h * 0.36 * bScale);
       // Heavy muzzle flash suppressor
-      ctx.fillStyle = "#94a3b8";
-      ctx.fillRect(bx - 0.5 * u, -h * 0.46, 4.2 * u, 3.2 * u);
+      ctx.fillStyle = isCustomVariant ? energy.core : "#94a3b8";
+      ctx.fillRect(bx - 0.5 * u, -h * 0.46 * bScale, 4.2 * u, 3.2 * u);
     }
 
     // 3. Armored Gunhouse Dome (Shaded along fixed World NW-SE sun axis)
-    const domeR = minDim * 0.22;
+    const domeR = minDim * 0.22 * dna.hullWidthScale;
     ctx.beginPath();
     ctx.arc(0, 0, domeR, 0, Math.PI * 2);
     ctx.fillStyle = createWorldSunLinearGradient(
@@ -1745,10 +2137,17 @@ export function drawLeonardoBuildingTurret(
     ctx.stroke();
 
     // Beveled armored mantlet plate
-    traceChamferedRect(ctx, -7 * u, -8 * u, 14 * u, 13 * u, 3 * u);
+    traceChamferedRect(
+      ctx,
+      -7 * u * dna.hullWidthScale,
+      -8 * u,
+      14 * u * dna.hullWidthScale,
+      13 * u,
+      3 * u * dna.armorChamferScale
+    );
     ctx.fillStyle = fSpec.secondaryColor;
     ctx.fill();
-    ctx.strokeStyle = fSpec.primaryColor;
+    ctx.strokeStyle = isCustomVariant ? energy.core : fSpec.primaryColor;
     ctx.lineWidth = 1.2 * u;
     ctx.stroke();
 
@@ -1759,7 +2158,7 @@ export function drawLeonardoBuildingTurret(
     ctx.fill();
     ctx.beginPath();
     ctx.arc(0, 1.5 * u, 2.6 * u, 0, Math.PI * 2);
-    ctx.fillStyle = "#38bdf8";
+    ctx.fillStyle = isCustomVariant ? energy.core : "#38bdf8";
     ctx.fill();
 
     // 4. Fixed World-Space NW Specular Rim Highlight
@@ -1781,15 +2180,22 @@ export function drawLeonardoBuildingTurret(
     const tubeX = [-9 * u, -3 * u, 3 * u, 9 * u];
     for (const tx of tubeX) {
       ctx.fillStyle = "#f8fafc";
-      ctx.fillRect(tx - 1.7 * u, -17.5 * u, 3.4 * u, 9 * u);
+      ctx.fillRect(tx - 1.7 * u, -17.5 * u * bScale, 3.4 * u, 9 * u * bScale);
       ctx.beginPath();
-      ctx.arc(tx, -17.5 * u, 1.9 * u, 0, Math.PI * 2);
-      ctx.fillStyle = "#ef4444";
+      ctx.arc(tx, -17.5 * u * bScale, 1.9 * u, 0, Math.PI * 2);
+      ctx.fillStyle = isCustomVariant ? energy.core : "#ef4444";
       ctx.fill();
     }
 
     // 3. Quad Surface-to-Air Missile Launcher Box (Shaded along fixed World NW-SE sun axis)
-    traceChamferedRect(ctx, -14 * u, -12 * u, 28 * u, 24 * u, 4 * u);
+    traceChamferedRect(
+      ctx,
+      -14 * u * dna.hullWidthScale,
+      -12 * u,
+      28 * u * dna.hullWidthScale,
+      24 * u,
+      4 * u * dna.armorChamferScale
+    );
     ctx.fillStyle = createWorldSunLinearGradient(
       ctx,
       radians,
@@ -1798,7 +2204,7 @@ export function drawLeonardoBuildingTurret(
       fSpec.secondaryColor
     );
     ctx.fill();
-    ctx.strokeStyle = "#cbd5e1";
+    ctx.strokeStyle = isCustomVariant ? energy.core : "#cbd5e1";
     ctx.lineWidth = 1.6 * u;
     ctx.stroke();
 
@@ -1808,7 +2214,7 @@ export function drawLeonardoBuildingTurret(
     drawVentLouvers(ctx, -10 * u, 5 * u, 20 * u, 5 * u, 3);
 
     // Side-mounted target-tracking radar dish pod
-    ctx.fillStyle = "#38bdf8";
+    ctx.fillStyle = isCustomVariant ? energy.core : "#38bdf8";
     ctx.fillRect(-5 * u, -5 * u, 10 * u, 3 * u);
 
     // 4. Fixed World-Space NW Specular Rim Highlight
@@ -1843,12 +2249,44 @@ function drawDetailedTrack(
 }
 
 /**
- * 3. High-Precision Vector Unit Body Renderer (All 10 UnitKinds)
+ * 3. High-Precision Vector Unit Body Renderer (All 12 UnitKinds + Leonardo Variants)
  * Note: `ctx` is already translated to `(sizePx/2, sizePx/2)` and rotated by `radians = (angleIndex / 16) * Math.PI * 2`.
  * Lot 2: Uses `angleIndex` (`0..15`) so ground shadows and NW specular highlights remain locked to the
  * fixed world-space North-West sun, and each infantry soldier rotates on their own individual axis.
  */
 export function drawLeonardoUnitBody(
+  ctx: VectorDrawingContext,
+  faction: FactionId,
+  kind: UnitKind,
+  sizePx: number,
+  angleIndex = 0,
+  variantOverride?: VectorVariantProposal
+): void {
+  const activeVariant = variantOverride ?? getActiveUnitVariant(kind);
+  const isCustomVariant = activeVariant.variantId !== "v1_classic_mk1";
+  const isInfantry =
+    kind === "RIFLE_INFANTRY" || kind === "ROCKET_SOLDIER" || kind === "ENGINEER";
+
+  ctx.save();
+  if (isCustomVariant && !isInfantry) {
+    ctx.scale(activeVariant.dna.hullWidthScale, activeVariant.dna.hullLengthScale);
+  }
+  drawLeonardoUnitBodyBase(ctx, faction, kind, sizePx, angleIndex);
+  ctx.restore();
+
+  if (isCustomVariant) {
+    drawUnitBodyVariantEvolutionLayer(
+      ctx,
+      faction,
+      kind,
+      sizePx,
+      angleIndex,
+      activeVariant
+    );
+  }
+}
+
+function drawLeonardoUnitBodyBase(
   ctx: VectorDrawingContext,
   faction: FactionId,
   kind: UnitKind,
@@ -2430,11 +2868,41 @@ export function drawLeonardoUnitBody(
 }
 
 /**
- * 4. High-Precision Vector Unit Turret Renderer
+ * 4. High-Precision Vector Unit Turret Renderer (+ Leonardo Variants)
  * Note: `ctx` is already translated to `(sizePx/2, sizePx/2)` and rotated (`-Y` = aim direction).
  * Lot 2: Uses `angleIndex` (`0..15`) so the turret cast shadow and NW specular highlight stay locked to the world sun.
  */
 export function drawLeonardoUnitTurret(
+  ctx: VectorDrawingContext,
+  faction: FactionId,
+  kind: UnitKind,
+  sizePx: number,
+  angleIndex = 0,
+  variantOverride?: VectorVariantProposal
+): void {
+  const activeVariant = variantOverride ?? getActiveUnitVariant(kind);
+  const isCustomVariant = activeVariant.variantId !== "v1_classic_mk1";
+
+  ctx.save();
+  if (isCustomVariant) {
+    ctx.scale(1, activeVariant.dna.barrelLengthScale);
+  }
+  drawLeonardoUnitTurretBase(ctx, faction, kind, sizePx, angleIndex);
+  ctx.restore();
+
+  if (isCustomVariant) {
+    drawUnitTurretVariantEvolutionLayer(
+      ctx,
+      faction,
+      kind,
+      sizePx,
+      angleIndex,
+      activeVariant
+    );
+  }
+}
+
+function drawLeonardoUnitTurretBase(
   ctx: VectorDrawingContext,
   faction: FactionId,
   kind: UnitKind,
@@ -2703,3 +3171,366 @@ export function drawLeonardoExplosionFrame(
 
   ctx.restore();
 }
+
+function drawUnitBodyVariantEvolutionLayer(
+  ctx: VectorDrawingContext,
+  faction: FactionId,
+  kind: UnitKind,
+  sizePx: number,
+  angleIndex: number,
+  variant: VectorVariantProposal
+): void {
+  const fSpec = FACTIONS[faction];
+  const dna = variant.dna;
+  const u = sizePx / 64;
+  const radians = (angleIndex / 16) * Math.PI * 2;
+  const energy = resolveEnergyHueColors(
+    dna.energyCoreHue,
+    fSpec.primaryColor,
+    fSpec.secondaryColor
+  );
+
+  ctx.save();
+
+  if (kind === "RIFLE_INFANTRY" || kind === "ROCKET_SOLDIER" || kind === "ENGINEER") {
+    const squadOffsets: ReadonlyArray<{ x: number; y: number }> = [
+      { x: 0, y: -10 * u },
+      { x: -10 * u, y: 8 * u },
+      { x: 10 * u, y: 8 * u },
+    ];
+    ctx.rotate(-radians);
+    for (const pos of squadOffsets) {
+      ctx.save();
+      ctx.translate(pos.x, pos.y);
+      ctx.rotate(radians);
+
+      // Exo-Pauldron Energy Trim & Dorsal Power Cell
+      ctx.fillStyle = energy.core;
+      ctx.fillRect(-7.2 * u, -2.2 * u, 1.8 * u, 4.4 * u);
+      ctx.fillRect(5.4 * u, -2.2 * u, 1.8 * u, 4.4 * u);
+
+      // Glowing Tactical Visor Crest on Helmet
+      ctx.beginPath();
+      ctx.arc(0, -1.5 * u, 2.0 * u, 0, Math.PI * 2);
+      ctx.fillStyle = energy.core;
+      ctx.fill();
+
+      ctx.restore();
+    }
+    ctx.restore();
+    return;
+  }
+
+  // Vehicles: Armored Side Skirts, Glacis ERA / Dozer Edge & Dorsal Reactor Cell
+  if (dna.silhouetteProfile === "WIDENED_HEAVY" || dna.superstructureStyle === "REACTIVE_ERA_BLOCKS") {
+    // Up-armored side track/wheel skirts
+    ctx.fillStyle = "#1e293b";
+    ctx.strokeStyle = fSpec.primaryColor;
+    ctx.lineWidth = 1.2 * u;
+    ctx.fillRect(-19 * u, -14 * u, 3.2 * u, 28 * u);
+    ctx.strokeRect(-19 * u, -14 * u, 3.2 * u, 28 * u);
+    ctx.fillRect(15.8 * u, -14 * u, 3.2 * u, 28 * u);
+    ctx.strokeRect(15.8 * u, -14 * u, 3.2 * u, 28 * u);
+
+    // Front V-Shaped Ram / Dozer Bumper (-Y)
+    ctx.beginPath();
+    ctx.moveTo(-13 * u, -18 * u);
+    ctx.lineTo(0, -22.5 * u);
+    ctx.lineTo(13 * u, -18 * u);
+    ctx.lineTo(11 * u, -15.5 * u);
+    ctx.lineTo(0, -19 * u);
+    ctx.lineTo(-11 * u, -15.5 * u);
+    ctx.closePath();
+    ctx.fillStyle = fSpec.primaryColor;
+    ctx.fill();
+    ctx.strokeStyle = "#0f172a";
+    ctx.lineWidth = 1.2 * u;
+    ctx.stroke();
+  }
+
+  if (dna.hazardStripeMode === "DOUBLE_CHEVRON" || dna.hazardStripeMode === "PERIMETER_WARNING") {
+    drawHazardStripes(ctx, -10 * u, 13 * u, 20 * u, 3.5 * u, 3 * u);
+  }
+
+  if (
+    dna.superstructureStyle === "DUAL_REACTOR" ||
+    dna.superstructureStyle === "CRYO_CONDUITS" ||
+    dna.energyCoreHue !== "FACTION"
+  ) {
+    // Glowing Rear Deck Energy Core Node (+Y)
+    ctx.beginPath();
+    ctx.arc(0, 10 * u, 3.8 * u, 0, Math.PI * 2);
+    ctx.fillStyle = "#090d16";
+    ctx.fill();
+    ctx.strokeStyle = energy.core;
+    ctx.lineWidth = 1.4 * u;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(0, 10 * u, 2.0 * u, 0, Math.PI * 2);
+    ctx.fillStyle = energy.core;
+    ctx.fill();
+  }
+
+  if (dna.superstructureStyle === "COMMAND_ANTENNA" || dna.superstructureStyle === "SOLAR_VANES") {
+    // Twin Rear Whip Antennas & Telemetry Pod
+    ctx.strokeStyle = energy.rim;
+    ctx.lineWidth = 1.2 * u;
+    ctx.beginPath();
+    ctx.moveTo(-10 * u, 12 * u);
+    ctx.lineTo(-13 * u, 20 * u);
+    ctx.moveTo(10 * u, 12 * u);
+    ctx.lineTo(13 * u, 20 * u);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+function drawUnitTurretVariantEvolutionLayer(
+  ctx: VectorDrawingContext,
+  faction: FactionId,
+  kind: UnitKind,
+  sizePx: number,
+  _angleIndex: number,
+  variant: VectorVariantProposal
+): void {
+  if (
+    kind !== "RECON_BUGGY" &&
+    kind !== "MEDIUM_TANK" &&
+    kind !== "ARTILLERY" &&
+    kind !== "MAMMOTH_TANK"
+  ) {
+    return;
+  }
+
+  const fSpec = FACTIONS[faction];
+  const dna = variant.dna;
+  const u = sizePx / 64;
+  const energy = resolveEnergyHueColors(
+    dna.energyCoreHue,
+    fSpec.primaryColor,
+    fSpec.secondaryColor
+  );
+
+  ctx.save();
+
+  if (dna.turretProfile === "COIL_OVERCHARGE") {
+    // Electromagnetic plasma accelerator rings along the main barrel(s)
+    ctx.strokeStyle = energy.core;
+    ctx.lineWidth = 1.6 * u;
+    for (const ry of [-16 * u, -20 * u, -24 * u]) {
+      ctx.beginPath();
+      ctx.moveTo(-5.5 * u, ry);
+      ctx.lineTo(5.5 * u, ry);
+      ctx.stroke();
+    }
+  } else if (dna.turretProfile === "ARMORED_MANTLET") {
+    // Heavy sloped cheek armor plates flanking the turret
+    ctx.fillStyle = fSpec.primaryColor;
+    ctx.strokeStyle = "#0f172a";
+    ctx.lineWidth = 1.2 * u;
+    ctx.fillRect(-12.5 * u, -7 * u, 3.2 * u, 13 * u);
+    ctx.strokeRect(-12.5 * u, -7 * u, 3.2 * u, 13 * u);
+    ctx.fillRect(9.3 * u, -7 * u, 3.2 * u, 13 * u);
+    ctx.strokeRect(9.3 * u, -7 * u, 3.2 * u, 13 * u);
+  } else if (dna.turretProfile === "FINNED_STABILIZER") {
+    // Swept rear turret counter-weight stabilizer fins
+    ctx.beginPath();
+    ctx.moveTo(-8 * u, 4 * u);
+    ctx.lineTo(-14 * u, 12 * u);
+    ctx.lineTo(-7 * u, 10 * u);
+    ctx.closePath();
+    ctx.moveTo(8 * u, 4 * u);
+    ctx.lineTo(14 * u, 12 * u);
+    ctx.lineTo(7 * u, 10 * u);
+    ctx.closePath();
+    ctx.fillStyle = fSpec.primaryColor;
+    ctx.fill();
+  }
+
+  // Glowing Roof Targeter Optic
+  ctx.beginPath();
+  ctx.arc(0, -2 * u, 2.3 * u, 0, Math.PI * 2);
+  ctx.fillStyle = energy.core;
+  ctx.fill();
+
+  ctx.restore();
+}
+
+/**
+ * 6. High-Precision Destructible Tree Renderer (Supports all 4 TreeKinds + Leonardo Variants)
+ */
+export function drawLeonardoTree(
+  ctx: VectorDrawingContext,
+  kind: TreeKind,
+  px: number,
+  py: number,
+  tileSizePx: number,
+  scale = 1.0,
+  frameNowMs = 0,
+  variantOverride?: VectorVariantProposal
+): void {
+  const activeVariant = variantOverride ?? getActiveTreeVariant(kind);
+  const dna = activeVariant.dna;
+  const isCustomVariant = activeVariant.variantId !== "v1_classic_mk1";
+  const cx = px + tileSizePx * 0.5;
+  const cy = py + tileSizePx * 0.5;
+  const u = tileSizePx / 32;
+  const effScale = scale * u;
+  const sway =
+    Math.sin(frameNowMs * 0.0022 + px * 0.04 + py * 0.03) * 1.2 * effScale;
+
+  ctx.save();
+
+  // Nursery sapling growth ring if young sapling
+  if (scale < 0.95) {
+    const growthRatio = Math.max(0.05, Math.min(1, (scale - 0.42) / (1.1 - 0.42)));
+    ctx.strokeStyle = "rgba(74, 222, 128, 0.45)";
+    ctx.lineWidth = 1.5 * u;
+    ctx.beginPath();
+    ctx.arc(
+      cx,
+      cy + 2 * u,
+      11 * effScale + 3 * u,
+      -Math.PI * 0.5,
+      -Math.PI * 0.5 + Math.PI * 2 * growthRatio
+    );
+    ctx.stroke();
+  }
+
+  // 1. Soft elliptical ground shadow
+  ctx.fillStyle = "rgba(8, 14, 10, 0.45)";
+  ctx.beginPath();
+  ctx.ellipse(
+    cx + 3 * effScale,
+    cy + 4 * effScale,
+    10 * effScale,
+    6 * effScale,
+    0,
+    0,
+    Math.PI * 2
+  );
+  ctx.fill();
+
+  // 2. Trunk
+  ctx.fillStyle = isCustomVariant
+    ? dna.treeTrunkHex
+    : kind === "TREE_CYPRESS"
+      ? "#4a3728"
+      : "#5c4028";
+  ctx.fillRect(cx - 2.2 * effScale, cy - 2 * effScale, 4.4 * effScale, 8 * effScale);
+
+  const colDark = isCustomVariant ? dna.treeSecondaryFoliageHex : "#14532d";
+  const colMid = isCustomVariant ? dna.treePrimaryFoliageHex : "#166534";
+  const colLight = isCustomVariant ? dna.treeAccentFoliageHex : "#22c55e";
+
+  // 3. Species-specific foliage canopy
+  if (kind === "TREE_PINE") {
+    const tiers = [
+      { yOff: 3, w: 12, h: 11, color: colDark },
+      { yOff: -2, w: 9.5, h: 10, color: colMid },
+      { yOff: -7, w: 6.5, h: 8.5, color: colLight },
+    ];
+    if (dna.treeCanopyStyle === "DENSE_MULTI_TIER") {
+      tiers.push({ yOff: -11, w: 4.5, h: 6.5, color: colLight });
+    }
+    for (const tier of tiers) {
+      ctx.beginPath();
+      ctx.moveTo(cx + sway, cy + (tier.yOff - tier.h) * effScale);
+      ctx.lineTo(cx + tier.w * effScale + sway * 0.5, cy + tier.yOff * effScale);
+      ctx.lineTo(cx - tier.w * effScale + sway * 0.5, cy + tier.yOff * effScale);
+      ctx.closePath();
+      ctx.fillStyle = tier.color;
+      ctx.fill();
+      ctx.strokeStyle = "#052e16";
+      ctx.lineWidth = 1 * u;
+      ctx.stroke();
+    }
+  } else if (kind === "TREE_PALM") {
+    const crownX = cx + sway;
+    const crownY = cy - 4 * effScale;
+    const frondCount = dna.treeCanopyStyle === "DENSE_MULTI_TIER" ? 8 : 6;
+    ctx.strokeStyle = colMid;
+    ctx.lineWidth = 2.6 * effScale;
+    ctx.lineCap = "round";
+    for (let i = 0; i < frondCount; i++) {
+      const ang = (i / frondCount) * Math.PI * 2 + 0.3;
+      const tipX = crownX + Math.cos(ang) * 11.5 * effScale;
+      const tipY = crownY + Math.sin(ang) * 9.5 * effScale;
+      ctx.beginPath();
+      ctx.moveTo(crownX, crownY);
+      ctx.quadraticCurveTo(
+        crownX + Math.cos(ang) * 6 * effScale,
+        crownY + Math.sin(ang) * 4 * effScale - 2 * effScale,
+        tipX,
+        tipY
+      );
+      ctx.stroke();
+    }
+    ctx.beginPath();
+    ctx.arc(crownX, crownY, 3.2 * effScale, 0, Math.PI * 2);
+    ctx.fillStyle = colLight;
+    ctx.fill();
+  } else if (kind === "TREE_CYPRESS") {
+    const tiers: Array<[number, number, number, string]> = [
+      [0, -1, 8.5, colDark],
+      [-4, 1, 6.2, colMid],
+      [4, 1, 6.2, colMid],
+      [0, -6.5, 6.5, colMid],
+      [0, -10.5, 4.2, colLight],
+    ];
+    for (const [lx, ly, lr, col] of tiers) {
+      ctx.beginPath();
+      ctx.ellipse(
+        cx + lx * effScale + sway * 0.5,
+        cy + ly * effScale,
+        lr * effScale,
+        lr * 1.15 * effScale,
+        0,
+        0,
+        Math.PI * 2
+      );
+      ctx.fillStyle = col;
+      ctx.fill();
+    }
+    ctx.strokeStyle = colLight;
+    ctx.lineWidth = Math.max(0.9, 1.1 * effScale);
+    ctx.beginPath();
+    ctx.moveTo(cx - 5 * effScale + sway * 0.5, cy + 1 * effScale);
+    ctx.lineTo(cx - 5 * effScale + sway * 0.7, cy + 5.5 * effScale);
+    ctx.moveTo(cx + 5 * effScale + sway * 0.5, cy + 1 * effScale);
+    ctx.lineTo(cx + 5 * effScale + sway * 0.7, cy + 5.5 * effScale);
+    ctx.stroke();
+  } else {
+    // TREE_OAK
+    const lobes: Array<[number, number, number, string]> = [
+      [-5, 1, 7.5, colDark],
+      [5, 1, 7.5, colMid],
+      [0, -4, 8.5, colMid],
+      [-2.5, -2, 5.5, colLight],
+    ];
+    if (dna.treeCanopyStyle === "DENSE_MULTI_TIER") {
+      lobes.push([3.5, -5.5, 5.0, colLight]);
+    }
+    for (const [lx, ly, lr, col] of lobes) {
+      ctx.beginPath();
+      ctx.arc(cx + lx * effScale + sway * 0.6, cy + ly * effScale, lr * effScale, 0, Math.PI * 2);
+      ctx.fillStyle = col;
+      ctx.fill();
+    }
+  }
+
+  // Bioluminescent / Crystal spore nodes when CRYSTAL_MUTATED
+  if (dna.treeCanopyStyle === "CRYSTAL_MUTATED") {
+    ctx.fillStyle = "#5eead4";
+    ctx.beginPath();
+    ctx.arc(cx - 3.5 * effScale, cy - 3 * effScale, 1.8 * effScale, 0, Math.PI * 2);
+    ctx.arc(cx + 3.5 * effScale, cy - 1.5 * effScale, 1.6 * effScale, 0, Math.PI * 2);
+    ctx.arc(cx, cy - 7 * effScale, 2.0 * effScale, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.restore();
+}
+

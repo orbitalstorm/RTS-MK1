@@ -56,6 +56,10 @@ import {
   generateProceduralSpriteAtlasAsync,
   type ProceduralSpriteAtlas,
 } from "../../../renderer/generator/atlas-generator";
+import {
+  setActiveVectorVariantConfig,
+  type VectorVariantsState,
+} from "../../../shared/schemas/vector-variants";
 import { renderMinimapRadar } from "../../../renderer/minimap-renderer";
 import { BattlefieldVfxManager } from "../../../renderer/vfx-manager";
 import { renderTacticalWorld } from "../../../renderer/world-renderer";
@@ -306,24 +310,40 @@ export default function GameMatchPage() {
     }
   }, [mapSeed, playerId, atlas, zoomLevel]);
 
-  // 2. Generate Hybrid Vector/Bitmap OffscreenCanvas -> ImageBitmap Sprite Atlas in async chunks
+  // 2. Load active Vector Variants then generate Hybrid Vector/Bitmap OffscreenCanvas -> ImageBitmap Sprite Atlas
   useEffect(() => {
     let cancelled = false;
     let builtAtlas: ProceduralSpriteAtlas | null = null;
 
-    void generateProceduralSpriteAtlasAsync((pct, label) => {
-      if (!cancelled) {
-        setAtlasProgress(pct);
-        setAtlasStage(label);
+    const initAtlas = async () => {
+      try {
+        const res = await fetch("/api/vector-variants", { cache: "no-store" });
+        if (res.ok) {
+          const data = (await res.json()) as { state?: VectorVariantsState };
+          if (data.state) {
+            setActiveVectorVariantConfig(data.state);
+          }
+        }
+      } catch {
+        // Fallback to built-in V1 variants if offline
       }
-    }).then((result) => {
+
+      const result = await generateProceduralSpriteAtlasAsync((pct, label) => {
+        if (!cancelled) {
+          setAtlasProgress(pct);
+          setAtlasStage(label);
+        }
+      });
+
       if (cancelled) {
         result.dispose();
         return;
       }
       builtAtlas = result;
       setAtlas(result);
-    });
+    };
+
+    void initAtlas();
 
     return () => {
       cancelled = true;

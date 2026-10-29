@@ -11,12 +11,26 @@ import {
 import { RtsSimulation } from "../src/engine/simulation";
 import { GET as getMapsApiRoute } from "../src/app/api/maps/route";
 import {
+  GET as getVectorVariantsApiRoute,
+  POST as postVectorVariantsApiRoute,
+} from "../src/app/api/vector-variants/route";
+import {
   deleteCustomMapById,
   getCustomMapById,
+  getVectorVariantsState,
   listCustomMaps,
   listRecentMatchSeedLogs,
+  mutateVectorVariantsState,
   upsertCustomMap,
 } from "../src/server/db";
+import {
+  VECTOR_ASSET_ELEMENTS,
+  getActiveBuildingVariant,
+  getActiveTerrainVariantByNumericKind,
+  getActiveTreeVariant,
+  getActiveUnitVariant,
+  getActiveVectorConfigSignature,
+} from "../src/shared/schemas/vector-variants";
 import { LobbyManager } from "../src/server/lobby-manager";
 import {
   createStarterCustomMapFromSeed,
@@ -331,7 +345,7 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
   });
 
   it("v1.2.0 — supports Game Juice camera shake, shortest-arc 16-angle interpolation, and 2x Hi-DPI sprite scale", () => {
-    expect(APP_VERSION).toBe("1.14.0");
+    expect(APP_VERSION).toBe("1.15.0");
     expect(SPRITE_ATLAS_SCALE).toBe(2);
 
     // Zero trauma produces zero offset
@@ -1548,7 +1562,7 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
   });
 
   it("v1.11.0 — enlarges global UI typography (zero text-[8px..11px] classes) and makes construction grid icons fill 100% of each tile", () => {
-    expect(APP_VERSION).toBe("1.14.0");
+    expect(APP_VERSION).toBe("1.15.0");
 
     const srcRoot = path.join(process.cwd(), "src");
     const collectSourceFiles = (dir: string): string[] => {
@@ -1954,5 +1968,99 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
     expect(portalSrc).toContain('data-testid="refresh-maps-button"');
     expect(portalSrc).toContain("/api/maps");
     expect(portalSrc).toContain("customMapId: selectedMapId");
+  });
+
+  it("v1.15.0 (ORB-23) — synchronizes Leonardo vector graphics variants across all 41 game elements (buildings, units, terrain tiles, trees) and supports unlimited new proposals", async () => {
+    expect(APP_VERSION).toBe("1.15.0");
+    expect(VECTOR_ASSET_ELEMENTS.length).toBe(41);
+
+    // 1. Reset to default V1 and check initial state
+    const resetRes = mutateVectorVariantsState({
+      action: "RESET_TO_DEFAULT",
+      targetScope: "ALL",
+    });
+    expect(resetRes.summary.totalVariants).toBeGreaterThanOrEqual(164);
+    expect(getActiveBuildingVariant("CONSTRUCTION_YARD").versionNumber).toBe(1);
+
+    // 2. Select custom variants via POST /api/vector-variants
+    const sigBefore = getActiveVectorConfigSignature();
+    const saveRes = await postVectorVariantsApiRoute(
+      new Request("http://localhost:4300/api/vector-variants", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "SAVE_SELECTIONS",
+          activeVariants: {
+            "BUILDING:CONSTRUCTION_YARD": "v4_tactical_vanguard",
+            "BUILDING:WAR_FACTORY": "v2_heavy_bastion",
+            "UNIT:MAMMOTH_TANK": "v3_experimental_apex",
+            "TERRAIN:GRASS": "v2_heavy_bastion",
+            "TREE:TREE_PINE": "v4_tactical_vanguard",
+          },
+        }),
+      })
+    );
+    expect(saveRes.status).toBe(200);
+    const saveJson = (await saveRes.json()) as {
+      ok: boolean;
+      summary: { modifiedAssetsCount: number };
+    };
+    expect(saveJson.ok).toBe(true);
+    expect(saveJson.summary.modifiedAssetsCount).toBe(5);
+    expect(getActiveBuildingVariant("CONSTRUCTION_YARD").versionNumber).toBe(4);
+    expect(getActiveBuildingVariant("WAR_FACTORY").versionNumber).toBe(2);
+    expect(getActiveUnitVariant("MAMMOTH_TANK").versionNumber).toBe(3);
+    expect(
+      getActiveTerrainVariantByNumericKind(TERRAIN_KIND.GRASS).versionNumber
+    ).toBe(2);
+    expect(getActiveTreeVariant("TREE_PINE").versionNumber).toBe(4);
+    expect(getActiveVectorConfigSignature()).not.toBe(sigBefore);
+
+    // 3. Request new proposals from Leonardo repeatedly and verify strictly increasing version numbers (V5, V6...)
+    const propRes = await postVectorVariantsApiRoute(
+      new Request("http://localhost:4300/api/vector-variants", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "PROPOSE_NEW_VARIANTS",
+          targetScope: "ASSET",
+          assetKey: "UNIT:MAMMOTH_TANK",
+          count: 2,
+          directivePrompt: "Double canon railgun plasma et blindage réactif",
+          styleArchetype: "APEX_PLASMA",
+          autoSelectNewest: true,
+        }),
+      })
+    );
+    expect(propRes.status).toBe(200);
+    const propJson = (await propRes.json()) as {
+      ok: boolean;
+      newlyCreated: Array<{ versionNumber: number; variantId: string }>;
+    };
+    expect(propJson.ok).toBe(true);
+    expect(propJson.newlyCreated.length).toBe(2);
+    expect(propJson.newlyCreated[0]?.versionNumber).toBe(5);
+    expect(propJson.newlyCreated[1]?.versionNumber).toBe(6);
+    const v6Id = propJson.newlyCreated[1]!.variantId;
+    expect(getActiveUnitVariant("MAMMOTH_TANK").versionNumber).toBe(6);
+
+    // 4. Verify GET /api/vector-variants returns persisted state
+    const getRes = await getVectorVariantsApiRoute();
+    expect(getRes.status).toBe(200);
+    const getJson = (await getRes.json()) as {
+      ok: boolean;
+      state: { activeVariants: Record<string, string> };
+    };
+    expect(getJson.ok).toBe(true);
+    expect(getJson.state.activeVariants["UNIT:MAMMOTH_TANK"]).toBe(v6Id);
+    expect(getVectorVariantsState().activeVariants["UNIT:MAMMOTH_TANK"]).toBe(
+      v6Id
+    );
+
+    // Reset back to V1 defaults after test
+    mutateVectorVariantsState({
+      action: "RESET_TO_DEFAULT",
+      targetScope: "ALL",
+    });
   });
 });

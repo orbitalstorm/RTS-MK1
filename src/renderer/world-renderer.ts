@@ -14,8 +14,14 @@ import {
   interpolateAngleIndex16,
   type BuildingKind,
   type FactionId,
+  type TreeKind,
   type UnitKind,
 } from "../shared/constants";
+import {
+  getActiveTerrainVariantByNumericKind,
+  getActiveVectorConfigSignature,
+} from "../shared/schemas/vector-variants";
+import { drawLeonardoTree } from "./generator/leonardo-vector-art";
 import type {
   EntityState,
   PlayerEconomyDelta,
@@ -151,11 +157,22 @@ function getTerrainVisualPriority(kind: number): number {
 
 function getStratumPalette(kind: number): StratumPalette {
   const norm = normalizeBaseTerrainKind(kind);
-  return STRATUM_PALETTES[norm] ?? STRATUM_PALETTES[TERRAIN_KIND.DIRT]!;
+  const base = STRATUM_PALETTES[norm] ?? STRATUM_PALETTES[TERRAIN_KIND.DIRT]!;
+  const activeVariant = getActiveTerrainVariantByNumericKind(norm);
+  if (activeVariant.variantId === "v1_classic_mk1") {
+    return base;
+  }
+  return {
+    fill: activeVariant.dna.terrainFillHex,
+    lipShadow: activeVariant.dna.terrainLipShadowHex,
+    lipHighlight: activeVariant.dna.terrainLipHighlightHex,
+    cornerRadiusRatio: base.cornerRadiusRatio,
+    thicknessPx: base.thicknessPx,
+  };
 }
 
 function computeBaseTerrainSignature(grid: readonly number[]): number {
-  let hash = 2166136261;
+  let hash = 2166136261 ^ getActiveVectorConfigSignature();
   for (let i = 0; i < grid.length; i++) {
     const baseKind = normalizeBaseTerrainKind(grid[i] ?? 0);
     hash ^= baseKind;
@@ -2557,124 +2574,13 @@ function drawDestructibleTreeEntity(
   s: number,
   frameNowMs: number
 ): void {
-  const scale = ent.treeScale ?? 1;
-  const cx = px + s * 0.5;
-  const cy = py + s * 0.5;
-  const sway = Math.sin(frameNowMs * 0.0022 + ent.x * 1.3 + ent.y * 0.9) * 1.2 * scale;
-
-  ctx.save();
-
-  // If this tree is a growing sapling (planted by a Forestry Truck), draw a subtle nursery growth ring
-  if (scale < 0.95) {
-    const growthRatio = Math.max(0.05, Math.min(1, (scale - 0.42) / (1.1 - 0.42)));
-    ctx.strokeStyle = "rgba(74, 222, 128, 0.45)";
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.arc(cx, cy + 2, 11 * scale + 3, -Math.PI * 0.5, -Math.PI * 0.5 + Math.PI * 2 * growthRatio);
-    ctx.stroke();
-  }
-
-  // 1. Soft elliptical ground shadow
-  ctx.fillStyle = "rgba(8, 14, 10, 0.45)";
-  ctx.beginPath();
-  ctx.ellipse(cx + 3 * scale, cy + 4 * scale, 10 * scale, 6 * scale, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  // 2. Trunk
-  ctx.fillStyle = ent.kind === "TREE_CYPRESS" ? "#4a3728" : "#5c4028";
-  ctx.fillRect(cx - 2.2 * scale, cy - 2 * scale, 4.4 * scale, 8 * scale);
-
-  // 3. Species-specific foliage canopy
-  if (ent.kind === "TREE_PINE") {
-    const tiers = [
-      { yOff: 3, w: 12, h: 11, color: "#14532d" },
-      { yOff: -2, w: 9.5, h: 10, color: "#166534" },
-      { yOff: -7, w: 6.5, h: 8.5, color: "#22c55e" },
-    ];
-    for (const tier of tiers) {
-      ctx.beginPath();
-      ctx.moveTo(cx + sway, cy + (tier.yOff - tier.h) * scale);
-      ctx.lineTo(cx + tier.w * scale + sway * 0.5, cy + tier.yOff * scale);
-      ctx.lineTo(cx - tier.w * scale + sway * 0.5, cy + tier.yOff * scale);
-      ctx.closePath();
-      ctx.fillStyle = tier.color;
-      ctx.fill();
-      ctx.strokeStyle = "#052e16";
-      ctx.lineWidth = 1;
-      ctx.stroke();
-    }
-  } else if (ent.kind === "TREE_PALM") {
-    // Arid curved palm fronds radiating from crown
-    const crownX = cx + sway;
-    const crownY = cy - 4 * scale;
-    ctx.strokeStyle = "#15803d";
-    ctx.lineWidth = 2.6 * scale;
-    ctx.lineCap = "round";
-    for (let i = 0; i < 6; i++) {
-      const ang = (i / 6) * Math.PI * 2 + 0.3;
-      const tipX = crownX + Math.cos(ang) * 11.5 * scale;
-      const tipY = crownY + Math.sin(ang) * 9.5 * scale;
-      ctx.beginPath();
-      ctx.moveTo(crownX, crownY);
-      ctx.quadraticCurveTo(
-        crownX + Math.cos(ang) * 6 * scale,
-        crownY + Math.sin(ang) * 4 * scale - 2 * scale,
-        tipX,
-        tipY
-      );
-      ctx.stroke();
-    }
-    ctx.beginPath();
-    ctx.arc(crownX, crownY, 3 * scale, 0, Math.PI * 2);
-    ctx.fillStyle = "#4ade80";
-    ctx.fill();
-  } else if (ent.kind === "TREE_CYPRESS") {
-    // Swamp Cypress (Cyprès des Marais): tall tapered marsh canopy with hanging moss fronds
-    const tiers: Array<[number, number, number, string]> = [
-      [0, -1, 8.5, "#1e3f2b"],
-      [-4, 1, 6.2, "#285438"],
-      [4, 1, 6.2, "#285438"],
-      [0, -6.5, 6.5, "#346b47"],
-      [0, -10.5, 4.2, "#4ade80"],
-    ];
-    for (const [lx, ly, lr, col] of tiers) {
-      ctx.beginPath();
-      ctx.ellipse(
-        cx + lx * scale + sway * 0.5,
-        cy + ly * scale,
-        lr * scale,
-        lr * 1.15 * scale,
-        0,
-        0,
-        Math.PI * 2
-      );
-      ctx.fillStyle = col;
-      ctx.fill();
-    }
-    // Hanging Spanish moss strands
-    ctx.strokeStyle = "#86efac";
-    ctx.lineWidth = Math.max(0.9, 1.1 * scale);
-    ctx.beginPath();
-    ctx.moveTo(cx - 5 * scale + sway * 0.5, cy + 1 * scale);
-    ctx.lineTo(cx - 5 * scale + sway * 0.7, cy + 5.5 * scale);
-    ctx.moveTo(cx + 5 * scale + sway * 0.5, cy + 1 * scale);
-    ctx.lineTo(cx + 5 * scale + sway * 0.7, cy + 5.5 * scale);
-    ctx.stroke();
-  } else {
-    // TREE_OAK: lush multi-lobed broadleaf canopy
-    const lobes: Array<[number, number, number, string]> = [
-      [-5, 1, 7.5, "#14532d"],
-      [5, 1, 7.5, "#166534"],
-      [0, -4, 8.5, "#15803d"],
-      [-2.5, -2, 5.5, "#22c55e"],
-    ];
-    for (const [lx, ly, lr, col] of lobes) {
-      ctx.beginPath();
-      ctx.arc(cx + lx * scale + sway * 0.6, cy + ly * scale, lr * scale, 0, Math.PI * 2);
-      ctx.fillStyle = col;
-      ctx.fill();
-    }
-  }
-
-  ctx.restore();
+  drawLeonardoTree(
+    ctx,
+    ent.kind as TreeKind,
+    px,
+    py,
+    s,
+    ent.treeScale ?? 1,
+    frameNowMs
+  );
 }

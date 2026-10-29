@@ -2,11 +2,16 @@
 
 import React from "react";
 import {
+  BUILDINGS,
   FACTIONS,
   type BuildingKind,
   type FactionId,
   type UnitKind,
 } from "../../shared/constants";
+import {
+  getActiveVectorVariant,
+  type VectorVariantProposal,
+} from "../../shared/schemas/vector-variants";
 
 export const FactionVectorEmblem = React.memo(function FactionVectorEmblem({
   faction,
@@ -268,18 +273,25 @@ export const ProductionItemVectorIcon = React.memo(function ProductionItemVector
   itemKind,
   faction,
   className = "h-full w-full",
+  variantOverride,
 }: {
   itemKind: BuildingKind | UnitKind;
   faction: FactionId;
   className?: string;
+  variantOverride?: VectorVariantProposal;
 }): React.JSX.Element {
   const fSpec = FACTIONS[faction];
+  const isBuilding = Object.prototype.hasOwnProperty.call(BUILDINGS, itemKind);
+  const assetKey = `${isBuilding ? "BUILDING" : "UNIT"}:${itemKind}`;
+  const activeVariant = variantOverride ?? getActiveVectorVariant(assetKey);
+  const isCustomVariant = activeVariant.variantId !== "v1_classic_mk1";
   const pColor = fSpec.primaryColor;
   const sColor = fSpec.secondaryColor;
-  const hullGradId = `hull-${faction}-${itemKind}`;
-  const shadeGradId = `shade-${faction}-${itemKind}`;
-  const glowGradId = `glow-${faction}-${itemKind}`;
-  const bgGradId = `bg-${faction}-${itemKind}`;
+  const uid = `${faction}-${itemKind}-${activeVariant.variantId}`;
+  const hullGradId = `hull-${uid}`;
+  const shadeGradId = `shade-${uid}`;
+  const glowGradId = `glow-${uid}`;
+  const bgGradId = `bg-${uid}`;
 
   return (
     <svg
@@ -1078,6 +1090,43 @@ export const ProductionItemVectorIcon = React.memo(function ProductionItemVector
           strokeWidth="1.1"
           opacity="0.38"
         />
+        {isCustomVariant && (
+          <>
+            <polygon
+              points="46,6 58,6 58,15 46,15"
+              fill="#090d16"
+              stroke={pColor}
+              strokeWidth="1"
+            />
+            <circle
+              cx="52"
+              cy="10.5"
+              r="2.2"
+              fill={
+                activeVariant.dna.energyCoreHue === "CYAN_PLASMA"
+                  ? "#38bdf8"
+                  : activeVariant.dna.energyCoreHue === "EMERALD_TIBERIUM"
+                    ? "#10b981"
+                    : activeVariant.dna.energyCoreHue === "CRIMSON_LASER"
+                      ? "#ef4444"
+                      : activeVariant.dna.energyCoreHue === "VIOLET_QUANTUM"
+                        ? "#a855f7"
+                        : "#facc15"
+              }
+            />
+            <polyline
+              points="6,50 14,58 58,58"
+              fill="none"
+              stroke={pColor}
+              strokeWidth="1.5"
+              strokeDasharray={
+                activeVariant.dna.hazardStripeMode === "DOUBLE_CHEVRON"
+                  ? "3 2"
+                  : undefined
+              }
+            />
+          </>
+        )}
       </g>
     </svg>
   );

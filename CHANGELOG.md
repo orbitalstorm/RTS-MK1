@@ -2,6 +2,14 @@
 
 All notable changes to **RTS-MK1** (`https://rts-mk1.orbital8.cloud`) follow strict non-reusable `v1.x.y` versioning.
 
+## [v1.15.0] — 2026-10-29
+
+### Added & Changed
+- **Leonardo Vector Graphics Evolution System & Cross-Container Synchronization (`src/shared/schemas/vector-variants.ts`, `src/server/db/index.ts`, `src/app/api/vector-variants/route.ts`, `src/renderer/generator/leonardo-vector-art.ts`, `src/renderer/world-renderer.ts`, `src/components/hud/leonardo-icons.tsx`, `src/app/game/[lobbyId]/page.tsx`, `src/components/lobby/portal-command-center.tsx`) — ORB-23**:
+  - Added the complete Zod-validated Vector Variants schema (`VectorVariantsStateSchema`, `VectorVariantProposalSchema`, `VectorVariantDnaSchema`, `VectorVariantsMutationRequestSchema`) covering all **41 game elements** (`15 BUILDING`, `12 UNIT`, `10 TERRAIN`, `4 TREE`).
+  - Added SQLite (`vector_variants_state`) and shared volume file (`/app/data/vector-variants/state.json`) persistence + `GET/POST /api/vector-variants` API endpoint so variant selections and new Leonardo proposals made in **DevTools (`https://devtools-rts-mk1.orbital8.cloud/vector-lab`)** are immediately applied in the live game (`https://rts-mk1.orbital8.cloud`).
+  - Updated `drawLeonardoBuilding`, `drawLeonardoBuildingTurret`, `drawLeonardoUnitBody`, `drawLeonardoUnitTurret`, `drawLeonardoTerrainTile`, `drawLeonardoTree`, `world-renderer.ts`, and `ProductionItemVectorIcon` to render active vector variants and invalidate terrain/sprite caches when variants evolve.
+
 ## [v1.14.0] — 2026-10-29
 
 ### Added & Changed
