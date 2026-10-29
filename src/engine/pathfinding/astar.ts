@@ -108,8 +108,15 @@ export class SpatialReservationGrid {
     this.buildingBlocked = new Uint8Array(width * height);
     this.terrainBlocked = new Uint8Array(width * height);
     for (let i = 0; i < terrainGrid.length; i++) {
-      this.terrainBlocked[i] = terrainGrid[i] === 2 ? 1 : 0;
+      const tk = terrainGrid[i];
+      this.terrainBlocked[i] = tk === 2 || tk === 7 ? 1 : 0;
     }
+  }
+
+  public updateTerrainTile(tileX: number, tileY: number, terrainKind: number): void {
+    if (!this.inBounds(tileX, tileY)) return;
+    const idx = this.index(tileX, tileY);
+    this.terrainBlocked[idx] = terrainKind === 2 || terrainKind === 7 ? 1 : 0;
   }
 
   public index(x: number, y: number): number {

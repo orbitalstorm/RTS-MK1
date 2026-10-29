@@ -2,6 +2,19 @@
 
 All notable changes to **RTS-MK1** (`https://rts-mk1.orbital8.cloud`) follow strict non-reusable `v1.x.y` versioning.
 
+## [v1.13.0] — 2026-10-29
+
+### Added & Changed
+- **New Indestructible Terrain Biomes (`TERRAIN_KIND.WATER = 7`, `TERRAIN_KIND.SAND = 8`, `TERRAIN_KIND.SWAMP = 9`) (`src/shared/constants/index.ts`, `src/shared/schemas/deltas.ts`, `src/shared/map-generator.ts`, `src/engine/pathfinding/astar.ts`, `src/engine/simulation.ts`, `src/renderer/world-renderer.ts`, `src/renderer/minimap-renderer.ts`)**:
+  - **Eau (`TERRAIN_KIND.WATER = 7`)**: Impassable by ground units (`isPassableTerrainKind(WATER) === false`, blocked in `SpatialReservationGrid`), non-buildable (`canPlaceBuildingOnTerrainTile` returns `false`), and strictly non-degradable when hit by projectile explosions (`getTerrainLayerThickness(WATER) === Infinity`, `degradeTerrainLayer(WATER) === WATER`, skipped in `degradeTerrainAtImpact`).
+  - **Sable (`TERRAIN_KIND.SAND = 8`)**: Strictly non-degradable when hit by projectile explosions (`getTerrainLayerThickness(SAND) === Infinity`, `degradeTerrainLayer(SAND) === SAND`), applies a `×0.8` movement speed modifier (`getTerrainSpeedMultiplier(SAND) === 0.8`) to ground units in `stepUnitMovement()`.
+  - **Marais (`TERRAIN_KIND.SWAMP = 9`)**: Strictly non-degradable when hit by projectile explosions (`getTerrainLayerThickness(SWAMP) === Infinity`, `degradeTerrainLayer(SWAMP) === SWAMP`), applies a `×0.8` movement speed modifier (`getTerrainSpeedMultiplier(SWAMP) === 0.8`), and can be progressively dried into Dirt (`TERRAIN_KIND.DIRT = 0`) over `SWAMP_DRYING_TICKS = 60` ticks (`3s`) by the new **Soufflerie Mobile (`BLOWER_TRUCK`)** engineering vehicle.
+- **Multi-Species Destructible Trees, Sapling Growth System & Camion Forestier (`FORESTRY_TRUCK`) (`src/shared/constants/index.ts`, `src/shared/map-generator.ts`, `src/engine/ecs/types.ts`, `src/engine/simulation.ts`, `src/renderer/world-renderer.ts`, `src/renderer/generator/leonardo-vector-art.ts`, `src/components/hud/leonardo-icons.tsx`)**:
+  - **Root-Cause Fix for Tree Visibility**: Fixed `world-renderer.ts` and `minimap-renderer.ts` so `TREE` entities remain visible on all explored tiles (`exploredCells`) instead of vanishing outside active unit line-of-sight, increased `CONSTRUCTION_YARD.sightRadius` from `8` to `13`, and added 2 guaranteed starter tree groves per spawn (`10.5..13.5` tiles from spawn center) so trees are immediately visible around the command base at match start.
+  - **4 Distinct Multi-Hit Destructible Tree Species**: `TREE_PINE` (*Pin Boréal*, `180 HP`), `TREE_OAK` (*Chêne Centenaire*, `240 HP`), `TREE_PALM` (*Palmier des Sables*, `140 HP`), and `TREE_CYPRESS` (*Cyprès des Marais*, `170 HP`), each requiring multiple weapon impacts to fell.
+  - **Camion Forestier (`FORESTRY_TRUCK`) & Sapling Growth (`isSapling`)**: Added the `FORESTRY_TRUCK` (*Camion Forestier*, `500 CR`, `LOGISTICS_ENGINEERING` in `WAR_FACTORY`) which plants young saplings (`treeScale = 0.42`, `isSapling = true`) on natural ground (`GRASS`, `DIRT`, `SAND`, `SWAMP`). Saplings grow smoothly over `TREE_GROWTH_DURATION_SECONDS = 30` (`600` ticks) into adult trees (`treeScale = 1.10`) with a live botanical growth gauge in `world-renderer.ts`.
+  - **Soufflerie Mobile (`BLOWER_TRUCK`)**: Added the `BLOWER_TRUCK` (*Soufflerie Mobile*, `550 CR`, `LOGISTICS_ENGINEERING` in `WAR_FACTORY`) with twin turbine blowers and thermal wave animations (`stateLabel === "DRYING"`) that desiccates `SWAMP` tiles into firm `DIRT` terrain and updates the `SpatialReservationGrid`.
+
 ## [v1.12.0] — 2026-10-29
 
 ### Added & Changed

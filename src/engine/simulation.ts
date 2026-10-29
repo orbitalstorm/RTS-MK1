@@ -6,10 +6,13 @@ import {
   BUILDING_REPAIR_HP_PER_TICK,
   BUILDINGS,
   canPlaceBuildingOnTerrainTile,
+  canPlantTreeOnTerrainKind,
   degradeTerrainLayer,
   FACTIONS,
+  FORESTRY_PLANT_TICKS,
   generateProceduralMap,
   getTerrainLayerThickness,
+  getTerrainSpeedMultiplier,
   getTimedConstructionTicks,
   HARVESTER_LOAD_PER_TICK,
   HARVESTER_MAX_LOAD,
@@ -24,7 +27,11 @@ import {
   SILVER_MINE_YIELD_PER_CYCLE,
   SPAWN_CONCRETE_PAD_SIZE,
   STARTING_CREDITS,
+  SWAMP_DRYING_TICKS,
   TERRAIN_KIND,
+  TREE_ADULT_SCALE,
+  TREE_GROWTH_DURATION_TICKS,
+  TREE_SAPLING_INITIAL_SCALE,
   TREES,
   UNIT_SPAWN_PROTECTION_TICKS,
   UNITS,
@@ -262,7 +269,7 @@ export class RtsSimulation {
       if (t.x < 1 || t.y < 1 || t.x >= this.width - 1 || t.y >= this.height - 1) continue;
       const idx = t.y * this.width + t.x;
       const tk = this.terrainGrid[idx] ?? TERRAIN_KIND.DIRT;
-      if (tk !== TERRAIN_KIND.GRASS && tk !== TERRAIN_KIND.DIRT) {
+      if (!canPlantTreeOnTerrainKind(tk)) {
         continue;
       }
       if (!this.reservationGrid.isTilePassable(t.x, t.y, undefined, false)) continue;
@@ -274,11 +281,23 @@ export class RtsSimulation {
     kind: TreeKind,
     tileX: number,
     tileY: number,
-    treeScale = 1
+    treeScale = 1,
+    saplingOpts?: {
+      isSapling: boolean;
+      targetScale?: number;
+      growthDurationTicks?: number;
+    }
   ): EcsEntity {
     const spec = TREES[kind];
-    const clampedScale = Number(Math.max(0.7, Math.min(1.4, treeScale)).toFixed(2));
-    const maxHp = Math.max(60, Math.round(spec.baseHp * clampedScale));
+    const isSapling = Boolean(saplingOpts?.isSapling);
+    const clampedScale = isSapling
+      ? Number(Math.max(0.35, Math.min(0.65, treeScale)).toFixed(2))
+      : Number(Math.max(0.7, Math.min(1.4, treeScale)).toFixed(2));
+    const targetScale = isSapling
+      ? Number(Math.max(0.95, Math.min(1.35, saplingOpts?.targetScale ?? TREE_ADULT_SCALE)).toFixed(2))
+      : clampedScale;
+    const maxHp = Math.max(50, Math.round(spec.baseHp * clampedScale));
+    const targetMaxHp = Math.max(maxHp, Math.round(spec.baseHp * targetScale));
     const id = `tree_${this.nextEntitySeq++}`;
 
     const entity: EcsEntity = {
@@ -290,6 +309,12 @@ export class RtsSimulation {
       sightRadius: 0,
       spawnProtectionTicks: 0,
       treeScale: clampedScale,
+      isSapling,
+      treeTargetScale: targetScale,
+      treeTargetMaxHp: targetMaxHp,
+      treeGrowthTicksRemaining: isSapling
+        ? Math.max(1, saplingOpts?.growthDurationTicks ?? TREE_GROWTH_DURATION_TICKS)
+        : 0,
       stateLabel: "IDLE",
       transform: {
         x: tileX,
@@ -519,11 +544,132 @@ export class RtsSimulation {
           ent.harvester.state = "IDLE";
           ent.stateLabel = "MOVING";
         }
+      } else if (ent.kind === "FORESTRY_TRUCK") {
+        const idxTile = gy * this.width + gx;
+        const tk = this.terrainGrid[idxTile] ?? TERRAIN_KIND.DIRT;
+        if (canPlantTreeOnTerrainKind(tk) && (this.oreGrid[idxTile] ?? 0) === 0) {
+          ent.forestryTargetTile = { x: gx, y: gy };
+          ent.forestryWorkTicks = 0;
+          ent.forestryRemainingPlants = 1;
+        } else {
+          ent.forestryTargetTile = null;
+          ent.forestryWorkTicks = 0;
+          ent.forestryRemainingPlants = 0;
+        }
+        ent.stateLabel = path.length > 0 ? "MOVING" : "IDLE";
+      } else if (ent.kind === "BLOWER_TRUCK") {
+        ent.blowerTargetTile = { x: gx, y: gy };
+        ent.blowerWorkTicks = 0;
+        ent.stateLabel = path.length > 0 ? "MOVING" : "IDLE";
       } else {
         ent.stateLabel = path.length > 0 ? "MOVING" : "IDLE";
       }
       ent.dirty = true;
     });
+  }
+
+  public issuePlantTreeCommand(
+    playerId: string,
+    entityIds: readonly string[],
+    targetTileX: number,
+    targetTileY: number,
+    preferredTreeKind?: TreeKind
+  ): boolean {
+    const gx = Math.max(1, Math.min(this.width - 2, Math.round(targetTileX)));
+    const gy = Math.max(1, Math.min(this.height - 2, Math.round(targetTileY)));
+    let issued = false;
+
+    for (const id of entityIds) {
+      const ent = this.entities.get(id);
+      if (
+        !ent ||
+        ent.ownerId !== playerId ||
+        ent.entityType !== "UNIT" ||
+        ent.kind !== "FORESTRY_TRUCK" ||
+        !ent.navigation
+      ) {
+        continue;
+      }
+      ent.forestryTargetTile = { x: gx, y: gy, treeKind: preferredTreeKind };
+      ent.forestryWorkTicks = 0;
+      ent.forestryRemainingPlants = 1;
+      const dist = Math.hypot(ent.transform.x - gx, ent.transform.y - gy);
+      if (dist > 1.5) {
+        const path = this.pathfinder.findPath(
+          ent.transform.x,
+          ent.transform.y,
+          gx,
+          gy,
+          this.reservationGrid,
+          ent.id,
+          true
+        );
+        ent.navigation.path = path;
+        ent.navigation.pathIndex = 0;
+        ent.navigation.targetX = gx;
+        ent.navigation.targetY = gy;
+        ent.navigation.waitTicks = 0;
+        ent.stateLabel = path.length > 0 ? "MOVING" : "PLANTING";
+      } else {
+        ent.navigation.path = [];
+        ent.navigation.pathIndex = 0;
+        ent.stateLabel = "PLANTING";
+      }
+      ent.dirty = true;
+      issued = true;
+    }
+    return issued;
+  }
+
+  public issueDrySwampCommand(
+    playerId: string,
+    entityIds: readonly string[],
+    targetTileX: number,
+    targetTileY: number
+  ): boolean {
+    const gx = Math.max(0, Math.min(this.width - 1, Math.round(targetTileX)));
+    const gy = Math.max(0, Math.min(this.height - 1, Math.round(targetTileY)));
+    let issued = false;
+
+    for (const id of entityIds) {
+      const ent = this.entities.get(id);
+      if (
+        !ent ||
+        ent.ownerId !== playerId ||
+        ent.entityType !== "UNIT" ||
+        ent.kind !== "BLOWER_TRUCK" ||
+        !ent.navigation
+      ) {
+        continue;
+      }
+      ent.blowerTargetTile = { x: gx, y: gy };
+      ent.blowerWorkTicks = 0;
+      const dist = Math.hypot(ent.transform.x - gx, ent.transform.y - gy);
+      if (dist > 1.6) {
+        const path = this.pathfinder.findPath(
+          ent.transform.x,
+          ent.transform.y,
+          gx,
+          gy,
+          this.reservationGrid,
+          ent.id,
+          true
+        );
+        ent.navigation.path = path;
+        ent.navigation.pathIndex = 0;
+        ent.navigation.targetX = gx;
+        ent.navigation.targetY = gy;
+        ent.navigation.waitTicks = 0;
+        ent.stateLabel = path.length > 0 ? "MOVING" : "DRYING";
+      } else {
+        ent.navigation.path = [];
+        ent.navigation.pathIndex = 0;
+        ent.stateLabel = "DRYING";
+      }
+      ent.dirty = true;
+      issued = true;
+    }
+    return issued;
   }
 
   public issueAttackCommand(
@@ -917,6 +1063,9 @@ export class RtsSimulation {
     this.stepConstructorBots();
     this.stepSilverMines();
     this.stepHarvesters();
+    this.stepTreeGrowth();
+    this.stepForestryTrucks();
+    this.stepBlowerTrucks();
     this.stepUnitMovement();
     this.stepCombat();
     this.stepAiControllers();
@@ -1692,6 +1841,351 @@ export class RtsSimulation {
     }
   }
 
+  private pickTreeSpeciesForTerrain(tileX: number, tileY: number): TreeKind {
+    const idx = tileY * this.width + tileX;
+    const tk = this.terrainGrid[idx] ?? TERRAIN_KIND.GRASS;
+    if (tk === TERRAIN_KIND.SWAMP) return "TREE_CYPRESS";
+    if (tk === TERRAIN_KIND.SAND || tk === TERRAIN_KIND.DIRT) return "TREE_PALM";
+    for (let dy = -2; dy <= 2; dy++) {
+      for (let dx = -2; dx <= 2; dx++) {
+        const nx = tileX + dx;
+        const ny = tileY + dy;
+        if (this.reservationGrid.inBounds(nx, ny)) {
+          const ntk = this.terrainGrid[ny * this.width + nx];
+          if (ntk === TERRAIN_KIND.SWAMP || ntk === TERRAIN_KIND.WATER) {
+            return "TREE_CYPRESS";
+          }
+        }
+      }
+    }
+    return (tileX + tileY) % 2 === 0 ? "TREE_PINE" : "TREE_OAK";
+  }
+
+  private isTileOccupiedByTreeOrBuilding(tileX: number, tileY: number): boolean {
+    for (const ent of this.entities.values()) {
+      if (ent.entityType === "TREE") {
+        if (Math.round(ent.transform.x) === tileX && Math.round(ent.transform.y) === tileY) {
+          return true;
+        }
+      } else if (ent.entityType === "BUILDING" && ent.building) {
+        if (
+          tileX >= ent.transform.x &&
+          tileX < ent.transform.x + ent.building.footprintW &&
+          tileY >= ent.transform.y &&
+          tileY < ent.transform.y + ent.building.footprintH
+        ) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  private stepTreeGrowth(): void {
+    for (const ent of this.entities.values()) {
+      if (
+        ent.entityType !== "TREE" ||
+        !ent.isSapling ||
+        (ent.treeGrowthTicksRemaining ?? 0) <= 0
+      ) {
+        continue;
+      }
+      const remaining = Math.max(0, (ent.treeGrowthTicksRemaining ?? 1) - 1);
+      ent.treeGrowthTicksRemaining = remaining;
+
+      const targetScale = ent.treeTargetScale ?? TREE_ADULT_SCALE;
+      const progress = Math.max(
+        0,
+        Math.min(1, 1 - remaining / Math.max(1, TREE_GROWTH_DURATION_TICKS))
+      );
+      const nextScale = Number(
+        (
+          TREE_SAPLING_INITIAL_SCALE +
+          (targetScale - TREE_SAPLING_INITIAL_SCALE) * progress
+        ).toFixed(2)
+      );
+      const spec = TREES[ent.kind as TreeKind] ?? TREES.TREE_PINE;
+      const nextMaxHp = Math.max(50, Math.round(spec.baseHp * nextScale));
+      const hpDelta = Math.max(0, nextMaxHp - ent.health.maxHp);
+      if (hpDelta > 0) {
+        ent.health.maxHp = nextMaxHp;
+        ent.health.hp = Math.min(nextMaxHp, ent.health.hp + hpDelta);
+      }
+
+      if (Math.abs(nextScale - ent.treeScale) >= 0.02 || remaining === 0) {
+        ent.treeScale = nextScale;
+        ent.dirty = true;
+      }
+      if (remaining === 0) {
+        ent.isSapling = false;
+        ent.treeScale = targetScale;
+        ent.dirty = true;
+      }
+    }
+  }
+
+  private stepForestryTrucks(): void {
+    for (const ent of this.entities.values()) {
+      if (
+        ent.entityType !== "UNIT" ||
+        ent.kind !== "FORESTRY_TRUCK" ||
+        !ent.navigation ||
+        !ent.forestryTargetTile
+      ) {
+        continue;
+      }
+
+      const target = ent.forestryTargetTile;
+      const dist = Math.hypot(ent.transform.x - target.x, ent.transform.y - target.y);
+
+      if (dist > 1.65 && ent.navigation.pathIndex < ent.navigation.path.length) {
+        continue;
+      }
+
+      if (dist > 2.5) {
+        ent.forestryTargetTile = null;
+        ent.forestryWorkTicks = 0;
+        if (ent.stateLabel === "PLANTING") {
+          ent.stateLabel = "IDLE";
+          ent.dirty = true;
+        }
+        continue;
+      }
+
+      ent.navigation.path = [];
+      ent.navigation.pathIndex = 0;
+
+      if (ent.stateLabel !== "PLANTING") {
+        ent.stateLabel = "PLANTING";
+        ent.dirty = true;
+      }
+
+      const nextTicks = (ent.forestryWorkTicks ?? 0) + 1;
+      ent.forestryWorkTicks = nextTicks;
+
+      if (nextTicks % 10 === 0) {
+        this.pushVisualEffect("HARVEST_SPARKS", target.x, target.y, 0.45, 0, ent.faction);
+      }
+
+      if (nextTicks < FORESTRY_PLANT_TICKS) {
+        continue;
+      }
+
+      // Find the target tile or nearest adjacent valid natural tile to plant the sapling
+      let plantTile: { x: number; y: number } | null = null;
+      const candidateOffsets: ReadonlyArray<{ dx: number; dy: number }> = [
+        { dx: 0, dy: 0 },
+        { dx: 1, dy: 0 },
+        { dx: -1, dy: 0 },
+        { dx: 0, dy: 1 },
+        { dx: 0, dy: -1 },
+        { dx: 1, dy: 1 },
+        { dx: -1, dy: -1 },
+        { dx: 1, dy: -1 },
+        { dx: -1, dy: 1 },
+      ];
+
+      for (const off of candidateOffsets) {
+        const cx = target.x + off.dx;
+        const cy = target.y + off.dy;
+        if (cx < 1 || cy < 1 || cx >= this.width - 1 || cy >= this.height - 1) continue;
+        const idx = cy * this.width + cx;
+        const tk = this.terrainGrid[idx] ?? TERRAIN_KIND.DIRT;
+        if (!canPlantTreeOnTerrainKind(tk)) continue;
+        if ((this.oreGrid[idx] ?? 0) > 0) continue;
+        if (this.isTileOccupiedByTreeOrBuilding(cx, cy)) continue;
+        plantTile = { x: cx, y: cy };
+        break;
+      }
+
+      if (plantTile) {
+        const truckTileX = Math.round(ent.transform.x);
+        const truckTileY = Math.round(ent.transform.y);
+        if (truckTileX === plantTile.x && truckTileY === plantTile.y) {
+          // Step the forestry truck onto an adjacent free passable tile so it doesn't sit on the sapling
+          for (const off of candidateOffsets) {
+            if (off.dx === 0 && off.dy === 0) continue;
+            const nx = truckTileX + off.dx;
+            const ny = truckTileY + off.dy;
+            if (this.reservationGrid.isTilePassable(nx, ny, ent.id, false)) {
+              this.reservationGrid.releaseUnitTile(truckTileX, truckTileY, ent.id);
+              ent.transform.x = nx;
+              ent.transform.y = ny;
+              this.reservationGrid.reserveUnitTile(nx, ny, ent.id);
+              break;
+            }
+          }
+        }
+
+        const species =
+          target.treeKind ?? this.pickTreeSpeciesForTerrain(plantTile.x, plantTile.y);
+        this.createTreeEntity(species, plantTile.x, plantTile.y, TREE_SAPLING_INITIAL_SCALE, {
+          isSapling: true,
+          targetScale: TREE_ADULT_SCALE,
+          growthDurationTicks: TREE_GROWTH_DURATION_TICKS,
+        });
+        this.pushVisualEffect("HARVEST_SPARKS", plantTile.x, plantTile.y, 0.65, 0, ent.faction);
+      }
+
+      ent.forestryTargetTile = null;
+      ent.forestryWorkTicks = 0;
+      ent.forestryRemainingPlants = 0;
+      ent.stateLabel = "IDLE";
+      ent.dirty = true;
+    }
+  }
+
+  private findNearestSwampTile(
+    fromX: number,
+    fromY: number,
+    maxRadiusTiles: number
+  ): { x: number; y: number } | null {
+    const cx = Math.round(fromX);
+    const cy = Math.round(fromY);
+    const r = Math.ceil(maxRadiusTiles);
+    let best: { x: number; y: number } | null = null;
+    let bestDist = Infinity;
+
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        const tx = cx + dx;
+        const ty = cy + dy;
+        if (!this.reservationGrid.inBounds(tx, ty)) continue;
+        const d = Math.hypot(tx - fromX, ty - fromY);
+        if (d > maxRadiusTiles || d >= bestDist) continue;
+        const idx = ty * this.width + tx;
+        if (this.terrainGrid[idx] === TERRAIN_KIND.SWAMP) {
+          bestDist = d;
+          best = { x: tx, y: ty };
+        }
+      }
+    }
+    return best;
+  }
+
+  private stepBlowerTrucks(): void {
+    for (const ent of this.entities.values()) {
+      if (
+        ent.entityType !== "UNIT" ||
+        ent.kind !== "BLOWER_TRUCK" ||
+        !ent.navigation
+      ) {
+        continue;
+      }
+
+      // If idle, automatically look for a nearby SWAMP tile within 6 tiles
+      if (!ent.blowerTargetTile && ent.navigation.pathIndex >= ent.navigation.path.length) {
+        const autoSwamp = this.findNearestSwampTile(ent.transform.x, ent.transform.y, 6);
+        if (autoSwamp) {
+          ent.blowerTargetTile = autoSwamp;
+          ent.blowerWorkTicks = 0;
+          const d = Math.hypot(ent.transform.x - autoSwamp.x, ent.transform.y - autoSwamp.y);
+          if (d > 1.65) {
+            ent.navigation.path = this.pathfinder.findPath(
+              ent.transform.x,
+              ent.transform.y,
+              autoSwamp.x,
+              autoSwamp.y,
+              this.reservationGrid,
+              ent.id,
+              true
+            );
+            ent.navigation.pathIndex = 0;
+            ent.stateLabel = ent.navigation.path.length > 0 ? "MOVING" : "IDLE";
+            ent.dirty = true;
+          }
+        } else if (ent.stateLabel === "DRYING") {
+          ent.stateLabel = "IDLE";
+          ent.dirty = true;
+        }
+      }
+
+      if (!ent.blowerTargetTile) continue;
+
+      let target = ent.blowerTargetTile;
+      const targetIdx = target.y * this.width + target.x;
+      if (this.terrainGrid[targetIdx] !== TERRAIN_KIND.SWAMP) {
+        const nearbySwamp = this.findNearestSwampTile(target.x, target.y, 5);
+        if (!nearbySwamp) {
+          ent.blowerTargetTile = null;
+          ent.blowerWorkTicks = 0;
+          if (ent.stateLabel === "DRYING") {
+            ent.stateLabel = "IDLE";
+            ent.dirty = true;
+          }
+          continue;
+        }
+        target = nearbySwamp;
+        ent.blowerTargetTile = nearbySwamp;
+      }
+
+      const dist = Math.hypot(ent.transform.x - target.x, ent.transform.y - target.y);
+      if (dist > 1.75) {
+        if (ent.navigation.pathIndex >= ent.navigation.path.length) {
+          ent.navigation.path = this.pathfinder.findPath(
+            ent.transform.x,
+            ent.transform.y,
+            target.x,
+            target.y,
+            this.reservationGrid,
+            ent.id,
+            true
+          );
+          ent.navigation.pathIndex = 0;
+          if (ent.navigation.path.length === 0) {
+            ent.blowerTargetTile = null;
+            ent.stateLabel = "IDLE";
+            ent.dirty = true;
+          } else {
+            ent.stateLabel = "MOVING";
+            ent.dirty = true;
+          }
+        }
+        continue;
+      }
+
+      // Within thermal blower range: dry the swamp tile slowly into DIRT
+      ent.navigation.path = [];
+      ent.navigation.pathIndex = 0;
+
+      if (ent.stateLabel !== "DRYING") {
+        ent.stateLabel = "DRYING";
+        if (dist > 0.1) {
+          const ang = vectorToAngleIndex16(
+            target.x - ent.transform.x,
+            target.y - ent.transform.y
+          );
+          ent.transform.angleIndex = ang;
+          ent.transform.turretAngleIndex = ang;
+        }
+        ent.dirty = true;
+      }
+
+      const nextTicks = (ent.blowerWorkTicks ?? 0) + 1;
+      ent.blowerWorkTicks = nextTicks;
+
+      if (nextTicks % 12 === 0) {
+        this.pushVisualEffect("HARVEST_SPARKS", target.x, target.y, 0.6, 0, ent.faction);
+      }
+
+      if (nextTicks >= SWAMP_DRYING_TICKS) {
+        const dryIdx = target.y * this.width + target.x;
+        this.terrainGrid[dryIdx] = TERRAIN_KIND.DIRT;
+        this.terrainDamageGrid[dryIdx] = 0;
+        this.terrainUpdatesThisTick.set(dryIdx, {
+          tileX: target.x,
+          tileY: target.y,
+          terrainKind: TERRAIN_KIND.DIRT,
+        });
+        this.pushVisualEffect("HARVEST_SPARKS", target.x, target.y, 0.85, 0, ent.faction);
+        ent.blowerWorkTicks = 0;
+        ent.blowerTargetTile = null;
+        ent.stateLabel = "IDLE";
+        ent.dirty = true;
+      }
+    }
+  }
+
   private stepUnitMovement(): void {
     let dynamicRepathsThisTick = 0;
     const maxDynamicRepathsPerTick = 4;
@@ -1709,7 +2203,11 @@ export class RtsSimulation {
 
       const startTileX = Math.round(ent.transform.x);
       const startTileY = Math.round(ent.transform.y);
-      let remainingStep = nav.speedTilesPerTick;
+      const startTileIdx = startTileY * this.width + startTileX;
+      const terrainSpeedMult = getTerrainSpeedMultiplier(
+        this.terrainGrid[startTileIdx] ?? TERRAIN_KIND.DIRT
+      );
+      let remainingStep = nav.speedTilesPerTick * terrainSpeedMult;
       let movedThisTick = false;
       let lastDx = 0;
       let lastDy = 0;
@@ -2275,6 +2773,8 @@ export class RtsSimulation {
             ent.entityType === "UNIT" &&
             ent.kind !== "HARVESTER" &&
             ent.kind !== "CONSTRUCTOR_BOT" &&
+            ent.kind !== "FORESTRY_TRUCK" &&
+            ent.kind !== "BLOWER_TRUCK" &&
             ent.kind !== "MCV" &&
             ent.stateLabel === "IDLE" &&
             (!ent.combat || ent.combat.targetEntityId === null)
@@ -2525,7 +3025,10 @@ export class RtsSimulation {
     if (
       curKind === TERRAIN_KIND.CLIFF ||
       curKind === TERRAIN_KIND.STONE ||
-      curKind === TERRAIN_KIND.SILVER_ORE
+      curKind === TERRAIN_KIND.SILVER_ORE ||
+      curKind === TERRAIN_KIND.WATER ||
+      curKind === TERRAIN_KIND.SAND ||
+      curKind === TERRAIN_KIND.SWAMP
     ) {
       return false;
     }

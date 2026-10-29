@@ -112,7 +112,7 @@ export type BuildingKind =
   | "SAM_SITE"
   | "OBELISK";
 
-export type TreeKind = "TREE_PINE" | "TREE_OAK" | "TREE_PALM";
+export type TreeKind = "TREE_PINE" | "TREE_OAK" | "TREE_PALM" | "TREE_CYPRESS";
 
 export interface TreeSpec {
   kind: TreeKind;
@@ -124,7 +124,17 @@ export const TREES: Record<TreeKind, TreeSpec> = {
   TREE_PINE: { kind: "TREE_PINE", name: "Pin Conifère", baseHp: 140 },
   TREE_OAK: { kind: "TREE_OAK", name: "Chêne Massif", baseHp: 210 },
   TREE_PALM: { kind: "TREE_PALM", name: "Palmier Aride", baseHp: 120 },
+  TREE_CYPRESS: { kind: "TREE_CYPRESS", name: "Cyprès des Marais", baseHp: 170 },
 };
+
+export const TREE_SAPLING_INITIAL_SCALE = 0.42;
+export const TREE_ADULT_SCALE = 1.1;
+export const TREE_GROWTH_DURATION_SECONDS = 30;
+export const TREE_GROWTH_DURATION_TICKS = 600; // 30s at 20 Hz
+export const FORESTRY_PLANT_TICKS = 40; // 2.0s planting cycle at 20 Hz
+export const SWAMP_DRYING_TICKS = 60; // 3.0s thermal drying cycle per swamp tile at 20 Hz
+export const SAND_SPEED_MULTIPLIER = 0.8;
+export const SWAMP_SPEED_MULTIPLIER = 0.8;
 
 export type UnitKind =
   | "RIFLE_INFANTRY"
@@ -132,6 +142,8 @@ export type UnitKind =
   | "ENGINEER"
   | "CONSTRUCTOR_BOT"
   | "HARVESTER"
+  | "FORESTRY_TRUCK"
+  | "BLOWER_TRUCK"
   | "RECON_BUGGY"
   | "MEDIUM_TANK"
   | "ARTILLERY"
@@ -193,7 +205,7 @@ export interface UnitSpec {
   description: string;
 }
 
-export const APP_VERSION = "1.12.0";
+export const APP_VERSION = "1.13.0";
 export const SIM_TICK_RATE_HZ = 20;
 export const SIM_TICK_MS = 50;
 export const MAP_WIDTH_TILES = 160;
@@ -257,6 +269,8 @@ export function canPlaceBuildingOnTerrainTile(kind: BuildingKind, rawKind: numbe
   }
   if (
     rawKind === TERRAIN_KIND.CLIFF ||
+    rawKind === TERRAIN_KIND.WATER ||
+    rawKind === TERRAIN_KIND.SWAMP ||
     rawKind === TERRAIN_KIND.ORE ||
     rawKind === TERRAIN_KIND.SILVER_ORE
   ) {
@@ -276,8 +290,42 @@ export const TERRAIN_KIND = {
   GRASS: 4, // Herbe / Prairie naturelle (couche superficielle organique)
   CONCRETE_SLAB: 5, // Dalle de béton armé posée par le joueur
   SILVER_ORE: 6, // Gros rocher de minerai à pépites argentées (2x2)
+  WATER: 7, // Eau profonde infranchissable par unités terrestres (indestructible)
+  SAND: 8, // Sable côtier / dunaire (indestructible, vitesse déplacement x0.8)
+  SWAMP: 9, // Marais boueux (indestructible aux tirs, asséchable en Terre par Soufflerie Mobile, vitesse x0.8)
 } as const;
 export type TerrainKindCode = (typeof TERRAIN_KIND)[keyof typeof TERRAIN_KIND];
+
+/**
+ * Returns true if ground units can traverse a tile with `rawKind`.
+ * Cliffs (2) and Water (7) are impassable to ground units.
+ */
+export function isPassableTerrainKind(rawKind: number): boolean {
+  return rawKind !== TERRAIN_KIND.CLIFF && rawKind !== TERRAIN_KIND.WATER;
+}
+
+/**
+ * Returns the ground movement speed multiplier for a tile with `rawKind`.
+ * Sand (8) and Swamp (9) apply a x0.8 speed factor.
+ */
+export function getTerrainSpeedMultiplier(rawKind: number): number {
+  if (rawKind === TERRAIN_KIND.SAND || rawKind === TERRAIN_KIND.SWAMP) {
+    return 0.8;
+  }
+  return 1.0;
+}
+
+/**
+ * Returns true if a tree sapling can be planted on `rawKind`.
+ */
+export function canPlantTreeOnTerrainKind(rawKind: number): boolean {
+  return (
+    rawKind === TERRAIN_KIND.GRASS ||
+    rawKind === TERRAIN_KIND.DIRT ||
+    rawKind === TERRAIN_KIND.SAND ||
+    rawKind === TERRAIN_KIND.SWAMP
+  );
+}
 
 export interface TerrainNeighborMask {
   centerKind: number;
@@ -314,10 +362,14 @@ export function normalizeBaseTerrainKind(rawKind: number): number {
 /**
  * Returns the geological stratum directly underneath `kind`.
  * Grass (4) -> Dirt (0) -> Stone (1). Concrete Slab (5) -> Stone (1).
+ * Swamp (9) -> Dirt (0). Sand (8) -> Dirt (0). Water (7) -> Sand (8).
  */
 export function getUnderlyingTerrainKind(kind: number): number {
   const norm = normalizeBaseTerrainKind(kind);
   if (norm === TERRAIN_KIND.GRASS) return TERRAIN_KIND.DIRT;
+  if (norm === TERRAIN_KIND.SWAMP) return TERRAIN_KIND.DIRT;
+  if (norm === TERRAIN_KIND.SAND) return TERRAIN_KIND.DIRT;
+  if (norm === TERRAIN_KIND.WATER) return TERRAIN_KIND.SAND;
   if (norm === TERRAIN_KIND.DIRT) return TERRAIN_KIND.STONE;
   if (norm === TERRAIN_KIND.CONCRETE_SLAB) return TERRAIN_KIND.STONE;
   return TERRAIN_KIND.STONE;
@@ -325,6 +377,7 @@ export function getUnderlyingTerrainKind(kind: number): number {
 
 /**
  * Returns the layer thickness (impact wear threshold) before a terrain layer deteriorates into the underlying stratum.
+ * Water (7), Sand (8), and Swamp (9) never deteriorate from weapon impacts (Infinity).
  */
 export function getTerrainLayerThickness(kind: number): number {
   if (kind === TERRAIN_KIND.GRASS) return 1;
@@ -336,6 +389,7 @@ export function getTerrainLayerThickness(kind: number): number {
 /**
  * Deteriorates a terrain layer by one geological step when blasted by projectiles:
  * Grass (4) -> Dirt (0) -> Stone (1). Concrete Slab (5) -> Stone (1).
+ * Water (7), Sand (8), and Swamp (9) do NOT change when deteriorated by impacts.
  */
 export function degradeTerrainLayer(currentKind: number): number {
   if (currentKind === TERRAIN_KIND.GRASS) return TERRAIN_KIND.DIRT;
@@ -685,7 +739,7 @@ export const BUILDINGS: Record<BuildingKind, BuildingSpec> = {
     buildTimeTicks: 100,
     maxHp: 1500,
     powerDelta: 30,
-    sightRadius: 8,
+    sightRadius: 13,
     footprintW: 3,
     footprintH: 3,
     storageCapacity: 1000,
@@ -1087,6 +1141,44 @@ export const UNITS: Record<UnitKind, UnitSpec> = {
     harvestCapacity: HARVESTER_MAX_LOAD,
     prerequisites: ["WAR_FACTORY", "REFINERY"],
     description: "Convoi minier massif à benne articulée et citernes pressurisées récoltant le minerai actif.",
+  },
+  FORESTRY_TRUCK: {
+    kind: "FORESTRY_TRUCK",
+    name: "Camion Forestier",
+    shortName: "Forestier",
+    category: "VEHICLE",
+    subcategory: "LOGISTICS_ENGINEERING",
+    cost: 500,
+    buildTimeTicks: 45,
+    maxHp: 450,
+    speedTilesPerTick: 0.13,
+    sightRadius: 7,
+    detectionRange: 0,
+    attackRange: 0,
+    attackDamage: 0,
+    attackCooldownTicks: 0,
+    harvestCapacity: 0,
+    prerequisites: ["WAR_FACTORY"],
+    description: "Véhicule sylvicole plantant de jeunes arbres (pousses grandissant en 30s jusqu'à l'âge adulte).",
+  },
+  BLOWER_TRUCK: {
+    kind: "BLOWER_TRUCK",
+    name: "Soufflerie Mobile",
+    shortName: "Soufflerie",
+    category: "VEHICLE",
+    subcategory: "LOGISTICS_ENGINEERING",
+    cost: 550,
+    buildTimeTicks: 50,
+    maxHp: 480,
+    speedTilesPerTick: 0.13,
+    sightRadius: 7,
+    detectionRange: 0,
+    attackRange: 0,
+    attackDamage: 0,
+    attackCooldownTicks: 0,
+    harvestCapacity: 0,
+    prerequisites: ["WAR_FACTORY"],
+    description: "Turbine thermique mobile asséchant lentement les marais (SWAMP) pour les transformer en Terre (DIRT).",
   },
   RECON_BUGGY: {
     kind: "RECON_BUGGY",

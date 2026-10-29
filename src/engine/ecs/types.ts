@@ -67,6 +67,15 @@ export interface EcsEntity {
   sightRadius: number;
   spawnProtectionTicks: number;
   treeScale: number;
+  isSapling?: boolean;
+  treeTargetScale?: number;
+  treeTargetMaxHp?: number;
+  treeGrowthTicksRemaining?: number;
+  forestryTargetTile?: { x: number; y: number; treeKind?: TreeKind } | null;
+  forestryWorkTicks?: number;
+  forestryRemainingPlants?: number;
+  blowerTargetTile?: { x: number; y: number } | null;
+  blowerWorkTicks?: number;
   stateLabel:
     | "IDLE"
     | "MOVING"
@@ -75,7 +84,9 @@ export interface EcsEntity {
     | "UNLOADING"
     | "ALERT"
     | "ATTACKING"
-    | "BUILDING";
+    | "BUILDING"
+    | "PLANTING"
+    | "DRYING";
   transform: TransformComponent;
   health: HealthComponent;
   navigation: NavigationComponent | null;

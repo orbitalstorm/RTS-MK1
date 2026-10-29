@@ -29,7 +29,7 @@ export interface ProceduralSilverDepositSpec {
 export interface ProceduralTreePlacement {
   x: number;
   y: number;
-  kind: "TREE_PINE" | "TREE_OAK" | "TREE_PALM";
+  kind: "TREE_PINE" | "TREE_OAK" | "TREE_PALM" | "TREE_CYPRESS";
   scale: number;
 }
 
@@ -262,8 +262,8 @@ export const MAP_GENERATION_RULES: MapGenerationRules = {
     minTacticalPassWidthTiles: 8,
     minCentralBasinClearanceTiles: 14,
     cliffRidgeCount: 8,
-    minTreeDistanceFromSpawnTiles: 15,
-    treeGroveCount: 20,
+    minTreeDistanceFromSpawnTiles: 10,
+    treeGroveCount: 42,
   },
 } as const;
 
@@ -279,6 +279,9 @@ const TERRAIN_CODES = {
   GRASS: 4,
   CONCRETE_SLAB: 5,
   SILVER_ORE: 6,
+  WATER: 7,
+  SAND: 8,
+  SWAMP: 9,
 } as const;
 
 export interface SeededRng {
@@ -987,20 +990,250 @@ export function generateProceduralMap(options?: {
   }
 
   // --------------------------------------------------------------------------
-  // 6. PROCEDURAL DESTRUCTIBLE TREES (TREE_PINE, TREE_OAK, TREE_PALM)
-  // Strictly respects minTreeDistanceFromSpawnTiles and avoids Ore / Silver Ore / Cliffs.
+  // 5B. PROCEDURAL WATER PONDS (WATER + SAND BEACHES), SAND DUNES & SWAMP MARSHES
+  // Preserves wide maneuver corridors and never overlaps spawn pads, ore, or silver.
+  // --------------------------------------------------------------------------
+  const biomeFeatureAnchors: Array<{
+    x: number;
+    y: number;
+    featureKind: "WATER_POND" | "SWAMP_MARSH" | "SAND_DUNE";
+    rx: number;
+    ry: number;
+  }> = [
+    {
+      x: Math.round(width * 0.24 + rng.int(-4, 4)),
+      y: Math.round(height * 0.36 + rng.int(-4, 4)),
+      featureKind: "WATER_POND",
+      rx: rng.range(2.4, 3.2),
+      ry: rng.range(1.9, 2.7),
+    },
+    {
+      x: Math.round(width * 0.76 + rng.int(-4, 4)),
+      y: Math.round(height * 0.64 + rng.int(-4, 4)),
+      featureKind: "WATER_POND",
+      rx: rng.range(2.4, 3.2),
+      ry: rng.range(1.9, 2.7),
+    },
+    {
+      x: Math.round(width * 0.36 + rng.int(-4, 4)),
+      y: Math.round(height * 0.76 + rng.int(-4, 4)),
+      featureKind: "WATER_POND",
+      rx: rng.range(2.2, 3.0),
+      ry: rng.range(1.8, 2.5),
+    },
+    {
+      x: Math.round(width * 0.64 + rng.int(-4, 4)),
+      y: Math.round(height * 0.24 + rng.int(-4, 4)),
+      featureKind: "WATER_POND",
+      rx: rng.range(2.2, 3.0),
+      ry: rng.range(1.8, 2.5),
+    },
+    {
+      x: Math.round(width * 0.32 + rng.int(-4, 4)),
+      y: Math.round(height * 0.56 + rng.int(-4, 4)),
+      featureKind: "SWAMP_MARSH",
+      rx: rng.range(3.0, 4.0),
+      ry: rng.range(2.2, 3.2),
+    },
+    {
+      x: Math.round(width * 0.68 + rng.int(-4, 4)),
+      y: Math.round(height * 0.44 + rng.int(-4, 4)),
+      featureKind: "SWAMP_MARSH",
+      rx: rng.range(3.0, 4.0),
+      ry: rng.range(2.2, 3.2),
+    },
+    {
+      x: Math.round(width * 0.44 + rng.int(-4, 4)),
+      y: Math.round(height * 0.22 + rng.int(-4, 4)),
+      featureKind: "SWAMP_MARSH",
+      rx: rng.range(2.8, 3.6),
+      ry: rng.range(2.1, 2.9),
+    },
+    {
+      x: Math.round(width * 0.56 + rng.int(-4, 4)),
+      y: Math.round(height * 0.78 + rng.int(-4, 4)),
+      featureKind: "SWAMP_MARSH",
+      rx: rng.range(2.8, 3.6),
+      ry: rng.range(2.1, 2.9),
+    },
+    {
+      x: Math.round(width * 0.42 + rng.int(-4, 4)),
+      y: Math.round(height * 0.42 + rng.int(-4, 4)),
+      featureKind: "SAND_DUNE",
+      rx: rng.range(3.2, 4.2),
+      ry: rng.range(2.4, 3.2),
+    },
+    {
+      x: Math.round(width * 0.58 + rng.int(-4, 4)),
+      y: Math.round(height * 0.58 + rng.int(-4, 4)),
+      featureKind: "SAND_DUNE",
+      rx: rng.range(3.2, 4.2),
+      ry: rng.range(2.4, 3.2),
+    },
+  ];
+
+  for (const feat of biomeFeatureAnchors) {
+    const bound = Math.ceil(Math.max(feat.rx, feat.ry)) + 3;
+    // Ensure feature anchor is safe from spawns, silver, and ore centers
+    const safeFromSpawns = spawnPads.every((pad) => {
+      const c = getPadCenter(pad, padSize);
+      return Math.hypot(feat.x - c.x, feat.y - c.y) >= 24;
+    });
+    if (!safeFromSpawns) continue;
+
+    const safeFromSilver = silverDeposits.every(
+      (sDep) => Math.hypot(feat.x - (sDep.x + 0.5), feat.y - (sDep.y + 0.5)) >= bound + 4
+    );
+    if (!safeFromSilver) continue;
+
+    const safeFromOre = orePatches.every(
+      (patch) =>
+        Math.hypot(feat.x - patch.cx, feat.y - patch.cy) >=
+        Math.max(patch.rx, patch.ry) + bound + 3
+    );
+    if (!safeFromOre) continue;
+
+    for (let dy = -bound; dy <= bound; dy++) {
+      for (let dx = -bound; dx <= bound; dx++) {
+        const tx = feat.x + dx;
+        const ty = feat.y + dy;
+        if (tx < 4 || ty < 4 || tx >= width - 4 || ty >= height - 4) continue;
+        const idx = ty * width + tx;
+        const cur = terrainGrid[idx];
+        if (
+          cur === TERRAIN_CODES.CONCRETE_SLAB ||
+          cur === TERRAIN_CODES.ORE ||
+          cur === TERRAIN_CODES.SILVER_ORE ||
+          cur === TERRAIN_CODES.CLIFF ||
+          (oreGrid[idx] ?? 0) > 0
+        ) {
+          continue;
+        }
+
+        const normDist =
+          Math.hypot(dx / feat.rx, dy / feat.ry) +
+          seededValueNoise2D(tx * 0.35, ty * 0.35, seed ^ 0x1b873593) * 0.16;
+
+        if (feat.featureKind === "WATER_POND") {
+          if (normDist <= 0.85) {
+            terrainGrid[idx] = TERRAIN_CODES.WATER;
+          } else if (normDist <= 1.28) {
+            terrainGrid[idx] = TERRAIN_CODES.SAND;
+          }
+        } else if (feat.featureKind === "SWAMP_MARSH") {
+          if (normDist <= 1.05) {
+            terrainGrid[idx] = TERRAIN_CODES.SWAMP;
+          }
+        } else {
+          if (normDist <= 1.05) {
+            terrainGrid[idx] = TERRAIN_CODES.SAND;
+          }
+        }
+      }
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // 6. PROCEDURAL DESTRUCTIBLE TREES (TREE_PINE, TREE_OAK, TREE_PALM, TREE_CYPRESS)
+  // Strictly respects minTreeDistanceFromSpawnTiles and avoids Ore / Silver Ore / Cliffs / Water.
+  // Also places 2 visible starter groves per base right outside the spawn perimeter (10.5..13.5t).
   // --------------------------------------------------------------------------
   const trees: ProceduralTreePlacement[] = [];
   const occupiedTreeCoords = new Set<string>();
-  const speciesCycle: ReadonlyArray<"TREE_PINE" | "TREE_OAK" | "TREE_PALM"> = [
-    "TREE_PINE",
-    "TREE_OAK",
-    "TREE_PALM",
-  ];
+  const speciesCycle: ReadonlyArray<
+    "TREE_PINE" | "TREE_OAK" | "TREE_PALM" | "TREE_CYPRESS"
+  > = ["TREE_PINE", "TREE_OAK", "TREE_PALM", "TREE_CYPRESS"];
 
+  const pickTreeSpeciesForTile = (
+    tx: number,
+    ty: number,
+    fallback: "TREE_PINE" | "TREE_OAK" | "TREE_PALM" | "TREE_CYPRESS"
+  ): "TREE_PINE" | "TREE_OAK" | "TREE_PALM" | "TREE_CYPRESS" => {
+    const tk = terrainGrid[ty * width + tx];
+    if (tk === TERRAIN_CODES.SWAMP) return "TREE_CYPRESS";
+    if (tk === TERRAIN_CODES.SAND || tk === TERRAIN_CODES.DIRT) return "TREE_PALM";
+    // Check if adjacent to water or swamp
+    for (let dy = -2; dy <= 2; dy++) {
+      for (let dx = -2; dx <= 2; dx++) {
+        const nx = tx + dx;
+        const ny = ty + dy;
+        if (nx >= 0 && ny >= 0 && nx < width && ny < height) {
+          const ntk = terrainGrid[ny * width + nx];
+          if (ntk === TERRAIN_CODES.SWAMP || ntk === TERRAIN_CODES.WATER) {
+            return "TREE_CYPRESS";
+          }
+        }
+      }
+    }
+    return fallback;
+  };
+
+  // 6A. Guaranteed starter groves near each spawn (at 10.5..13.5 tiles on both flanks)
+  // so players immediately see multi-species destructible trees around their base at match start.
+  for (let sIdx = 0; sIdx < spawnPads.length; sIdx++) {
+    const pad = spawnPads[sIdx]!;
+    const center = getPadCenter(pad, padSize);
+    const dirX = center.x < midX ? 1 : -1;
+    const dirY = center.y < midY ? 1 : -1;
+
+    const flankAnchors: MapCoord[] = [
+      {
+        x: Math.round(center.x + dirX * 10.5),
+        y: Math.round(center.y + dirY * 2.5),
+      },
+      {
+        x: Math.round(center.x + dirX * 2.5),
+        y: Math.round(center.y + dirY * 10.5),
+      },
+    ];
+
+    for (let fIdx = 0; fIdx < flankAnchors.length; fIdx++) {
+      const anchor = flankAnchors[fIdx]!;
+      let placedNearSpawn = 0;
+      for (let dy = -2; dy <= 2 && placedNearSpawn < 4; dy++) {
+        for (let dx = -2; dx <= 2 && placedNearSpawn < 4; dx++) {
+          const tx = anchor.x + dx;
+          const ty = anchor.y + dy;
+          if (tx < 2 || ty < 2 || tx >= width - 2 || ty >= height - 2) continue;
+          const key = `${tx},${ty}`;
+          if (occupiedTreeCoords.has(key)) continue;
+
+          const minSpawnDist = Math.min(
+            ...spawnPads.map((p) => {
+              const c = getPadCenter(p, padSize);
+              return Math.hypot(tx - c.x, ty - c.y);
+            })
+          );
+          if (minSpawnDist < rules.terrainAndCoverRules.minTreeDistanceFromSpawnTiles) {
+            continue;
+          }
+
+          const idx = ty * width + tx;
+          const tk = terrainGrid[idx];
+          if (
+            tk !== TERRAIN_CODES.GRASS &&
+            tk !== TERRAIN_CODES.DIRT &&
+            tk !== TERRAIN_CODES.SAND &&
+            tk !== TERRAIN_CODES.SWAMP
+          ) {
+            continue;
+          }
+          if ((oreGrid[idx] ?? 0) > 0) continue;
+
+          const kind = speciesCycle[(sIdx * 2 + fIdx + placedNearSpawn) % speciesCycle.length]!;
+          const scale = Number(rng.range(0.92, 1.28).toFixed(2));
+          occupiedTreeCoords.add(key);
+          trees.push({ x: tx, y: ty, kind, scale });
+          placedNearSpawn++;
+        }
+      }
+    }
+  }
+
+  // 6B. Regional & midfield groves across the entire map
   let attempts = 0;
   let grovesCreated = 0;
-  while (grovesCreated < rules.terrainAndCoverRules.treeGroveCount && attempts < 160) {
+  while (grovesCreated < rules.terrainAndCoverRules.treeGroveCount && attempts < 260) {
     attempts++;
     const gx = rng.int(8, width - 9);
     const gy = rng.int(8, height - 9);
@@ -1009,7 +1242,7 @@ export function generateProceduralMap(options?: {
       const c = getPadCenter(pad, padSize);
       return (
         Math.hypot(gx - c.x, gy - c.y) <
-        rules.terrainAndCoverRules.minTreeDistanceFromSpawnTiles + 2
+        rules.terrainAndCoverRules.minTreeDistanceFromSpawnTiles + 1
       );
     });
     if (tooCloseToSpawn) continue;
@@ -1019,7 +1252,7 @@ export function generateProceduralMap(options?: {
     );
     if (tooCloseToSilver) continue;
 
-    const treeCountInGrove = rng.int(2, 3);
+    const treeCountInGrove = rng.int(3, 5);
     const groveSpecies = speciesCycle[grovesCreated % speciesCycle.length]!;
     let placedInGrove = 0;
 
@@ -1041,18 +1274,24 @@ export function generateProceduralMap(options?: {
 
       const idx = ty * width + tx;
       const tk = terrainGrid[idx];
-      if (tk !== TERRAIN_CODES.GRASS && tk !== TERRAIN_CODES.DIRT) continue;
+      if (
+        tk !== TERRAIN_CODES.GRASS &&
+        tk !== TERRAIN_CODES.DIRT &&
+        tk !== TERRAIN_CODES.SAND &&
+        tk !== TERRAIN_CODES.SWAMP
+      ) {
+        continue;
+      }
       if ((oreGrid[idx] ?? 0) > 0) continue;
 
-      const scale = Number(rng.range(0.82, 1.34).toFixed(2));
-      const kind =
+      const scale = Number(rng.range(0.85, 1.34).toFixed(2));
+      const fallbackKind =
         placedInGrove === 0
           ? groveSpecies
-          : tk === TERRAIN_CODES.DIRT
-            ? "TREE_PALM"
-            : rng.next() < 0.5
-              ? "TREE_PINE"
-              : "TREE_OAK";
+          : rng.next() < 0.5
+            ? "TREE_PINE"
+            : "TREE_OAK";
+      const kind = pickTreeSpeciesForTile(tx, ty, fallbackKind);
 
       occupiedTreeCoords.add(key);
       trees.push({ x: tx, y: ty, kind, scale });

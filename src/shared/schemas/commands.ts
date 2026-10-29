@@ -25,6 +25,7 @@ export const TreeKindSchema = z.enum([
   "TREE_PINE",
   "TREE_OAK",
   "TREE_PALM",
+  "TREE_CYPRESS",
 ]);
 
 export const UnitKindSchema = z.enum([
@@ -33,6 +34,8 @@ export const UnitKindSchema = z.enum([
   "ENGINEER",
   "CONSTRUCTOR_BOT",
   "HARVESTER",
+  "FORESTRY_TRUCK",
+  "BLOWER_TRUCK",
   "RECON_BUGGY",
   "MEDIUM_TANK",
   "ARTILLERY",

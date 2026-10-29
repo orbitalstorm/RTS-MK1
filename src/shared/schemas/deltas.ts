@@ -23,7 +23,7 @@ export const EntityStateSchema = z.object({
   spawnProtectionTicks: z.number().int().min(0).default(0),
   isRepairing: z.boolean().default(false),
   buildProgress: z.number().min(0).max(1).default(1),
-  treeScale: z.number().min(0.5).max(2).default(1),
+  treeScale: z.number().min(0.3).max(2).default(1),
   stateLabel: z
     .enum([
       "IDLE",
@@ -34,6 +34,8 @@ export const EntityStateSchema = z.object({
       "ALERT",
       "ATTACKING",
       "BUILDING",
+      "PLANTING",
+      "DRYING",
     ])
     .default("IDLE"),
 });
@@ -47,7 +49,7 @@ export const OreTileDeltaSchema = z.object({
 export const TerrainTileDeltaSchema = z.object({
   tileX: z.number().int().min(0),
   tileY: z.number().int().min(0),
-  terrainKind: z.number().int().min(0).max(6),
+  terrainKind: z.number().int().min(0).max(9),
 });
 
 export const ProductionQueueSlotSchema = z.object({
@@ -161,7 +163,7 @@ export const FullSnapshotSchema = z.object({
   tickId: z.number().int().min(0),
   mapWidth: z.number().int().positive(),
   mapHeight: z.number().int().positive(),
-  terrainGrid: z.array(z.number().int().min(0).max(6)), // 0=dirt/earth, 1=stone, 2=cliff(blocked), 3=ore, 4=grass, 5=concrete_slab, 6=silver_ore
+  terrainGrid: z.array(z.number().int().min(0).max(9)), // 0=dirt/earth, 1=stone, 2=cliff(blocked), 3=ore, 4=grass, 5=concrete_slab, 6=silver_ore, 7=water(blocked), 8=sand(x0.8), 9=swamp(x0.8, dryable)
   oreGrid: z.array(z.number().int().min(0)),
   entities: z.array(EntityStateSchema),
   players: z.array(PlayerEconomyDeltaSchema),

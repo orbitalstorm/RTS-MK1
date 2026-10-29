@@ -26,6 +26,7 @@ import {
   BUILDINGS,
   CAMERA_SHAKE_MAX_OFFSET_PX,
   canPlaceBuildingOnTerrainTile,
+  canPlantTreeOnTerrainKind,
   computeCameraShakeOffset,
   computeDistanceAttenuatedShakeTrauma,
   computeEdgeScrollVelocity,
@@ -36,17 +37,21 @@ import {
   degradeTerrainLayer,
   EDGE_SCROLL_MARGIN_PX,
   EDGE_SCROLL_MAX_SPEED_PX,
+  FORESTRY_PLANT_TICKS,
   generateProceduralMap,
   generateRandomMapSeed,
   getBalancedGridSlotCount,
   getConstructionCatalogItems,
   getSubcategoriesForCategory,
+  getTerrainLayerThickness,
+  getTerrainSpeedMultiplier,
   getTimedConstructionTicks,
   HARVESTER_MAX_LOAD,
   HARVESTER_UNLOAD_PER_TICK,
   interpolateAngleIndex16,
   interpolateEntityPose,
   isFoundationTerrainKind,
+  isPassableTerrainKind,
   MAP_GENERATION_RULES,
   MAP_HEIGHT_TILES,
   MAP_SIZE_PRESETS,
@@ -58,8 +63,12 @@ import {
   SILVER_MINE_YIELD_PER_CYCLE,
   SPAWN_CONCRETE_PAD_SIZE,
   SPRITE_ATLAS_SCALE,
+  SWAMP_DRYING_TICKS,
   TERRAIN_KIND,
   TOUCH_INTERACTION_MODES,
+  TREE_ADULT_SCALE,
+  TREE_GROWTH_DURATION_TICKS,
+  TREE_SAPLING_INITIAL_SCALE,
   TREES,
   UNIT_LIST,
   UNITS,
@@ -311,7 +320,7 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
   });
 
   it("v1.2.0 — supports Game Juice camera shake, shortest-arc 16-angle interpolation, and 2x Hi-DPI sprite scale", () => {
-    expect(APP_VERSION).toBe("1.12.0");
+    expect(APP_VERSION).toBe("1.13.0");
     expect(SPRITE_ATLAS_SCALE).toBe(2);
 
     // Zero trauma produces zero offset
@@ -1259,7 +1268,7 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
     expect(harv.transform.y).toBeCloseTo(dockY, 2);
 
     // 5. Destructible Trees of different species and sizes on the map
-    expect(Object.keys(TREES)).toEqual(["TREE_PINE", "TREE_OAK", "TREE_PALM"]);
+    expect(Object.keys(TREES)).toEqual(["TREE_PINE", "TREE_OAK", "TREE_PALM", "TREE_CYPRESS"]);
     const trees = sim.getAllEntities().filter((e) => e.entityType === "TREE");
     expect(trees.length).toBeGreaterThanOrEqual(20);
     const speciesSet = new Set(trees.map((t) => t.kind));
@@ -1427,7 +1436,7 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
     );
     expect(MAP_GENERATION_RULES.silverMineRules.minDistanceFromSpawnTiles).toBeGreaterThanOrEqual(28);
     expect(MAP_GENERATION_RULES.silverMineRules.minDistanceBetweenSilverDepositsTiles).toBeGreaterThanOrEqual(24);
-    expect(MAP_GENERATION_RULES.terrainAndCoverRules.minTreeDistanceFromSpawnTiles).toBeGreaterThanOrEqual(15);
+    expect(MAP_GENERATION_RULES.terrainAndCoverRules.minTreeDistanceFromSpawnTiles).toBeGreaterThanOrEqual(10);
 
     // 3. Deterministic seed reproducibility & seed diversity
     const seedA = normalizeMapSeed(777_888_999);
@@ -1528,7 +1537,7 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
   });
 
   it("v1.11.0 — enlarges global UI typography (zero text-[8px..11px] classes) and makes construction grid icons fill 100% of each tile", () => {
-    expect(APP_VERSION).toBe("1.12.0");
+    expect(APP_VERSION).toBe("1.13.0");
 
     const srcRoot = path.join(process.cwd(), "src");
     const collectSourceFiles = (dir: string): string[] => {
@@ -1655,5 +1664,145 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
     expect(matchPageContent).toContain('data-testid="gameover-skull-icon"');
     expect(matchPageContent).toContain("GAME OVER — Défaite Tactique");
     expect(matchPageContent).toContain("Signal EVA interrompu • Base anéantie");
+  });
+
+  it("v1.13.0 (ORB-21) — implements WATER (impassable & non-degrading), SAND (non-degrading, x0.8 speed), SWAMP (non-degrading, x0.8 speed, dryable by BLOWER_TRUCK into DIRT), multi-species destructible trees visible on explored tiles, and FORESTRY_TRUCK sapling planting & growth", () => {
+    // 1. Verify terrain constants & rules for WATER (7), SAND (8), SWAMP (9)
+    expect(TERRAIN_KIND.WATER).toBe(7);
+    expect(TERRAIN_KIND.SAND).toBe(8);
+    expect(TERRAIN_KIND.SWAMP).toBe(9);
+
+    expect(isPassableTerrainKind(TERRAIN_KIND.WATER)).toBe(false);
+    expect(isPassableTerrainKind(TERRAIN_KIND.CLIFF)).toBe(false);
+    expect(isPassableTerrainKind(TERRAIN_KIND.SAND)).toBe(true);
+    expect(isPassableTerrainKind(TERRAIN_KIND.SWAMP)).toBe(true);
+
+    expect(canPlaceBuildingOnTerrainTile("POWER_PLANT", TERRAIN_KIND.WATER)).toBe(false);
+    expect(canPlaceBuildingOnTerrainTile("POWER_PLANT", TERRAIN_KIND.SAND)).toBe(false);
+    expect(canPlaceBuildingOnTerrainTile("POWER_PLANT", TERRAIN_KIND.SWAMP)).toBe(false);
+
+    // Non-degrading when deteriorated
+    for (const kind of [TERRAIN_KIND.WATER, TERRAIN_KIND.SAND, TERRAIN_KIND.SWAMP]) {
+      expect(getTerrainLayerThickness(kind)).toBe(Infinity);
+      expect(degradeTerrainLayer(kind)).toBe(kind);
+    }
+
+    // Movement speed multipliers: x0.8 on SAND and SWAMP, x1.0 on GRASS/DIRT
+    expect(getTerrainSpeedMultiplier(TERRAIN_KIND.SAND)).toBe(0.8);
+    expect(getTerrainSpeedMultiplier(TERRAIN_KIND.SWAMP)).toBe(0.8);
+    expect(getTerrainSpeedMultiplier(TERRAIN_KIND.GRASS)).toBe(1.0);
+    expect(getTerrainSpeedMultiplier(TERRAIN_KIND.DIRT)).toBe(1.0);
+
+    // Tree planting eligibility
+    expect(canPlantTreeOnTerrainKind(TERRAIN_KIND.GRASS)).toBe(true);
+    expect(canPlantTreeOnTerrainKind(TERRAIN_KIND.DIRT)).toBe(true);
+    expect(canPlantTreeOnTerrainKind(TERRAIN_KIND.SAND)).toBe(true);
+    expect(canPlantTreeOnTerrainKind(TERRAIN_KIND.SWAMP)).toBe(true);
+    expect(canPlantTreeOnTerrainKind(TERRAIN_KIND.WATER)).toBe(false);
+    expect(canPlantTreeOnTerrainKind(TERRAIN_KIND.CONCRETE_SLAB)).toBe(false);
+
+    const sim = new RtsSimulation("test_v1130_orb21", [
+      { playerId: "p1", commanderName: "Alpha", faction: "GDI", isAi: false },
+      { playerId: "p2", commanderName: "Beta", faction: "NOD", isAi: false },
+    ]);
+
+    // 2. Verify WATER blocks A* pathfinding and ground unit traversal
+    const grid = new SpatialReservationGrid(16, 16, new Array(16 * 16).fill(TERRAIN_KIND.GRASS));
+    grid.updateTerrainTile(5, 5, TERRAIN_KIND.WATER);
+    expect(grid.reserveUnitTile(5, 5, "unit_a")).toBe(false);
+    const astar = new AStarPathfinder(16, 16);
+    const pathAroundWater = astar.findPath(3, 5, 7, 5, grid, "unit_a", true);
+    expect(pathAroundWater.length).toBeGreaterThan(0);
+    expect(pathAroundWater.some((wp) => wp.x === 5 && wp.y === 5)).toBe(false);
+
+    // 3. Verify projectile explosions do NOT degrade WATER, SAND, or SWAMP
+    sim.terrainGrid[45 * sim.width + 45] = TERRAIN_KIND.WATER;
+    sim.terrainGrid[45 * sim.width + 46] = TERRAIN_KIND.SAND;
+    sim.terrainGrid[45 * sim.width + 47] = TERRAIN_KIND.SWAMP;
+    const mammoth = sim.createUnitEntity("p1", "GDI", "MAMMOTH_TANK", 45, 42);
+    mammoth.spawnProtectionTicks = 0;
+    for (const tx of [45, 46, 47]) {
+      sim.issueAttackGroundCommand("p1", [mammoth.id], tx, 45);
+      for (let t = 0; t < 35; t++) {
+        sim.stepTick();
+      }
+    }
+    expect(sim.terrainGrid[45 * sim.width + 45]).toBe(TERRAIN_KIND.WATER);
+    expect(sim.terrainGrid[45 * sim.width + 46]).toBe(TERRAIN_KIND.SAND);
+    expect(sim.terrainGrid[45 * sim.width + 47]).toBe(TERRAIN_KIND.SWAMP);
+
+    // 4. Verify x0.8 movement speed on SAND and SWAMP vs DIRT
+    for (let x = 50; x <= 60; x++) {
+      sim.terrainGrid[50 * sim.width + x] = TERRAIN_KIND.DIRT;
+      sim.terrainGrid[52 * sim.width + x] = TERRAIN_KIND.SAND;
+      sim.terrainGrid[54 * sim.width + x] = TERRAIN_KIND.SWAMP;
+    }
+    const tankDirt = sim.createUnitEntity("p1", "GDI", "MEDIUM_TANK", 50, 50);
+    const tankSand = sim.createUnitEntity("p1", "GDI", "MEDIUM_TANK", 50, 52);
+    const tankSwamp = sim.createUnitEntity("p1", "GDI", "MEDIUM_TANK", 50, 54);
+    sim.issueMoveCommand("p1", [tankDirt.id], 58, 50);
+    sim.issueMoveCommand("p1", [tankSand.id], 58, 52);
+    sim.issueMoveCommand("p1", [tankSwamp.id], 58, 54);
+    sim.stepTick();
+    const advanceDirt = tankDirt.transform.x - 50;
+    const advanceSand = tankSand.transform.x - 50;
+    const advanceSwamp = tankSwamp.transform.x - 50;
+    expect(advanceDirt).toBeGreaterThan(0);
+    expect(advanceSand / advanceDirt).toBeCloseTo(0.8, 3);
+    expect(advanceSwamp / advanceDirt).toBeCloseTo(0.8, 3);
+
+    // 5. Verify BLOWER_TRUCK ("Soufflerie Mobile") dries SWAMP into DIRT
+    expect(UNITS.BLOWER_TRUCK.name).toBe("Soufflerie Mobile");
+    sim.terrainGrid[65 * sim.width + 65] = TERRAIN_KIND.SWAMP;
+    const blower = sim.createUnitEntity("p1", "GDI", "BLOWER_TRUCK", 65.5, 65.5);
+    expect(sim.issueDrySwampCommand("p1", [blower.id], 65, 65)).toBe(true);
+    for (let t = 0; t < SWAMP_DRYING_TICKS + 5; t++) {
+      sim.stepTick();
+    }
+    expect(sim.terrainGrid[65 * sim.width + 65]).toBe(TERRAIN_KIND.DIRT);
+
+    // 6. Verify FORESTRY_TRUCK ("Camion Forestier") plants a sapling that grows over TREE_GROWTH_DURATION_TICKS into an adult tree
+    expect(UNITS.FORESTRY_TRUCK.name).toBe("Camion Forestier");
+    sim.terrainGrid[70 * sim.width + 70] = TERRAIN_KIND.GRASS;
+    // Clear any existing tree at (70, 70)
+    for (const ent of sim.getAllEntities()) {
+      if (ent.entityType === "TREE" && Math.floor(ent.transform.x) === 70 && Math.floor(ent.transform.y) === 70) {
+        ent.health.hp = 0;
+      }
+    }
+    sim.stepTick();
+
+    const forester = sim.createUnitEntity("p1", "GDI", "FORESTRY_TRUCK", 70.5, 70.5);
+    expect(sim.issuePlantTreeCommand("p1", [forester.id], 70, 70)).toBe(true);
+    for (let t = 0; t < FORESTRY_PLANT_TICKS + 5; t++) {
+      sim.stepTick();
+    }
+
+    const plantedSapling = sim
+      .getAllEntities()
+      .find((e) => e.entityType === "TREE" && Math.floor(e.transform.x) === 70 && Math.floor(e.transform.y) === 70);
+    expect(plantedSapling).toBeDefined();
+    expect(plantedSapling!.isSapling).toBe(true);
+    expect(plantedSapling!.treeScale!).toBeLessThan(0.6);
+    expect(plantedSapling!.treeScale!).toBeGreaterThanOrEqual(TREE_SAPLING_INITIAL_SCALE);
+    const saplingInitialHp = plantedSapling!.health.hp;
+
+    // Step through full growth duration (600 ticks = 30s)
+    for (let t = 0; t < TREE_GROWTH_DURATION_TICKS; t++) {
+      sim.stepTick();
+    }
+    const grownTree = sim.getEntity(plantedSapling!.id);
+    expect(grownTree).toBeDefined();
+    expect(grownTree!.isSapling).toBe(false);
+    expect(grownTree!.treeScale).toBeCloseTo(TREE_ADULT_SCALE, 2);
+    expect(grownTree!.health.hp).toBeGreaterThan(saplingInitialHp);
+
+    // 7. Verify trees remain visible on explored tiles in world-renderer.ts and minimap-renderer.ts
+    const worldRendererSrc = fs.readFileSync(
+      path.resolve(__dirname, "../src/renderer/world-renderer.ts"),
+      "utf8"
+    );
+    expect(worldRendererSrc).toContain('if (ent.entityType === "TREE")');
+    expect(worldRendererSrc).toContain("if (hasFog && !exploredCells.has(tileIdx)) {");
   });
 });

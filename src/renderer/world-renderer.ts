@@ -114,13 +114,37 @@ const STRATUM_PALETTES: Record<number, StratumPalette> = {
     cornerRadiusRatio: 0.34,
     thicknessPx: 2.2,
   },
+  [TERRAIN_KIND.WATER]: {
+    fill: "#0b3b5b",
+    lipShadow: "#051e32",
+    lipHighlight: "#38bdf8",
+    cornerRadiusRatio: 0.5,
+    thicknessPx: 2.8,
+  },
+  [TERRAIN_KIND.SAND]: {
+    fill: "#a8843e",
+    lipShadow: "#6b501d",
+    lipHighlight: "#d4b06a",
+    cornerRadiusRatio: 0.5,
+    thicknessPx: 2.2,
+  },
+  [TERRAIN_KIND.SWAMP]: {
+    fill: "#213628",
+    lipShadow: "#111f16",
+    lipHighlight: "#3a5a44",
+    cornerRadiusRatio: 0.5,
+    thicknessPx: 2.5,
+  },
 };
 
 function getTerrainVisualPriority(kind: number): number {
   const norm = normalizeBaseTerrainKind(kind);
-  if (norm === TERRAIN_KIND.CLIFF) return 5;
-  if (norm === TERRAIN_KIND.CONCRETE_SLAB) return 4;
-  if (norm === TERRAIN_KIND.GRASS) return 3;
+  if (norm === TERRAIN_KIND.CLIFF) return 8;
+  if (norm === TERRAIN_KIND.CONCRETE_SLAB) return 7;
+  if (norm === TERRAIN_KIND.GRASS) return 6;
+  if (norm === TERRAIN_KIND.SWAMP) return 5;
+  if (norm === TERRAIN_KIND.SAND) return 4;
+  if (norm === TERRAIN_KIND.WATER) return 3;
   if (norm === TERRAIN_KIND.DIRT) return 2;
   return 1; // STONE
 }
@@ -223,6 +247,61 @@ function drawSparseOrganicTerrainDetail(
       ctx.arc(rx - radX * 0.28, ry - radY * 0.28, Math.max(0.55, radX * 0.45), 0, Math.PI * 2);
       ctx.fill();
     }
+    return;
+  }
+
+  if (centerKind === TERRAIN_KIND.WATER) {
+    // Specular wave ripples & subtle foam crests on impassable water tiles
+    const waveY1 = py + 9 + ((h0 & 0x0f) / 15) * 4;
+    const waveY2 = py + 21 + (((h0 >>> 4) & 0x0f) / 15) * 4;
+    ctx.strokeStyle = "rgba(125, 211, 252, 0.34)";
+    ctx.lineWidth = 1.25;
+    ctx.beginPath();
+    ctx.moveTo(px + 5, waveY1);
+    ctx.quadraticCurveTo(px + s * 0.5, waveY1 - 2.4, px + s - 5, waveY1);
+    ctx.moveTo(px + 8, waveY2);
+    ctx.quadraticCurveTo(px + s * 0.55, waveY2 - 2.0, px + s - 6, waveY2);
+    ctx.stroke();
+    return;
+  }
+
+  if (centerKind === TERRAIN_KIND.SAND) {
+    // Wind-rippled sand dune lines & warm quartz grains
+    if ((h0 & 255) > 150) return;
+    const rippleY = py + 11 + ((h0 & 0x1f) / 31) * (s - 22);
+    ctx.strokeStyle = "rgba(254, 240, 138, 0.32)";
+    ctx.lineWidth = 1.1;
+    ctx.beginPath();
+    ctx.moveTo(px + 4, rippleY);
+    ctx.bezierCurveTo(
+      px + s * 0.33,
+      rippleY - 2.5,
+      px + s * 0.66,
+      rippleY + 2.5,
+      px + s - 4,
+      rippleY
+    );
+    ctx.stroke();
+    return;
+  }
+
+  if (centerKind === TERRAIN_KIND.SWAMP) {
+    // Murky bog puddle & marsh reed tuft on swamp tiles
+    const rx = px + 9 + ((h0 & 0x1f) / 31) * (s - 18);
+    const ry = py + 10 + (((h0 >>> 6) & 0x1f) / 31) * (s - 20);
+    ctx.fillStyle = "rgba(14, 116, 144, 0.34)";
+    ctx.beginPath();
+    ctx.ellipse(rx, ry, 5.2, 3.0, 0.15, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = "#4d7c0f";
+    ctx.lineWidth = 1.15;
+    ctx.beginPath();
+    ctx.moveTo(rx - 1.5, ry + 0.5);
+    ctx.lineTo(rx - 3.0, ry - 4.2);
+    ctx.moveTo(rx + 1.2, ry + 0.5);
+    ctx.lineTo(rx + 2.6, ry - 3.8);
+    ctx.stroke();
   }
 }
 
@@ -709,7 +788,11 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
 
     const tileIdx = Math.round(interpY) * MAP_WIDTH_TILES + Math.round(interpX);
     const isAllied = ent.ownerId === localPlayerId;
-    if (!isAllied && hasFog && !visibleCells.has(tileIdx)) {
+    if (ent.entityType === "TREE") {
+      if (hasFog && !exploredCells.has(tileIdx)) {
+        continue;
+      }
+    } else if (!isAllied && hasFog && !visibleCells.has(tileIdx)) {
       // Enemy units & structures hidden beneath Fog of War / Shroud when outside allied sight
       continue;
     }
@@ -2313,6 +2396,31 @@ function drawUnitLiveAnimation(
     ctx.arc(arcX, -s * 0.48, 2.2 + pulse * 1.5, 0, Math.PI * 2);
     ctx.fillStyle = "#e0f2fe";
     ctx.fill();
+  } else if (ent.kind === "FORESTRY_TRUCK" && ent.stateLabel === "PLANTING") {
+    // Active sapling planting auger & emerald bio-ring behind the Forestry Truck
+    ctx.strokeStyle = "#4ade80";
+    ctx.lineWidth = 2.0;
+    ctx.beginPath();
+    ctx.arc(0, s * 0.36, 4.5 + pulse * 2.5, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(0, s * 0.36, 2.2, 0, Math.PI * 2);
+    ctx.fillStyle = "#22c55e";
+    ctx.fill();
+  } else if (ent.kind === "BLOWER_TRUCK" && ent.stateLabel === "DRYING") {
+    // High-power thermal air-jet stream waves blowing forward (-Y) to dry Swamp into Dirt
+    for (let i = 0; i < 3; i++) {
+      const wavePhase = ((frameNowMs * 0.004 + i * 0.33) % 1);
+      const wy = -s * (0.38 + wavePhase * 0.55);
+      const ww = 6 + wavePhase * 9;
+      ctx.strokeStyle = `rgba(251, 146, 60, ${(0.85 * (1 - wavePhase)).toFixed(2)})`;
+      ctx.lineWidth = 2.0;
+      ctx.beginPath();
+      ctx.moveTo(-ww, wy);
+      ctx.quadraticCurveTo(0, wy - 3.5, ww, wy);
+      ctx.stroke();
+    }
   } else if (ent.kind === "MCV") {
     // Blinking amber command beacon on MCV roof
     ctx.beginPath();
@@ -2413,7 +2521,8 @@ function drawSilverOreBoulderTile(
 }
 
 /**
- * Renders a destructible Tree entity (`TREE_PINE`, `TREE_OAK`, `TREE_PALM`) with its size scale (`treeScale`).
+ * Renders a destructible Tree entity (`TREE_PINE`, `TREE_OAK`, `TREE_PALM`, `TREE_CYPRESS`) with its size scale (`treeScale`).
+ * Saplings (`treeScale < 0.95`) display a subtle botanical growth halo as they mature toward adult size (`1.10`).
  */
 function drawDestructibleTreeEntity(
   ctx: CanvasRenderingContext2D,
@@ -2430,6 +2539,16 @@ function drawDestructibleTreeEntity(
 
   ctx.save();
 
+  // If this tree is a growing sapling (planted by a Forestry Truck), draw a subtle nursery growth ring
+  if (scale < 0.95) {
+    const growthRatio = Math.max(0.05, Math.min(1, (scale - 0.42) / (1.1 - 0.42)));
+    ctx.strokeStyle = "rgba(74, 222, 128, 0.45)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(cx, cy + 2, 11 * scale + 3, -Math.PI * 0.5, -Math.PI * 0.5 + Math.PI * 2 * growthRatio);
+    ctx.stroke();
+  }
+
   // 1. Soft elliptical ground shadow
   ctx.fillStyle = "rgba(8, 14, 10, 0.45)";
   ctx.beginPath();
@@ -2437,7 +2556,7 @@ function drawDestructibleTreeEntity(
   ctx.fill();
 
   // 2. Trunk
-  ctx.fillStyle = "#5c4028";
+  ctx.fillStyle = ent.kind === "TREE_CYPRESS" ? "#4a3728" : "#5c4028";
   ctx.fillRect(cx - 2.2 * scale, cy - 2 * scale, 4.4 * scale, 8 * scale);
 
   // 3. Species-specific foliage canopy
@@ -2484,6 +2603,38 @@ function drawDestructibleTreeEntity(
     ctx.arc(crownX, crownY, 3 * scale, 0, Math.PI * 2);
     ctx.fillStyle = "#4ade80";
     ctx.fill();
+  } else if (ent.kind === "TREE_CYPRESS") {
+    // Swamp Cypress (Cyprès des Marais): tall tapered marsh canopy with hanging moss fronds
+    const tiers: Array<[number, number, number, string]> = [
+      [0, -1, 8.5, "#1e3f2b"],
+      [-4, 1, 6.2, "#285438"],
+      [4, 1, 6.2, "#285438"],
+      [0, -6.5, 6.5, "#346b47"],
+      [0, -10.5, 4.2, "#4ade80"],
+    ];
+    for (const [lx, ly, lr, col] of tiers) {
+      ctx.beginPath();
+      ctx.ellipse(
+        cx + lx * scale + sway * 0.5,
+        cy + ly * scale,
+        lr * scale,
+        lr * 1.15 * scale,
+        0,
+        0,
+        Math.PI * 2
+      );
+      ctx.fillStyle = col;
+      ctx.fill();
+    }
+    // Hanging Spanish moss strands
+    ctx.strokeStyle = "#86efac";
+    ctx.lineWidth = Math.max(0.9, 1.1 * scale);
+    ctx.beginPath();
+    ctx.moveTo(cx - 5 * scale + sway * 0.5, cy + 1 * scale);
+    ctx.lineTo(cx - 5 * scale + sway * 0.7, cy + 5.5 * scale);
+    ctx.moveTo(cx + 5 * scale + sway * 0.5, cy + 1 * scale);
+    ctx.lineTo(cx + 5 * scale + sway * 0.7, cy + 5.5 * scale);
+    ctx.stroke();
   } else {
     // TREE_OAK: lush multi-lobed broadleaf canopy
     const lobes: Array<[number, number, number, string]> = [

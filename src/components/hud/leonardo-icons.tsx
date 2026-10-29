@@ -758,6 +758,33 @@ export const ProductionItemVectorIcon = React.memo(function ProductionItemVector
             <polygon points="11,26 25,34 28,31 15,23" fill="#38bdf8" stroke="#091526" strokeWidth="1.1" />
           </>
         )}
+
+        {itemKind === "FORESTRY_TRUCK" && (
+          <>
+            {/* 3/4 Heavy Forestry Truck with Rear Sapling Nursery Rack & Forward Cab */}
+            <polygon points="8,40 28,52 28,57 8,45" fill="#18181b" stroke="#64748b" strokeWidth="1.2" />
+            <polygon points="28,52 55,37 55,43 28,57" fill="#09090b" stroke="#334155" strokeWidth="1.2" />
+            {/* Rear Open Nursery Bed (Emerald Soil & Sapling Crate) */}
+            <polygon points="24,16 54,28 54,40 24,28" fill="#14532d" stroke="#22c55e" strokeWidth="1.3" />
+            <polygon points="24,16 54,28 40,36 14,23" fill="#064e3b" stroke="#4ade80" strokeWidth="1.3" />
+            {/* Forward Forestry Cab (Sunlit NW) */}
+            <polygon points="9,28 28,39 28,50 9,39" fill={`url(#${hullGradId})`} stroke="#0f172a" strokeWidth="1.4" />
+            <polygon points="19,21 38,31 28,39 9,28" fill={pColor} stroke="#0f172a" strokeWidth="1.3" />
+            <polygon points="12,28 24,35 27,32 15,25" fill="#38bdf8" stroke="#091526" strokeWidth="1" />
+          </>
+        )}
+
+        {itemKind === "BLOWER_TRUCK" && (
+          <>
+            {/* 3/4 Mobile Thermal Blower Truck with Twin Turbo-Fan Turbines */}
+            <polygon points="8,40 28,52 28,57 8,45" fill="#18181b" stroke="#64748b" strokeWidth="1.2" />
+            <polygon points="28,52 55,37 55,43 28,57" fill="#09090b" stroke="#334155" strokeWidth="1.2" />
+            {/* Main Amphibious Engineering Hull */}
+            <polygon points="9,30 29,42 29,51 9,39" fill={`url(#${hullGradId})`} stroke="#0f172a" strokeWidth="1.3" />
+            <polygon points="29,42 54,28 54,38 29,51" fill={`url(#${shadeGradId})`} stroke="#0f172a" strokeWidth="1.3" />
+            <polygon points="29,18 54,28 29,42 9,30" fill="#1e293b" stroke={pColor} strokeWidth="1.3" />
+          </>
+        )}
       </g>
 
       {/* LAYER 3: MECHANICAL SUB-ASSEMBLIES (3/4 Barrels, Weapons, Crystals, Cranes, Rotors) */}
@@ -1017,6 +1044,27 @@ export const ProductionItemVectorIcon = React.memo(function ProductionItemVector
             <line x1="25" y1="24" x2="47" y2="16" stroke="#eab308" strokeWidth="3.5" strokeLinecap="round" />
             <circle cx="24" cy="22" r="3" fill="#facc15" stroke="#ffffff" strokeWidth="1" />
             <line x1="32" y1="45" x2="50" y2="35" stroke="#eab308" strokeWidth="2.2" strokeDasharray="3 2" />
+          </>
+        )}
+
+        {itemKind === "FORESTRY_TRUCK" && (
+          <>
+            {/* 3 Emerald Sapling Canopies in Nursery Rack & Hydraulic Planting Boom */}
+            <polygon points="34,11 40,22 28,22" fill="#22c55e" stroke="#052e16" strokeWidth="1" />
+            <polygon points="44,16 50,26 38,26" fill="#4ade80" stroke="#052e16" strokeWidth="1" />
+            <line x1="45" y1="28" x2="55" y2="21" stroke="#eab308" strokeWidth="2.8" strokeLinecap="round" />
+          </>
+        )}
+
+        {itemKind === "BLOWER_TRUCK" && (
+          <>
+            {/* Twin Turbo-Fan Thermal Blowers & Orange Heat Waves */}
+            <circle cx="29" cy="25" r="6" fill="#0f172a" stroke="#38bdf8" strokeWidth="1.5" />
+            <circle cx="41" cy="22" r="6" fill="#0f172a" stroke="#38bdf8" strokeWidth="1.5" />
+            <circle cx="29" cy="25" r="2.2" fill="#f97316" />
+            <circle cx="41" cy="22" r="2.2" fill="#f97316" />
+            <path d="M8,36 Q14,32 20,38" fill="none" stroke="#fb923c" strokeWidth="2" />
+            <path d="M5,41 Q12,37 18,43" fill="none" stroke="#facc15" strokeWidth="1.8" />
           </>
         )}
       </g>

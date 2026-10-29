@@ -385,6 +385,56 @@ export function drawLeonardoTerrainTile(
     ctx.moveTo(33 * u, 42 * u);
     ctx.lineTo(48 * u, 32 * u);
     ctx.stroke();
+  } else if (kind === 7) {
+    // Deep Impassable Water (WATER): abyssal cerulean-navy gradient with specular wave ripples
+    const waterGrad = ctx.createLinearGradient(0, 0, s, s);
+    waterGrad.addColorStop(0, "#0b3b5b");
+    waterGrad.addColorStop(0.55, "#082f49");
+    waterGrad.addColorStop(1, "#051e32");
+    ctx.fillStyle = waterGrad;
+    ctx.fillRect(0, 0, s, s);
+
+    ctx.strokeStyle = "rgba(125, 211, 252, 0.25)";
+    ctx.lineWidth = 1.2 * u;
+    ctx.beginPath();
+    ctx.moveTo(8 * u, 16 * u);
+    ctx.quadraticCurveTo(22 * u, 11 * u, 36 * u, 16 * u);
+    ctx.moveTo(22 * u, 36 * u);
+    ctx.quadraticCurveTo(38 * u, 31 * u, 54 * u, 36 * u);
+    ctx.moveTo(10 * u, 52 * u);
+    ctx.quadraticCurveTo(26 * u, 47 * u, 42 * u, 52 * u);
+    ctx.stroke();
+  } else if (kind === 8) {
+    // Golden Dune Sand (SAND): warm ochre-gold sand with wind-rippled crests
+    const sandGrad = ctx.createLinearGradient(0, 0, s, s);
+    sandGrad.addColorStop(0, "#b89146");
+    sandGrad.addColorStop(0.55, "#9e7a36");
+    sandGrad.addColorStop(1, "#856428");
+    ctx.fillStyle = sandGrad;
+    ctx.fillRect(0, 0, s, s);
+
+    ctx.strokeStyle = "rgba(254, 240, 138, 0.28)";
+    ctx.lineWidth = 1.1 * u;
+    ctx.beginPath();
+    ctx.moveTo(4 * u, 18 * u);
+    ctx.bezierCurveTo(22 * u, 12 * u, 42 * u, 24 * u, 60 * u, 18 * u);
+    ctx.moveTo(4 * u, 44 * u);
+    ctx.bezierCurveTo(22 * u, 38 * u, 42 * u, 50 * u, 60 * u, 44 * u);
+    ctx.stroke();
+  } else if (kind === 9) {
+    // Murky Swamp Marsh (SWAMP): olive-teal bog with murky puddles & reed tufts
+    const swampGrad = ctx.createLinearGradient(0, 0, s, s);
+    swampGrad.addColorStop(0, "#253829");
+    swampGrad.addColorStop(0.55, "#1b2a1f");
+    swampGrad.addColorStop(1, "#131f16");
+    ctx.fillStyle = swampGrad;
+    ctx.fillRect(0, 0, s, s);
+
+    ctx.fillStyle = "rgba(14, 116, 144, 0.28)";
+    ctx.beginPath();
+    ctx.ellipse(22 * u, 26 * u, 12 * u, 7 * u, 0.2, 0, Math.PI * 2);
+    ctx.ellipse(44 * u, 44 * u, 11 * u, 6 * u, -0.3, 0, Math.PI * 2);
+    ctx.fill();
   } else {
     // kind === 3: Rich Crystalline Tiberium / Spice Deposit
     const bedGrad = ctx.createRadialGradient(s * 0.5, s * 0.5, 4 * u, s * 0.5, s * 0.5, s * 0.46);
@@ -2053,6 +2103,136 @@ export function drawLeonardoUnitBody(
     ctx.fillRect(-12 * u, 12 * u, 24 * u, 2.2 * u);
 
     drawWorldSpaceNwSpecularArc(ctx, radians, 16 * u, 19 * u, u, 0.42);
+    return;
+  }
+
+  if (kind === "FORESTRY_TRUCK") {
+    // Forestry Truck (Camion Forestier): 6-wheel heavy forestry chassis with rear sapling nursery bed & planting auger arm
+    ctx.fillStyle = "rgba(0, 0, 0, 0.52)";
+    traceChamferedRect(ctx, -16 * u + shadowVec.x, -21 * u + shadowVec.y, 32 * u, 42 * u, 4 * u);
+    ctx.fill();
+
+    // 6 Heavy Off-Road Forestry Tires
+    drawDetailedTrack(ctx, -18 * u, -17 * u, 4 * u, 9 * u, 3);
+    drawDetailedTrack(ctx, 14 * u, -17 * u, 4 * u, 9 * u, 3);
+    drawDetailedTrack(ctx, -18 * u, -3 * u, 4 * u, 9 * u, 3);
+    drawDetailedTrack(ctx, 14 * u, -3 * u, 4 * u, 9 * u, 3);
+    drawDetailedTrack(ctx, -18 * u, 9 * u, 4 * u, 9 * u, 3);
+    drawDetailedTrack(ctx, 14 * u, 9 * u, 4 * u, 9 * u, 3);
+
+    // Main Forestry Chassis Frame
+    traceChamferedRect(ctx, -14 * u, -19 * u, 28 * u, 38 * u, 4 * u);
+    ctx.fillStyle = createWorldSunLinearGradient(
+      ctx,
+      radians,
+      16 * u,
+      fSpec.primaryColor,
+      fSpec.secondaryColor
+    );
+    ctx.fill();
+    ctx.strokeStyle = "#0f172a";
+    ctx.lineWidth = 1.6 * u;
+    ctx.stroke();
+
+    // Forward Armored Forestry Cab (-Y)
+    traceChamferedRect(ctx, -11 * u, -17 * u, 22 * u, 10 * u, 3 * u);
+    ctx.fillStyle = fSpec.primaryColor;
+    ctx.fill();
+    ctx.fillStyle = "#38bdf8";
+    ctx.fillRect(-8 * u, -15 * u, 16 * u, 3 * u);
+
+    // Rear Open Nursery Bed carrying 3 Emerald Saplings
+    ctx.fillStyle = "#14261c";
+    ctx.fillRect(-11 * u, -5 * u, 22 * u, 21 * u);
+    ctx.strokeStyle = "#22c55e";
+    ctx.lineWidth = 1.2 * u;
+    ctx.strokeRect(-11 * u, -5 * u, 22 * u, 21 * u);
+
+    const saplingSpots: Array<[number, number]> = [
+      [-5 * u, 1 * u],
+      [5 * u, 1 * u],
+      [0, 9 * u],
+    ];
+    for (const [sx, sy] of saplingSpots) {
+      ctx.beginPath();
+      ctx.arc(sx, sy, 3.8 * u, 0, Math.PI * 2);
+      ctx.fillStyle = "#15803d";
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(sx - 0.8 * u, sy - 0.8 * u, 2.2 * u, 0, Math.PI * 2);
+      ctx.fillStyle = "#4ade80";
+      ctx.fill();
+    }
+
+    // Rear Hydraulic Planting Auger Boom
+    ctx.strokeStyle = "#eab308";
+    ctx.lineWidth = 2.6 * u;
+    ctx.beginPath();
+    ctx.moveTo(0, 14 * u);
+    ctx.lineTo(0, 21 * u);
+    ctx.stroke();
+
+    drawWorldSpaceNwSpecularArc(ctx, radians, 12 * u, 16 * u, u, 0.42);
+    return;
+  }
+
+  if (kind === "BLOWER_TRUCK") {
+    // Mobile Blower Truck (Soufflerie Mobile): Tracked amphibious engineering chassis with twin directional thermal turbo-blowers
+    ctx.fillStyle = "rgba(0, 0, 0, 0.54)";
+    traceChamferedRect(ctx, -17 * u + shadowVec.x, -21 * u + shadowVec.y, 34 * u, 42 * u, 5 * u);
+    ctx.fill();
+
+    // Wide Low-Ground-Pressure Swamp Tracks
+    drawDetailedTrack(ctx, -19 * u, -18 * u, 5 * u, 36 * u, 9);
+    drawDetailedTrack(ctx, 14 * u, -18 * u, 5 * u, 36 * u, 9);
+
+    // Main Engineering Hull
+    traceChamferedRect(ctx, -14 * u, -19 * u, 28 * u, 38 * u, 4 * u);
+    ctx.fillStyle = createWorldSunLinearGradient(
+      ctx,
+      radians,
+      16 * u,
+      fSpec.primaryColor,
+      fSpec.secondaryColor
+    );
+    ctx.fill();
+    ctx.strokeStyle = "#0f172a";
+    ctx.lineWidth = 1.6 * u;
+    ctx.stroke();
+
+    // Front Directional Thermal Air-Jet Nozzle Shroud (-Y)
+    drawHazardStripes(ctx, -12 * u, -21 * u, 24 * u, 4 * u, 3 * u);
+
+    // Twin High-Velocity Turbo-Fan Cowlings on Dorsal Deck
+    for (const txOff of [-6.5 * u, 6.5 * u]) {
+      ctx.beginPath();
+      ctx.arc(txOff, 2 * u, 5.5 * u, 0, Math.PI * 2);
+      ctx.fillStyle = "#1e293b";
+      ctx.fill();
+      ctx.strokeStyle = "#38bdf8";
+      ctx.lineWidth = 1.4 * u;
+      ctx.stroke();
+
+      // Turbine blades
+      ctx.strokeStyle = "#cbd5e1";
+      ctx.lineWidth = 1.1 * u;
+      ctx.beginPath();
+      ctx.moveTo(txOff - 3.8 * u, 2 * u);
+      ctx.lineTo(txOff + 3.8 * u, 2 * u);
+      ctx.moveTo(txOff, 2 * u - 3.8 * u);
+      ctx.lineTo(txOff, 2 * u + 3.8 * u);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.arc(txOff, 2 * u, 1.8 * u, 0, Math.PI * 2);
+      ctx.fillStyle = "#f97316";
+      ctx.fill();
+    }
+
+    // Rear Thermal Generator Louvers
+    drawVentLouvers(ctx, -9 * u, 11 * u, 18 * u, 5 * u, 3);
+
+    drawWorldSpaceNwSpecularArc(ctx, radians, 12.5 * u, 16 * u, u, 0.44);
     return;
   }
 
