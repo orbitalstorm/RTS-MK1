@@ -311,7 +311,7 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
   });
 
   it("v1.2.0 — supports Game Juice camera shake, shortest-arc 16-angle interpolation, and 2x Hi-DPI sprite scale", () => {
-    expect(APP_VERSION).toBe("1.11.0");
+    expect(APP_VERSION).toBe("1.11.1");
     expect(SPRITE_ATLAS_SCALE).toBe(2);
 
     // Zero trauma produces zero offset
@@ -1528,7 +1528,7 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
   });
 
   it("v1.11.0 — enlarges global UI typography (zero text-[8px..11px] classes) and makes construction grid icons fill 100% of each tile", () => {
-    expect(APP_VERSION).toBe("1.11.0");
+    expect(APP_VERSION).toBe("1.11.1");
 
     const srcRoot = path.join(process.cwd(), "src");
     const collectSourceFiles = (dir: string): string[] => {
@@ -1572,5 +1572,88 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
     );
     expect(iconsContent).toContain('className = "h-full w-full"');
     expect(iconsContent).toContain('viewBox="4 4 56 56"');
+  });
+
+  it("v1.12.0 (ORB-17) — implements 3/4 HUD cameos, 16-angle fixed NW sun lighting, rotating defense buildingTurrets, dynamic Harvester ore bed, differentiated foundations, 3-stage construction, and terrainTiles cleanup", () => {
+    const srcRoot = path.join(process.cwd(), "src");
+    const iconsContent = fs.readFileSync(
+      path.join(srcRoot, "components/hud/leonardo-icons.tsx"),
+      "utf8"
+    );
+    const atlasContent = fs.readFileSync(
+      path.join(srcRoot, "renderer/generator/atlas-generator.ts"),
+      "utf8"
+    );
+    const vectorArtContent = fs.readFileSync(
+      path.join(srcRoot, "renderer/generator/leonardo-vector-art.ts"),
+      "utf8"
+    );
+    const worldRendererContent = fs.readFileSync(
+      path.join(srcRoot, "renderer/world-renderer.ts"),
+      "utf8"
+    );
+
+    // Lot 1: 3/4 isometric cameos, enriched emblems & tactical 3/4 infantry portraits (no generic 3-circle squad in HUD icon)
+    expect(iconsContent).toContain('viewBox="4 4 56 56"');
+    expect(iconsContent).toContain("shadeGradId");
+    expect(iconsContent).not.toContain("3-Soldier Tactical Formation");
+
+    // Lot 2: 16-angle fixed world-space NW sun vector & individual infantry rotation
+    expect(atlasContent).toContain("drawLeonardoUnitBody(ctx, faction, kind, s, angleIndex)");
+    expect(atlasContent).toContain("drawLeonardoUnitTurret(ctx, faction, kind, s, angleIndex)");
+    expect(vectorArtContent).toContain("toLocalSunVector");
+    expect(vectorArtContent).toContain("createWorldSunLinearGradient");
+
+    // Lot 3: Rotating defense buildingTurrets (GUARD_TOWER, SAM_SITE) & dynamic Harvester ore dump-bed
+    expect(atlasContent).toContain("buildingTurrets: Map<string, ImageBitmap>");
+    expect(vectorArtContent).toContain("export function drawLeonardoBuildingTurret(");
+    expect(worldRendererContent).toContain("atlas.buildingTurrets?.get(");
+    expect(worldRendererContent).toContain("activeCrystalCount");
+
+    // Lot 4: Differentiated building foundations, 3-stage construction overlay & terrainTiles cleanup
+    expect(vectorArtContent).toContain("drawDifferentiatedBuildingFoundation");
+    expect(worldRendererContent).toContain("PHASE 1 (0–33%)");
+    expect(worldRendererContent).toContain("PHASE 2 (34–66%)");
+    expect(worldRendererContent).toContain("PHASE 3 (67–99%)");
+    expect(atlasContent).not.toContain("terrainTiles");
+  });
+
+  it("v1.11.1 (ORB-19) — bundles latin-ext webfonts without ui-monospace fallback, avoids forced uppercase on accented UI buttons/badges, and provides a distinct Game Over defeat screen without Trophy icon", () => {
+    const srcRoot = path.join(process.cwd(), "src");
+
+    // 1. Verify RootLayout bundles Inter & JetBrains_Mono with latin and latin-ext subsets
+    const layoutContent = fs.readFileSync(path.join(srcRoot, "app/layout.tsx"), "utf8");
+    expect(layoutContent).toContain('subsets: ["latin", "latin-ext"]');
+    expect(layoutContent).toContain("--font-sans");
+    expect(layoutContent).toContain("font-sans");
+
+    // 2. Verify tailwind.config.ts defines sans & mono with --font-sans and removes broken ui-monospace
+    const tailwindContent = fs.readFileSync(
+      path.join(process.cwd(), "tailwind.config.ts"),
+      "utf8"
+    );
+    expect(tailwindContent).toContain("var(--font-sans)");
+    expect(tailwindContent).not.toContain("ui-monospace");
+
+    // 3. Verify Button and Badge primitives use font-sans and do not force uppercase on accented text
+    const primitivesContent = fs.readFileSync(
+      path.join(srcRoot, "components/ui/primitives.tsx"),
+      "utf8"
+    );
+    expect(primitivesContent).toContain("font-sans");
+    expect(primitivesContent).not.toContain("uppercase");
+
+    // 4. Verify GameMatchPage differentiates Victory (Trophy) vs Game Over Defeat (Skull + ShieldAlert, no Trophy on defeat)
+    const matchPageContent = fs.readFileSync(
+      path.join(srcRoot, "app/game/[lobbyId]/page.tsx"),
+      "utf8"
+    );
+    expect(matchPageContent).toContain('data-testid="match-end-overlay"');
+    expect(matchPageContent).toContain('data-testid="match-victory-card"');
+    expect(matchPageContent).toContain('data-testid="victory-trophy-icon"');
+    expect(matchPageContent).toContain('data-testid="match-gameover-card"');
+    expect(matchPageContent).toContain('data-testid="gameover-skull-icon"');
+    expect(matchPageContent).toContain("GAME OVER — Défaite Tactique");
+    expect(matchPageContent).toContain("Signal EVA interrompu • Base anéantie");
   });
 });

@@ -9,21 +9,26 @@ import {
 } from "../../shared/constants";
 import {
   drawLeonardoBuilding,
+  drawLeonardoBuildingTurret,
   drawLeonardoExplosionFrame,
-  drawLeonardoTerrainTile,
   drawLeonardoUnitBody,
   drawLeonardoUnitTurret,
 } from "./leonardo-vector-art";
 
 export interface ProceduralSpriteAtlas {
   buildings: Map<string, ImageBitmap>; // key: `${faction}:${buildingKind}`
+  buildingTurrets: Map<string, ImageBitmap>; // key: `${faction}:${buildingKind}:${angleIndex}` (16 angles for GUARD_TOWER, SAM_SITE)
   unitBodies: Map<string, ImageBitmap>; // key: `${faction}:${unitKind}:${angleIndex}`
   unitTurrets: Map<string, ImageBitmap>; // key: `${faction}:${unitKind}:${angleIndex}`
-  terrainTiles: Map<number, ImageBitmap>; // key: 0=sand, 1=rock, 2=ridge, 3=ore
   explosionFrames: ImageBitmap[]; // 12 multi-layer vector explosion frames (0..11)
   disposed: boolean;
   dispose: () => void;
 }
+
+const ROTATING_DEFENSE_TURRET_KINDS: ReadonlyArray<BuildingKind> = [
+  "GUARD_TOWER",
+  "SAM_SITE",
+];
 
 type DrawingSurface = OffscreenCanvas | HTMLCanvasElement;
 type DrawingContext = OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D;
@@ -53,19 +58,25 @@ async function surfaceToBitmap(surface: DrawingSurface): Promise<ImageBitmap> {
   return await createImageBitmap(surface);
 }
 
-function drawTerrainTile(kind: number): Promise<ImageBitmap> {
-  const s = TILE_PIXEL_SIZE * SPRITE_ATLAS_SCALE;
-  const { surface, ctx } = createSurface(s, s);
-  drawLeonardoTerrainTile(ctx, kind, s);
-  return surfaceToBitmap(surface);
-}
-
 function drawBuildingBitmap(faction: FactionId, kind: BuildingKind): Promise<ImageBitmap> {
   const spec = BUILDING_LIST.find((b) => b.kind === kind)!;
   const w = spec.footprintW * TILE_PIXEL_SIZE * SPRITE_ATLAS_SCALE;
   const h = spec.footprintH * TILE_PIXEL_SIZE * SPRITE_ATLAS_SCALE;
   const { surface, ctx } = createSurface(w, h);
   drawLeonardoBuilding(ctx, faction, kind, w, h);
+  return surfaceToBitmap(surface);
+}
+
+function drawBuildingTurretBitmap(
+  faction: FactionId,
+  kind: BuildingKind,
+  angleIndex: number
+): Promise<ImageBitmap> {
+  const spec = BUILDING_LIST.find((b) => b.kind === kind)!;
+  const w = spec.footprintW * TILE_PIXEL_SIZE * SPRITE_ATLAS_SCALE;
+  const h = spec.footprintH * TILE_PIXEL_SIZE * SPRITE_ATLAS_SCALE;
+  const { surface, ctx } = createSurface(w, h);
+  drawLeonardoBuildingTurret(ctx, faction, kind, w, h, angleIndex);
   return surfaceToBitmap(surface);
 }
 
@@ -83,7 +94,7 @@ function drawUnitBodyBitmap(
   ctx.save();
   ctx.translate(cx, cy);
   ctx.rotate(radians);
-  drawLeonardoUnitBody(ctx, faction, kind, s);
+  drawLeonardoUnitBody(ctx, faction, kind, s, angleIndex);
   ctx.restore();
 
   return surfaceToBitmap(surface);
@@ -103,7 +114,7 @@ function drawUnitTurretBitmap(
   ctx.save();
   ctx.translate(cx, cy);
   ctx.rotate(radians);
-  drawLeonardoUnitTurret(ctx, faction, kind, s);
+  drawLeonardoUnitTurret(ctx, faction, kind, s, angleIndex);
   ctx.restore();
 
   return surfaceToBitmap(surface);
@@ -124,22 +135,13 @@ export async function generateProceduralSpriteAtlasAsync(
   onProgress?: (percent: number, stageLabel: string) => void
 ): Promise<ProceduralSpriteAtlas> {
   const buildings = new Map<string, ImageBitmap>();
+  const buildingTurrets = new Map<string, ImageBitmap>();
   const unitBodies = new Map<string, ImageBitmap>();
   const unitTurrets = new Map<string, ImageBitmap>();
-  const terrainTiles = new Map<number, ImageBitmap>();
   const explosionFrames: ImageBitmap[] = new Array<ImageBitmap>(12);
 
   const factions: FactionId[] = ["GDI", "NOD", "ORDOS"];
   const tasks: Array<{ label: string; run: () => Promise<void> }> = [];
-
-  for (const tKind of [0, 1, 2, 3]) {
-    tasks.push({
-      label: `Rastérisation tuiles terrain HD (#${tKind})`,
-      run: async () => {
-        terrainTiles.set(tKind, await drawTerrainTile(tKind));
-      },
-    });
-  }
 
   tasks.push({
     label: "Rastérisation séquence d'explosions thermiques (12 frames)",
@@ -156,6 +158,14 @@ export async function generateProceduralSpriteAtlasAsync(
         label: `Atlas Bâtiment ${faction} — ${b.name}`,
         run: async () => {
           buildings.set(`${faction}:${b.kind}`, await drawBuildingBitmap(faction, b.kind));
+          if (ROTATING_DEFENSE_TURRET_KINDS.includes(b.kind)) {
+            for (let angle = 0; angle < 16; angle++) {
+              buildingTurrets.set(
+                `${faction}:${b.kind}:${angle}`,
+                await drawBuildingTurretBitmap(faction, b.kind, angle)
+              );
+            }
+          }
         },
       });
     }
@@ -194,25 +204,25 @@ export async function generateProceduralSpriteAtlasAsync(
 
   const atlas: ProceduralSpriteAtlas = {
     buildings,
+    buildingTurrets,
     unitBodies,
     unitTurrets,
-    terrainTiles,
     explosionFrames,
     disposed: false,
     dispose: () => {
       if (atlas.disposed) return;
       atlas.disposed = true;
       for (const bmp of buildings.values()) bmp.close();
+      for (const bmp of buildingTurrets.values()) bmp.close();
       for (const bmp of unitBodies.values()) bmp.close();
       for (const bmp of unitTurrets.values()) bmp.close();
-      for (const bmp of terrainTiles.values()) bmp.close();
       for (const bmp of explosionFrames) {
         if (bmp) bmp.close();
       }
       buildings.clear();
+      buildingTurrets.clear();
       unitBodies.clear();
       unitTurrets.clear();
-      terrainTiles.clear();
       explosionFrames.length = 0;
     },
   };

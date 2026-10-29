@@ -113,7 +113,7 @@ export function PortalCommandCenter() {
   }
 
   return (
-    <div className="flex min-h-dvh flex-col bg-obsidian text-slate-100 font-mono">
+    <div className="flex min-h-dvh flex-col bg-obsidian text-slate-100 font-sans">
       {/* Minimal Tactical Header */}
       <header className="border-b border-slate-800 bg-tactical px-4 py-3.5">
         <div className="mx-auto flex max-w-5xl items-center justify-between gap-3">
@@ -139,7 +139,7 @@ export function PortalCommandCenter() {
             }
           >
             <Radio className="h-3.5 w-3.5" />
-            {wsConnected ? "SERVEUR PRÊT" : "CONNEXION..."}
+            {wsConnected ? "Serveur prêt" : "Connexion..."}
           </Badge>
         </div>
       </header>
@@ -148,12 +148,12 @@ export function PortalCommandCenter() {
       <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col justify-center p-4 sm:p-6">
         <Card className="p-5 sm:p-8 space-y-6 border-slate-800 bg-slate-950/90">
           <div className="text-center space-y-2">
-            <div className="inline-flex items-center gap-2 rounded-full border border-amber-500/40 bg-amber-500/10 px-3.5 py-1 text-xs font-bold uppercase tracking-widest text-amber-300">
+            <div className="inline-flex items-center gap-2 rounded-full border border-amber-500/40 bg-amber-500/10 px-3.5 py-1 text-xs font-bold tracking-wide text-amber-300">
               <Shield className="h-4 w-4" />
-              <span>Déploiement Tactique Immédiat</span>
+              <span>Déploiement tactique immédiat</span>
             </div>
-            <h2 className="text-xl sm:text-3xl font-bold uppercase tracking-wider text-slate-100">
-              Sélectionnez votre Clan
+            <h2 className="text-xl sm:text-3xl font-bold tracking-wide text-slate-100">
+              Sélectionnez votre clan
             </h2>
             <p className="text-xs sm:text-sm text-slate-300">
               Choisissez votre faction d&apos;allégeance et lancez directement l&apos;opération sur le terrain.
@@ -176,9 +176,9 @@ export function PortalCommandCenter() {
               const active = selectedFaction === fid;
               const bonusLabel =
                 fid === "GDI"
-                  ? "Blindage Lourd (+10%)"
+                  ? "Blindage lourd (+10%)"
                   : fid === "NOD"
-                    ? "Vitesse d'Assaut (+15%)"
+                    ? "Vitesse d'assaut (+15%)"
                     : "Récolte (+15%) & Vitesse (+8%)";
 
               return (
@@ -200,7 +200,7 @@ export function PortalCommandCenter() {
                     />
                   </div>
 
-                  <div className="text-base sm:text-lg font-bold uppercase tracking-wider text-slate-100">
+                  <div className="text-base sm:text-lg font-bold tracking-wide text-slate-100">
                     {spec.name}
                   </div>
 
@@ -209,16 +209,16 @@ export function PortalCommandCenter() {
                   </p>
 
                   <div className="mt-4 w-full border-t border-slate-800/80 pt-3">
-                    <span className="inline-block rounded border border-slate-700/80 bg-slate-950/80 px-3 py-1 text-xs font-bold uppercase tracking-wider text-slate-100">
+                    <span className="inline-block rounded border border-slate-700/80 bg-slate-950/80 px-3 py-1 text-xs font-bold tracking-wide text-slate-100">
                       {bonusLabel}
                     </span>
                   </div>
 
-                  <div className="mt-3 flex items-center justify-center gap-1.5 text-xs sm:text-sm font-bold uppercase">
+                  <div className="mt-3 flex items-center justify-center gap-1.5 text-xs sm:text-sm font-bold">
                     {active ? (
                       <span className="inline-flex items-center gap-1.5 text-emerald-300">
                         <CheckCircle2 className="h-4 w-4" />
-                        Clan Sélectionné
+                        Clan sélectionné
                       </span>
                     ) : (
                       <span className="text-slate-400 group-hover:text-slate-200">
@@ -236,7 +236,7 @@ export function PortalCommandCenter() {
             <div className="flex items-center gap-2.5 sm:max-w-xs w-full">
               <label
                 htmlFor="commander-callsign-input"
-                className="shrink-0 text-xs sm:text-sm font-bold uppercase text-slate-300"
+                className="shrink-0 text-xs sm:text-sm font-bold text-slate-300"
               >
                 Commandant :
               </label>
@@ -261,8 +261,8 @@ export function PortalCommandCenter() {
             >
               <Play className="h-5 w-5" />
               {isLaunching
-                ? "DÉPLOIEMENT EN COURS..."
-                : `Lancer la Partie (${selectedFaction})`}
+                ? "Déploiement en cours..."
+                : `Lancer la partie (${selectedFaction})`}
             </Button>
           </div>
         </Card>

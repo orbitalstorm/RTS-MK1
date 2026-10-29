@@ -123,6 +123,63 @@ function drawVentLouvers(
 }
 
 /**
+ * Converts a fixed world-space vector `(wx, wy)` into the local coordinate space of a sprite
+ * that has already been rotated by `radians = (angleIndex / 16) * Math.PI * 2`.
+ */
+function toLocalSunVector(wx: number, wy: number, radians: number): { x: number; y: number } {
+  const cosInv = Math.cos(-radians);
+  const sinInv = Math.sin(-radians);
+  return {
+    x: wx * cosInv - wy * sinInv,
+    y: wx * sinInv + wy * cosInv,
+  };
+}
+
+/**
+ * Creates a linear gradient aligned with the fixed world-space North-West sun (`(-r, -r) -> (+r, +r)`)
+ * inside a sprite context already rotated by `radians`.
+ */
+function createWorldSunLinearGradient(
+  ctx: VectorDrawingContext,
+  radians: number,
+  radius: number,
+  nwColor: string,
+  seColor: string
+): CanvasGradient {
+  const nw = toLocalSunVector(-radius, -radius, radians);
+  const se = toLocalSunVector(radius, radius, radians);
+  const grad = ctx.createLinearGradient(nw.x, nw.y, se.x, se.y);
+  grad.addColorStop(0, nwColor);
+  grad.addColorStop(1, seColor);
+  return grad;
+}
+
+/**
+ * Draws a crisp world-space North-West specular rim highlight inside a rotated sprite context
+ * by temporarily counter-rotating back to world orientation.
+ */
+function drawWorldSpaceNwSpecularArc(
+  ctx: VectorDrawingContext,
+  radians: number,
+  boxHalfW: number,
+  boxHalfH: number,
+  u: number,
+  opacity = 0.42
+): void {
+  ctx.save();
+  ctx.rotate(-radians);
+  ctx.strokeStyle = `rgba(255, 255, 255, ${opacity})`;
+  ctx.lineWidth = 1.3 * u;
+  ctx.beginPath();
+  ctx.moveTo(-boxHalfW, boxHalfH * 0.35);
+  ctx.lineTo(-boxHalfW, -boxHalfH + 2.5 * u);
+  ctx.lineTo(-boxHalfW + 2.5 * u, -boxHalfH);
+  ctx.lineTo(boxHalfW * 0.35, -boxHalfH);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/**
  * 1. High-Precision Vector Terrain Tile Renderer
  */
 export function drawLeonardoTerrainTile(
@@ -329,7 +386,7 @@ export function drawLeonardoTerrainTile(
     ctx.lineTo(48 * u, 32 * u);
     ctx.stroke();
   } else {
-    // kind === 3: Rich Crystalline Tiberium / Spice Deposit (Organic transparent radial bed so crystals blend seamlessly onto unified ground)
+    // kind === 3: Rich Crystalline Tiberium / Spice Deposit
     const bedGrad = ctx.createRadialGradient(s * 0.5, s * 0.5, 4 * u, s * 0.5, s * 0.5, s * 0.46);
     bedGrad.addColorStop(0, "rgba(19, 42, 32, 0.78)");
     bedGrad.addColorStop(0.65, "rgba(31, 29, 22, 0.42)");
@@ -421,7 +478,451 @@ export function drawLeonardoTerrainTile(
 }
 
 /**
- * 2. High-Precision 4-Layer Vector Building Renderer (All 11 BuildingKinds)
+ * Renders faction-specific corner anchor hardware & architectural motifs on a building foundation:
+ * - GDI: Heavy beveled amber/steel gussets with twin bolt heads
+ * - NOD: Sharp stealth crimson talon spurs & laser conduit channels
+ * - ORDOS: Circular cyan cryogenic stabilizer nodes & gimbal rings
+ */
+function drawFactionFoundationMotifs(
+  ctx: VectorDrawingContext,
+  faction: FactionId,
+  w: number,
+  h: number,
+  u: number,
+  insetX: number,
+  insetY: number
+): void {
+  const fSpec = FACTIONS[faction];
+  const corners: Array<[number, number, number, number]> = [
+    [insetX, insetY, 1, 1],
+    [w - insetX, insetY, -1, 1],
+    [insetX, h - insetY, 1, -1],
+    [w - insetX, h - insetY, -1, -1],
+  ];
+
+  if (faction === "GDI") {
+    const len = 11 * u;
+    const thick = 3.4 * u;
+    ctx.fillStyle = fSpec.primaryColor;
+    for (const [cx, cy, dx, dy] of corners) {
+      ctx.fillRect(dx > 0 ? cx : cx - len, dy > 0 ? cy : cy - thick, len, thick);
+      ctx.fillRect(dx > 0 ? cx : cx - thick, dy > 0 ? cy : cy - len, thick, len);
+    }
+    drawCornerRivets(ctx, insetX, insetY, w - insetX * 2, h - insetY * 2, 4.5 * u, 1.7 * u);
+  } else if (faction === "NOD") {
+    const spur = 13 * u;
+    ctx.fillStyle = fSpec.primaryColor;
+    ctx.strokeStyle = "#fecaca";
+    ctx.lineWidth = 0.9 * u;
+    for (const [cx, cy, dx, dy] of corners) {
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + dx * spur, cy + dy * 2.4 * u);
+      ctx.lineTo(cx + dx * 4.5 * u, cy + dy * 4.5 * u);
+      ctx.lineTo(cx + dx * 2.4 * u, cy + dy * spur);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
+  } else {
+    // ORDOS: Circular cryogenic stabilizer rings at each corner
+    for (const [cx, cy, dx, dy] of corners) {
+      const nx = cx + dx * 4.5 * u;
+      const ny = cy + dy * 4.5 * u;
+      ctx.beginPath();
+      ctx.arc(nx, ny, 4 * u, 0, Math.PI * 2);
+      ctx.fillStyle = "#082f49";
+      ctx.fill();
+      ctx.strokeStyle = fSpec.primaryColor;
+      ctx.lineWidth = 1.4 * u;
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.arc(nx, ny, 1.6 * u, 0, Math.PI * 2);
+      ctx.fillStyle = "#67e8f9";
+      ctx.fill();
+    }
+  }
+}
+
+/**
+ * Layer 1 (Lot 4.1): Renders a differentiated, immediately recognizable foundation silhouette
+ * tailored to both the building's tactical role (`kind`) and its clan (`GDI`, `NOD`, `ORDOS`).
+ */
+function drawDifferentiatedBuildingFoundation(
+  ctx: VectorDrawingContext,
+  faction: FactionId,
+  kind: BuildingKind,
+  w: number,
+  h: number,
+  u: number
+): void {
+  const fSpec = FACTIONS[faction];
+  const cx = w * 0.5;
+  const cy = h * 0.5;
+  const minDim = Math.min(w, h);
+  const fChamfer = faction === "NOD" ? 11 * u : faction === "ORDOS" ? 9 * u : 6 * u;
+
+  const makeSlabGrad = () => {
+    const g = ctx.createLinearGradient(0, 0, w, h);
+    if (faction === "NOD") {
+      g.addColorStop(0, "#27272a");
+      g.addColorStop(0.55, "#18181b");
+      g.addColorStop(1, "#09090b");
+    } else if (faction === "ORDOS") {
+      g.addColorStop(0, "#1e3a4c");
+      g.addColorStop(0.55, "#0f2537");
+      g.addColorStop(1, "#081420");
+    } else {
+      g.addColorStop(0, "#334155");
+      g.addColorStop(0.55, "#1e293b");
+      g.addColorStop(1, "#0f172a");
+    }
+    return g;
+  };
+
+  if (kind === "SANDBAG_WALL") {
+    // Compacted earth/gravel defensive trench berm with timber anchor stakes (no metallic slab)
+    ctx.fillStyle = "rgba(12, 9, 5, 0.48)";
+    ctx.beginPath();
+    ctx.ellipse(cx + 1.5 * u, cy + 2 * u, w * 0.44, h * 0.4, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#4a381b";
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, w * 0.42, h * 0.38, 0, 0, Math.PI * 2);
+    ctx.fill();
+    return;
+  }
+
+  if (kind === "CONCRETE_WALL") {
+    // Fortified anti-tank wall footing with lateral dragon's-tooth steel buttress anchors
+    ctx.fillStyle = "rgba(0, 0, 0, 0.52)";
+    traceChamferedRect(ctx, 5 * u, 6 * u, w - 8 * u, h - 8 * u, 5 * u);
+    ctx.fill();
+
+    traceChamferedRect(ctx, 4 * u, 4 * u, w - 8 * u, h - 8 * u, 5 * u);
+    ctx.fillStyle = makeSlabGrad();
+    ctx.fill();
+    ctx.strokeStyle = fSpec.secondaryColor;
+    ctx.lineWidth = 1.6 * u;
+    ctx.stroke();
+    return;
+  }
+
+  if (kind === "CONCRETE_SLAB") {
+    // Flush modular interlocking pavement tile
+    ctx.fillStyle = "rgba(0, 0, 0, 0.35)";
+    traceChamferedRect(ctx, 3 * u, 3.5 * u, w - 5 * u, h - 5 * u, 5 * u);
+    ctx.fill();
+
+    traceChamferedRect(ctx, 2 * u, 2 * u, w - 4 * u, h - 4 * u, 5 * u);
+    ctx.fillStyle = "#334155";
+    ctx.fill();
+    ctx.strokeStyle = "#1e293b";
+    ctx.lineWidth = 1.4 * u;
+    ctx.stroke();
+    return;
+  }
+
+  if (kind === "SILO") {
+    // Circular/Octagonal pressurized containment ring foundation with 4 radial pipe flanges
+    ctx.fillStyle = "rgba(0, 0, 0, 0.56)";
+    ctx.beginPath();
+    ctx.arc(cx + 2 * u, cy + 2.5 * u, minDim * 0.45, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 4 Cardinal Pipe Anchor Outriggers
+    ctx.fillStyle = "#1e293b";
+    ctx.strokeStyle = fSpec.secondaryColor;
+    ctx.lineWidth = 1.5 * u;
+    ctx.fillRect(cx - 6 * u, 2 * u, 12 * u, h - 4 * u);
+    ctx.strokeRect(cx - 6 * u, 2 * u, 12 * u, h - 4 * u);
+    ctx.fillRect(2 * u, cy - 6 * u, w - 4 * u, 12 * u);
+    ctx.strokeRect(2 * u, cy - 6 * u, w - 4 * u, 12 * u);
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, minDim * 0.43, 0, Math.PI * 2);
+    ctx.fillStyle = makeSlabGrad();
+    ctx.fill();
+    ctx.strokeStyle = fSpec.primaryColor;
+    ctx.lineWidth = 2 * u;
+    ctx.stroke();
+    return;
+  }
+
+  if (kind === "GUARD_TOWER") {
+    // Cruciform/Octagonal fortified watchtower bunker pad with 4 splayed stabilizer legs
+    ctx.fillStyle = "rgba(0, 0, 0, 0.56)";
+    traceChamferedRect(ctx, 5 * u, 6 * u, w - 7 * u, h - 7 * u, 11 * u);
+    ctx.fill();
+
+    // 4 Diagonal Outrigger Stabilizer Struts
+    ctx.strokeStyle = fSpec.secondaryColor;
+    ctx.lineWidth = 5 * u;
+    ctx.beginPath();
+    ctx.moveTo(6 * u, 6 * u);
+    ctx.lineTo(w - 6 * u, h - 6 * u);
+    ctx.moveTo(w - 6 * u, 6 * u);
+    ctx.lineTo(6 * u, h - 6 * u);
+    ctx.stroke();
+
+    traceChamferedRect(ctx, 6 * u, 6 * u, w - 12 * u, h - 12 * u, 10 * u);
+    ctx.fillStyle = makeSlabGrad();
+    ctx.fill();
+    ctx.strokeStyle = fSpec.primaryColor;
+    ctx.lineWidth = 2 * u;
+    ctx.stroke();
+    return;
+  }
+
+  if (kind === "SAM_SITE") {
+    // Circular blast deflector foundation with 4 exhaust flame channels
+    ctx.fillStyle = "rgba(0, 0, 0, 0.58)";
+    ctx.beginPath();
+    ctx.arc(cx + 2 * u, cy + 2.5 * u, minDim * 0.46, 0, Math.PI * 2);
+    ctx.fill();
+
+    traceChamferedRect(ctx, 4 * u, 4 * u, w - 8 * u, h - 8 * u, 12 * u);
+    ctx.fillStyle = makeSlabGrad();
+    ctx.fill();
+    ctx.strokeStyle = fSpec.secondaryColor;
+    ctx.lineWidth = 2 * u;
+    ctx.stroke();
+
+    // Circular yellow/black blast warning ring segment on N/S aprons
+    drawHazardStripes(ctx, cx - 12 * u, h - 8.5 * u, 24 * u, 3.8 * u, 3.5 * u);
+    drawFactionFoundationMotifs(ctx, faction, w, h, u, 5 * u, 5 * u);
+    return;
+  }
+
+  if (kind === "OBELISK") {
+    // Brotherhood Stepped Hexagonal/Triangular Obsidian Plinth with glowing crimson power conduits
+    ctx.fillStyle = "rgba(0, 0, 0, 0.62)";
+    ctx.beginPath();
+    ctx.moveTo(cx + 2 * u, 4 * u);
+    ctx.lineTo(w - 2 * u, h * 0.36);
+    ctx.lineTo(w - 6 * u, h - 2 * u);
+    ctx.lineTo(10 * u, h - 2 * u);
+    ctx.lineTo(4 * u, h * 0.36);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.moveTo(cx, 3 * u);
+    ctx.lineTo(w - 4 * u, h * 0.34);
+    ctx.lineTo(w - 8 * u, h - 4 * u);
+    ctx.lineTo(8 * u, h - 4 * u);
+    ctx.lineTo(4 * u, h * 0.34);
+    ctx.closePath();
+    ctx.fillStyle = "#140709";
+    ctx.fill();
+    ctx.strokeStyle = "#dc2626";
+    ctx.lineWidth = 2.2 * u;
+    ctx.stroke();
+
+    // Radial crimson high-voltage trenches feeding the monolith
+    ctx.strokeStyle = "rgba(239, 68, 68, 0.55)";
+    ctx.lineWidth = 1.6 * u;
+    ctx.beginPath();
+    ctx.moveTo(cx, 5 * u);
+    ctx.lineTo(cx, h - 5 * u);
+    ctx.moveTo(8 * u, h * 0.36);
+    ctx.lineTo(w - 8 * u, h * 0.78);
+    ctx.moveTo(w - 8 * u, h * 0.36);
+    ctx.lineTo(8 * u, h * 0.78);
+    ctx.stroke();
+    return;
+  }
+
+  if (kind === "SILVER_MINE") {
+    // Rugged excavated bedrock & timber/steel mine-head embankment with southern rail-track apron
+    ctx.fillStyle = "rgba(0, 0, 0, 0.58)";
+    ctx.beginPath();
+    ctx.moveTo(10 * u, 6 * u);
+    ctx.lineTo(w - 8 * u, 6 * u);
+    ctx.lineTo(w - 2 * u, h - 3 * u);
+    ctx.lineTo(4 * u, h - 3 * u);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.moveTo(8 * u, 4 * u);
+    ctx.lineTo(w - 8 * u, 4 * u);
+    ctx.lineTo(w - 3 * u, h - 4 * u);
+    ctx.lineTo(3 * u, h - 4 * u);
+    ctx.closePath();
+    ctx.fillStyle = "#28303d";
+    ctx.fill();
+    ctx.strokeStyle = fSpec.secondaryColor;
+    ctx.lineWidth = 2.2 * u;
+    ctx.stroke();
+
+    // Southern ore-cart loading dock hazard apron
+    drawHazardStripes(ctx, w * 0.3, h - 9 * u, w * 0.4, 4.2 * u, 3.8 * u);
+    return;
+  }
+
+  if (kind === "RADAR_DOME") {
+    // Octagonal dish sensor platform with protruding East/West stabilizer outriggers
+    ctx.fillStyle = "rgba(0, 0, 0, 0.56)";
+    traceChamferedRect(ctx, 5 * u, 6 * u, w - 7 * u, h - 7 * u, 14 * u);
+    ctx.fill();
+
+    // East/West Outrigger Stabilizer Pods
+    ctx.fillStyle = fSpec.secondaryColor;
+    ctx.fillRect(1.5 * u, cy - 11 * u, w - 3 * u, 22 * u);
+    ctx.fillRect(cx - 11 * u, 1.5 * u, 22 * u, h - 3 * u);
+
+    traceChamferedRect(ctx, 4 * u, 4 * u, w - 8 * u, h - 8 * u, 13 * u);
+    ctx.fillStyle = makeSlabGrad();
+    ctx.fill();
+    ctx.strokeStyle = fSpec.primaryColor;
+    ctx.lineWidth = 2.2 * u;
+    ctx.stroke();
+    drawFactionFoundationMotifs(ctx, faction, w, h, u, 6 * u, 6 * u);
+    return;
+  }
+
+  if (kind === "POWER_PLANT") {
+    // Stepped turbine foundation with Northern cooling-intake grates & copper grounding busbars
+    ctx.fillStyle = "rgba(0, 0, 0, 0.58)";
+    traceChamferedRect(ctx, 5 * u, 6 * u, w - 7 * u, h - 7 * u, fChamfer);
+    ctx.fill();
+
+    traceChamferedRect(ctx, 3 * u, 3 * u, w - 6 * u, h - 6 * u, fChamfer);
+    ctx.fillStyle = makeSlabGrad();
+    ctx.fill();
+    ctx.strokeStyle = fSpec.secondaryColor;
+    ctx.lineWidth = 2.4 * u;
+    ctx.stroke();
+
+    // Copper high-voltage grounding plates on East/West edges
+    ctx.fillStyle = "#b45309";
+    ctx.fillRect(2 * u, cy - 10 * u, 4 * u, 20 * u);
+    ctx.fillRect(w - 6 * u, cy - 10 * u, 4 * u, 20 * u);
+
+    drawVentLouvers(ctx, w * 0.24, 5 * u, w * 0.52, 5 * u, 3);
+    drawFactionFoundationMotifs(ctx, faction, w, h, u, 4 * u, 4 * u);
+    return;
+  }
+
+  if (kind === "REFINERY") {
+    // Asymmetric split industrial dock: Heavy Smelter Plinth (West) + Sunken Harvester Unloading Ramp (East)
+    ctx.fillStyle = "rgba(0, 0, 0, 0.58)";
+    traceChamferedRect(ctx, 4 * u, 5 * u, w - 6 * u, h - 6 * u, fChamfer);
+    ctx.fill();
+
+    // West Smelter Heavy Plinth
+    traceChamferedRect(ctx, 3 * u, 3 * u, w * 0.56, h - 6 * u, fChamfer);
+    ctx.fillStyle = makeSlabGrad();
+    ctx.fill();
+    ctx.strokeStyle = fSpec.primaryColor;
+    ctx.lineWidth = 2.2 * u;
+    ctx.stroke();
+
+    // East Sunken Harvester Unloading Dock Apron with guide rails
+    traceChamferedRect(ctx, w * 0.54, 6 * u, w * 0.43, h - 12 * u, 4 * u);
+    ctx.fillStyle = "#090d16";
+    ctx.fill();
+    ctx.strokeStyle = "#eab308";
+    ctx.lineWidth = 1.8 * u;
+    ctx.stroke();
+
+    drawHazardStripes(ctx, w * 0.58, h - 11 * u, w * 0.35, 4.5 * u, 4 * u);
+    drawFactionFoundationMotifs(ctx, faction, w * 0.58, h, u, 4 * u, 4 * u);
+    return;
+  }
+
+  if (kind === "WAR_FACTORY") {
+    // Heavy industrial hangar apron with wide dual tank roll-out treadways extending to the Southern exit
+    ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
+    traceChamferedRect(ctx, 4 * u, 5 * u, w - 6 * u, h - 6 * u, fChamfer);
+    ctx.fill();
+
+    traceChamferedRect(ctx, 3 * u, 3 * u, w - 6 * u, h - 6 * u, fChamfer);
+    ctx.fillStyle = makeSlabGrad();
+    ctx.fill();
+    ctx.strokeStyle = fSpec.secondaryColor;
+    ctx.lineWidth = 2.5 * u;
+    ctx.stroke();
+
+    // Wide Southern Tank Roll-Out Ramp & Chevron Apron
+    drawHazardStripes(ctx, w * 0.2, h - 10 * u, w * 0.6, 5.5 * u, 4.5 * u);
+    drawFactionFoundationMotifs(ctx, faction, w, h, u, 4 * u, 4 * u);
+    return;
+  }
+
+  if (kind === "BARRACKS") {
+    // Fortified compound base with Southern muster parade ground & defensive perimeter alcoves
+    ctx.fillStyle = "rgba(0, 0, 0, 0.56)";
+    traceChamferedRect(ctx, 5 * u, 6 * u, w - 7 * u, h - 7 * u, fChamfer);
+    ctx.fill();
+
+    traceChamferedRect(ctx, 3.5 * u, 3.5 * u, w - 7 * u, h - 7 * u, fChamfer);
+    ctx.fillStyle = makeSlabGrad();
+    ctx.fill();
+    ctx.strokeStyle = fSpec.primaryColor;
+    ctx.lineWidth = 2.2 * u;
+    ctx.stroke();
+
+    // Southern Infantry Muster Parade Deck
+    ctx.fillStyle = "#091526";
+    ctx.fillRect(w * 0.24, h - 12 * u, w * 0.52, 7.5 * u);
+    drawHazardStripes(ctx, w * 0.26, h - 8.5 * u, w * 0.48, 3.8 * u, 3.5 * u);
+    drawFactionFoundationMotifs(ctx, faction, w, h, u, 4.5 * u, 4.5 * u);
+    return;
+  }
+
+  if (kind === "TECH_CENTER") {
+    // Stepped octagonal clean-room research platform with glowing data-bus trenches
+    ctx.fillStyle = "rgba(0, 0, 0, 0.58)";
+    traceChamferedRect(ctx, 5 * u, 6 * u, w - 7 * u, h - 7 * u, 13 * u);
+    ctx.fill();
+
+    traceChamferedRect(ctx, 3 * u, 3 * u, w - 6 * u, h - 6 * u, 12 * u);
+    ctx.fillStyle = makeSlabGrad();
+    ctx.fill();
+    ctx.strokeStyle = "#38bdf8";
+    ctx.lineWidth = 2 * u;
+    ctx.stroke();
+
+    // Luminous cyan circuit bus lines on the foundation pad
+    ctx.strokeStyle = "rgba(56, 189, 248, 0.45)";
+    ctx.lineWidth = 1.4 * u;
+    ctx.beginPath();
+    ctx.moveTo(6 * u, cy);
+    ctx.lineTo(w - 6 * u, cy);
+    ctx.moveTo(cx, 6 * u);
+    ctx.lineTo(cx, h - 6 * u);
+    ctx.stroke();
+    drawFactionFoundationMotifs(ctx, faction, w, h, u, 5 * u, 5 * u);
+    return;
+  }
+
+  // Default / CONSTRUCTION_YARD: Massive command bastion foundation with reinforced corner bastions
+  ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
+  traceChamferedRect(ctx, 5 * u, 6 * u, w - 7 * u, h - 7 * u, fChamfer);
+  ctx.fill();
+
+  traceChamferedRect(ctx, 3 * u, 3 * u, w - 6 * u, h - 6 * u, fChamfer);
+  ctx.fillStyle = makeSlabGrad();
+  ctx.fill();
+  ctx.strokeStyle = fSpec.secondaryColor;
+  ctx.lineWidth = 2.6 * u;
+  ctx.stroke();
+
+  traceChamferedRect(ctx, 5.5 * u, 5.5 * u, w - 11 * u, h - 11 * u, 5 * u);
+  ctx.strokeStyle = "#475569";
+  ctx.lineWidth = 1.2 * u;
+  ctx.stroke();
+
+  drawHazardStripes(ctx, w * 0.28, h - 9.5 * u, w * 0.44, 4.5 * u, 4 * u);
+  drawFactionFoundationMotifs(ctx, faction, w, h, u, 4 * u, 4 * u);
+}
+
+/**
+ * 2. High-Precision 4-Layer Vector Building Renderer (All 15 BuildingKinds)
  */
 export function drawLeonardoBuilding(
   ctx: VectorDrawingContext,
@@ -437,52 +938,9 @@ export function drawLeonardoBuilding(
   const cy = h * 0.5;
 
   // ============================================================================
-  // LAYER 1: FOUNDATION & CAST SHADOW (Dalle blindée biseautée, hazard stripes, boulons)
+  // LAYER 1: DIFFERENTIATED FOUNDATION & CAST SHADOW (Lot 4.1)
   // ============================================================================
-  ctx.fillStyle = "rgba(0, 0, 0, 0.58)";
-  traceChamferedRect(ctx, 5 * u, 6 * u, w - 7 * u, h - 7 * u, 8 * u);
-  ctx.fill();
-
-  const baseGrad = ctx.createLinearGradient(0, 0, w, h);
-  baseGrad.addColorStop(0, "#334155");
-  baseGrad.addColorStop(0.5, "#1e293b");
-  baseGrad.addColorStop(1, "#0f172a");
-  traceChamferedRect(ctx, 3 * u, 3 * u, w - 6 * u, h - 6 * u, 7 * u);
-  ctx.fillStyle = baseGrad;
-  ctx.fill();
-
-  // Outer structural armor trim in faction secondary & primary colors
-  ctx.strokeStyle = fSpec.secondaryColor;
-  ctx.lineWidth = 2.5 * u;
-  ctx.stroke();
-
-  traceChamferedRect(ctx, 5.5 * u, 5.5 * u, w - 11 * u, h - 11 * u, 5 * u);
-  ctx.strokeStyle = "#475569";
-  ctx.lineWidth = 1.2 * u;
-  ctx.stroke();
-
-  // Yellow/Black Hazard Stripes on Southern Access Apron
-  drawHazardStripes(ctx, w * 0.28, h - 9.5 * u, w * 0.44, 4.5 * u, 4 * u);
-
-  // Corner Faction Armor Brackets
-  ctx.fillStyle = fSpec.primaryColor;
-  const bracketLen = 12 * u;
-  const bracketThick = 3.5 * u;
-  // Top-Left
-  ctx.fillRect(4 * u, 4 * u, bracketLen, bracketThick);
-  ctx.fillRect(4 * u, 4 * u, bracketThick, bracketLen);
-  // Top-Right
-  ctx.fillRect(w - 4 * u - bracketLen, 4 * u, bracketLen, bracketThick);
-  ctx.fillRect(w - 4 * u - bracketThick, 4 * u, bracketThick, bracketLen);
-  // Bottom-Left
-  ctx.fillRect(4 * u, h - 4 * u - bracketThick, bracketLen, bracketThick);
-  ctx.fillRect(4 * u, h - 4 * u - bracketLen, bracketThick, bracketLen);
-  // Bottom-Right
-  ctx.fillRect(w - 4 * u - bracketLen, h - 4 * u - bracketThick, bracketLen, bracketThick);
-  ctx.fillRect(w - 4 * u - bracketThick, h - 4 * u - bracketLen, bracketThick, bracketLen);
-
-  // Structural corner bolts
-  drawCornerRivets(ctx, 6 * u, 6 * u, w - 12 * u, h - 12 * u, 5 * u, 1.8 * u);
+  drawDifferentiatedBuildingFoundation(ctx, faction, kind, w, h, u);
 
   // ============================================================================
   // LAYER 2: PRIMARY STRUCTURE & MECHANICAL SUB-ASSEMBLIES
@@ -527,7 +985,7 @@ export function drawLeonardoBuilding(
     ctx.fillStyle = fSpec.primaryColor;
     ctx.fillRect(w * 0.19, h * 0.24, w * 0.24, h * 0.22);
 
-    // Articulated Gantry Crane with Cables & Hook
+    // Articulated Gantry Crane Base Pivot (live swinging boom rendered in world-renderer)
     ctx.strokeStyle = "#eab308";
     ctx.lineWidth = 4 * u;
     ctx.beginPath();
@@ -854,7 +1312,6 @@ export function drawLeonardoBuilding(
     ctx.stroke();
   } else if (kind === "SILVER_MINE") {
     // 2x2 Silver Mine featuring the prominent armored tunnel entrance ("l'entrée de la mine")
-    // 1. Sloped rock/concrete excavation embankment framing the mine shaft
     ctx.beginPath();
     ctx.moveTo(w * 0.1, h * 0.84);
     ctx.lineTo(w * 0.2, h * 0.16);
@@ -871,7 +1328,7 @@ export function drawLeonardoBuilding(
     ctx.lineWidth = 2.2 * u;
     ctx.stroke();
 
-    // 2. Heavy Steel Tunnel Portal Arch (L'Entrée de la Mine)
+    // Heavy Steel Tunnel Portal Arch (L'Entrée de la Mine)
     ctx.beginPath();
     ctx.moveTo(w * 0.26, h * 0.84);
     ctx.lineTo(w * 0.3, h * 0.32);
@@ -951,6 +1408,7 @@ export function drawLeonardoBuilding(
     ctx.moveTo(cx, h * 0.16);
     ctx.lineTo(cx, h * 0.84);
     ctx.stroke();
+    drawCornerRivets(ctx, w * 0.12, h * 0.12, w * 0.76, h * 0.76, 4 * u, 1.6 * u);
   } else if (kind === "SANDBAG_WALL") {
     // Stacked Tactical Burlap Sandbag Barricade (2 staggered courses with canvas seams & shadow)
     const bagRows: Array<{ y: number; offsets: number[] }> = [
@@ -967,7 +1425,12 @@ export function drawLeonardoBuilding(
         ctx.fill();
 
         // Sandbag body
-        const bagGrad = ctx.createLinearGradient(bx - 8 * u, row.y - 5 * u, bx + 8 * u, row.y + 5 * u);
+        const bagGrad = ctx.createLinearGradient(
+          bx - 8 * u,
+          row.y - 5 * u,
+          bx + 8 * u,
+          row.y + 5 * u
+        );
         bagGrad.addColorStop(0, "#d6b87c");
         bagGrad.addColorStop(0.55, "#b59457");
         bagGrad.addColorStop(1, "#7c6234");
@@ -1023,7 +1486,7 @@ export function drawLeonardoBuilding(
     ctx.lineWidth = 1.4 * u;
     ctx.stroke();
   } else if (kind === "GUARD_TOWER") {
-    // Octagonal Concrete/Steel Casemate
+    // Lot 3.1: Static Casemate Base ONLY (Rotating Twin Vulcan Turret is rendered via drawLeonardoBuildingTurret)
     traceChamferedRect(ctx, w * 0.16, h * 0.16, w * 0.68, h * 0.68, 8 * u);
     ctx.fillStyle = fSpec.secondaryColor;
     ctx.fill();
@@ -1031,55 +1494,57 @@ export function drawLeonardoBuilding(
     ctx.lineWidth = 2 * u;
     ctx.stroke();
 
-    // Turret Ring & Ammo Boxes
+    // Lateral Ammo Magazine Feed Boxes
     ctx.fillStyle = "#334155";
-    ctx.fillRect(cx - 11 * u, cy - 5 * u, 22 * u, 12 * u);
-
-    ctx.beginPath();
-    ctx.arc(cx, cy + 2 * u, minDim * 0.22, 0, Math.PI * 2);
-    ctx.fillStyle = fSpec.primaryColor;
-    ctx.fill();
+    ctx.fillRect(cx - 14 * u, cy - 6 * u, 28 * u, 12 * u);
     ctx.strokeStyle = "#0f172a";
-    ctx.lineWidth = 1.8 * u;
+    ctx.lineWidth = 1.2 * u;
+    ctx.strokeRect(cx - 14 * u, cy - 6 * u, 28 * u, 12 * u);
+
+    // Recessed Rotary Turret Bearing Ring / Raceway (ready to receive buildingTurrets sprite)
+    ctx.beginPath();
+    ctx.arc(cx, cy, minDim * 0.25, 0, Math.PI * 2);
+    ctx.fillStyle = "#090d16";
+    ctx.fill();
+    ctx.strokeStyle = "#64748b";
+    ctx.lineWidth = 2 * u;
     ctx.stroke();
 
-    // Twin Vulcan Rotary Barrels pointing North
-    ctx.fillStyle = "#e2e8f0";
-    ctx.fillRect(cx - 5 * u, h * 0.08, 3.2 * u, cy - h * 0.08);
-    ctx.fillRect(cx + 1.8 * u, h * 0.08, 3.2 * u, cy - h * 0.08);
-
-    // Optical Sensor Pod
     ctx.beginPath();
-    ctx.arc(cx, cy + 2 * u, 3.5 * u, 0, Math.PI * 2);
-    ctx.fillStyle = "#38bdf8";
-    ctx.fill();
+    ctx.arc(cx, cy, minDim * 0.18, 0, Math.PI * 2);
+    ctx.strokeStyle = fSpec.primaryColor;
+    ctx.lineWidth = 1.2 * u;
+    ctx.setLineDash([3 * u, 2 * u]);
+    ctx.stroke();
+    ctx.setLineDash([]);
   } else if (kind === "SAM_SITE") {
-    // Armored Rotary Pedestal
+    // Lot 3.1: Static Armored Rotary Pedestal ONLY (Rotating Quad SAM Launcher is rendered via drawLeonardoBuildingTurret)
     ctx.beginPath();
-    ctx.arc(cx, cy, minDim * 0.34, 0, Math.PI * 2);
+    ctx.arc(cx, cy, minDim * 0.36, 0, Math.PI * 2);
     ctx.fillStyle = "#1e293b";
     ctx.fill();
     ctx.strokeStyle = fSpec.primaryColor;
     ctx.lineWidth = 2.2 * u;
     ctx.stroke();
 
-    // Quad Surface-to-Air Missile Launcher Box
-    traceChamferedRect(ctx, cx - 14 * u, cy - 12 * u, 28 * u, 24 * u, 4 * u);
-    ctx.fillStyle = fSpec.secondaryColor;
+    // Recessed Azimuth Turret Ring & Hydraulic Pivot Socket
+    ctx.beginPath();
+    ctx.arc(cx, cy, minDim * 0.26, 0, Math.PI * 2);
+    ctx.fillStyle = "#090d16";
     ctx.fill();
-    ctx.strokeStyle = "#94a3b8";
-    ctx.lineWidth = 1.5 * u;
+    ctx.strokeStyle = "#64748b";
+    ctx.lineWidth = 1.8 * u;
     ctx.stroke();
 
-    // 4 Red/White Missile Warheads visible in launch tubes
-    const tubeX = [cx - 9 * u, cx - 3 * u, cx + 3 * u, cx + 9 * u];
-    for (const tx of tubeX) {
-      ctx.fillStyle = "#f8fafc";
-      ctx.fillRect(tx - 1.6 * u, cy - 15 * u, 3.2 * u, 9 * u);
+    // Azimuth gear teeth markings
+    ctx.strokeStyle = "#475569";
+    ctx.lineWidth = 1.2 * u;
+    for (let i = 0; i < 8; i++) {
+      const ang = (i * Math.PI) / 4;
       ctx.beginPath();
-      ctx.arc(tx, cy - 15 * u, 1.8 * u, 0, Math.PI * 2);
-      ctx.fillStyle = "#ef4444";
-      ctx.fill();
+      ctx.moveTo(cx + Math.cos(ang) * minDim * 0.16, cy + Math.sin(ang) * minDim * 0.16);
+      ctx.lineTo(cx + Math.cos(ang) * minDim * 0.25, cy + Math.sin(ang) * minDim * 0.25);
+      ctx.stroke();
     }
   } else if (kind === "OBELISK") {
     // Brotherhood Black/Ruby Pyramidal Monolith
@@ -1126,27 +1591,181 @@ export function drawLeonardoBuilding(
   }
 
   // ============================================================================
-  // LAYER 3: MICRO-DETAILS (Fine panel lines, air vents, rivets, lit viewports)
+  // LAYER 3: MICRO-DETAILS (Active powered structures only)
   // ============================================================================
-  drawVentLouvers(ctx, 10 * u, h - 16 * u, 12 * u, 5 * u, 3);
+  const isPassiveFortification =
+    kind === "SANDBAG_WALL" || kind === "CONCRETE_WALL" || kind === "CONCRETE_SLAB";
 
-  // Illuminated tactical status LEDs
-  ctx.fillStyle = "#38bdf8";
-  ctx.fillRect(w - 16 * u, 9 * u, 4 * u, 2.2 * u);
-  ctx.fillStyle = "#22c55e";
-  ctx.fillRect(w - 11 * u, 9 * u, 4 * u, 2.2 * u);
+  if (!isPassiveFortification) {
+    if (kind !== "SILO" && kind !== "OBELISK") {
+      drawVentLouvers(ctx, 10 * u, h - 16 * u, 12 * u, 5 * u, 3);
+    }
+    // Illuminated tactical status LEDs
+    ctx.fillStyle = "#38bdf8";
+    ctx.fillRect(w - 16 * u, 9 * u, 4 * u, 2.2 * u);
+    ctx.fillStyle = "#22c55e";
+    ctx.fillRect(w - 11 * u, 9 * u, 4 * u, 2.2 * u);
+  }
 
   // ============================================================================
   // LAYER 4: LIGHTING & SPECULAR HIGHLIGHTS (Crisp NW Rim Lighting)
   // ============================================================================
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.32)";
-  ctx.lineWidth = 1.4 * u;
-  ctx.beginPath();
-  ctx.moveTo(4 * u, h * 0.65);
-  ctx.lineTo(4 * u, 10 * u);
-  ctx.lineTo(10 * u, 4 * u);
-  ctx.lineTo(w * 0.65, 4 * u);
-  ctx.stroke();
+  if (kind !== "SANDBAG_WALL") {
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.34)";
+    ctx.lineWidth = 1.4 * u;
+    ctx.beginPath();
+    if (kind === "SILO") {
+      ctx.arc(cx, cy, minDim * 0.34, Math.PI * 0.85, Math.PI * 1.65);
+    } else if (kind === "OBELISK") {
+      ctx.moveTo(w * 0.2, h * 0.8);
+      ctx.lineTo(cx, h * 0.1);
+    } else {
+      ctx.moveTo(4 * u, h * 0.65);
+      ctx.lineTo(4 * u, 10 * u);
+      ctx.lineTo(10 * u, 4 * u);
+      ctx.lineTo(w * 0.65, 4 * u);
+    }
+    ctx.stroke();
+  }
+}
+
+/**
+ * 2b. High-Precision Rotating Defense Building Turret Renderer (Lot 3.1: `GUARD_TOWER`, `SAM_SITE`)
+ * Renders the 16-angle turret sprite (`angleIndex` 0..15) with fixed world-space NW lighting & SE drop shadow.
+ */
+export function drawLeonardoBuildingTurret(
+  ctx: VectorDrawingContext,
+  faction: FactionId,
+  kind: BuildingKind,
+  w: number,
+  h: number,
+  angleIndex = 0
+): void {
+  if (kind !== "GUARD_TOWER" && kind !== "SAM_SITE") {
+    return;
+  }
+
+  const fSpec = FACTIONS[faction];
+  const minDim = Math.min(w, h);
+  const u = minDim / 64;
+  const cx = w * 0.5;
+  const cy = h * 0.5;
+  const radians = (angleIndex / 16) * Math.PI * 2;
+  const shadowVec = toLocalSunVector(2.5 * u, 3.0 * u, radians);
+
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(radians);
+
+  if (kind === "GUARD_TOWER") {
+    // 1. Fixed World-Space SE Cast Shadow of Turret & Barrels
+    ctx.fillStyle = "rgba(0, 0, 0, 0.52)";
+    ctx.beginPath();
+    ctx.arc(shadowVec.x, shadowVec.y, minDim * 0.22, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillRect(-5.5 * u + shadowVec.x, -h * 0.44 + shadowVec.y, 11 * u, h * 0.36);
+
+    // 2. Twin Rotary 30mm Vulcan Cannon Barrels & Cooling Jackets (-Y is aim vector)
+    for (const bx of [-5.2 * u, 2.0 * u]) {
+      // Barrel thermal cooling jacket
+      ctx.fillStyle = "#475569";
+      ctx.fillRect(bx - 0.6 * u, -h * 0.32, 4.4 * u, h * 0.18);
+      // Multi-barrel rotary cluster
+      ctx.fillStyle = "#e2e8f0";
+      ctx.fillRect(bx, -h * 0.44, 3.2 * u, h * 0.36);
+      // Heavy muzzle flash suppressor
+      ctx.fillStyle = "#94a3b8";
+      ctx.fillRect(bx - 0.5 * u, -h * 0.46, 4.2 * u, 3.2 * u);
+    }
+
+    // 3. Armored Gunhouse Dome (Shaded along fixed World NW-SE sun axis)
+    const domeR = minDim * 0.22;
+    ctx.beginPath();
+    ctx.arc(0, 0, domeR, 0, Math.PI * 2);
+    ctx.fillStyle = createWorldSunLinearGradient(
+      ctx,
+      radians,
+      domeR,
+      fSpec.primaryColor,
+      fSpec.secondaryColor
+    );
+    ctx.fill();
+    ctx.strokeStyle = "#0f172a";
+    ctx.lineWidth = 1.8 * u;
+    ctx.stroke();
+
+    // Beveled armored mantlet plate
+    traceChamferedRect(ctx, -7 * u, -8 * u, 14 * u, 13 * u, 3 * u);
+    ctx.fillStyle = fSpec.secondaryColor;
+    ctx.fill();
+    ctx.strokeStyle = fSpec.primaryColor;
+    ctx.lineWidth = 1.2 * u;
+    ctx.stroke();
+
+    // Electro-Optical Target Acquisition Sensor Dome
+    ctx.beginPath();
+    ctx.arc(0, 1.5 * u, 3.8 * u, 0, Math.PI * 2);
+    ctx.fillStyle = "#091526";
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(0, 1.5 * u, 2.6 * u, 0, Math.PI * 2);
+    ctx.fillStyle = "#38bdf8";
+    ctx.fill();
+
+    // 4. Fixed World-Space NW Specular Rim Highlight
+    drawWorldSpaceNwSpecularArc(ctx, radians, 9 * u, 9 * u, u, 0.48);
+  } else if (kind === "SAM_SITE") {
+    // 1. Fixed World-Space SE Cast Shadow of Launcher Box
+    ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
+    traceChamferedRect(
+      ctx,
+      -14 * u + shadowVec.x,
+      -13 * u + shadowVec.y,
+      28 * u,
+      25 * u,
+      4 * u
+    );
+    ctx.fill();
+
+    // 2. 4 Protruding Red/White Surface-to-Air Missile Warheads in Launch Tubes (-Y)
+    const tubeX = [-9 * u, -3 * u, 3 * u, 9 * u];
+    for (const tx of tubeX) {
+      ctx.fillStyle = "#f8fafc";
+      ctx.fillRect(tx - 1.7 * u, -17.5 * u, 3.4 * u, 9 * u);
+      ctx.beginPath();
+      ctx.arc(tx, -17.5 * u, 1.9 * u, 0, Math.PI * 2);
+      ctx.fillStyle = "#ef4444";
+      ctx.fill();
+    }
+
+    // 3. Quad Surface-to-Air Missile Launcher Box (Shaded along fixed World NW-SE sun axis)
+    traceChamferedRect(ctx, -14 * u, -12 * u, 28 * u, 24 * u, 4 * u);
+    ctx.fillStyle = createWorldSunLinearGradient(
+      ctx,
+      radians,
+      16 * u,
+      fSpec.primaryColor,
+      fSpec.secondaryColor
+    );
+    ctx.fill();
+    ctx.strokeStyle = "#cbd5e1";
+    ctx.lineWidth = 1.6 * u;
+    ctx.stroke();
+
+    // Inner armored launch cell divider ribs & rear blast exhaust louvers (+Y)
+    ctx.fillStyle = "#1e293b";
+    ctx.fillRect(-11 * u, -8 * u, 22 * u, 12 * u);
+    drawVentLouvers(ctx, -10 * u, 5 * u, 20 * u, 5 * u, 3);
+
+    // Side-mounted target-tracking radar dish pod
+    ctx.fillStyle = "#38bdf8";
+    ctx.fillRect(-5 * u, -5 * u, 10 * u, 3 * u);
+
+    // 4. Fixed World-Space NW Specular Rim Highlight
+    drawWorldSpaceNwSpecularArc(ctx, radians, 12 * u, 10 * u, u, 0.5);
+  }
+
+  ctx.restore();
 }
 
 /**
@@ -1174,35 +1793,48 @@ function drawDetailedTrack(
 }
 
 /**
- * 3. High-Precision Vector Unit Body Renderer (All 9 UnitKinds)
- * Note: `ctx` is already translated to `(sizePx/2, sizePx/2)` and rotated (North = `-Y`).
+ * 3. High-Precision Vector Unit Body Renderer (All 10 UnitKinds)
+ * Note: `ctx` is already translated to `(sizePx/2, sizePx/2)` and rotated by `radians = (angleIndex / 16) * Math.PI * 2`.
+ * Lot 2: Uses `angleIndex` (`0..15`) so ground shadows and NW specular highlights remain locked to the
+ * fixed world-space North-West sun, and each infantry soldier rotates on their own individual axis.
  */
 export function drawLeonardoUnitBody(
   ctx: VectorDrawingContext,
   faction: FactionId,
   kind: UnitKind,
-  sizePx: number
+  sizePx: number,
+  angleIndex = 0
 ): void {
   const fSpec = FACTIONS[faction];
   const u = sizePx / 64; // Normalized unit scale relative to 64px high-DPI sprite
+  const radians = (angleIndex / 16) * Math.PI * 2;
+  const shadowVec = toLocalSunVector(2.8 * u, 3.4 * u, radians);
 
   if (kind === "RIFLE_INFANTRY" || kind === "ROCKET_SOLDIER" || kind === "ENGINEER") {
-    // 3-Soldier Tactical Squad Formation
+    // Lot 2.2: Maintain fixed triangular 3-soldier formation in world space and rotate each soldier on their own axis!
     const squadOffsets: Array<{ x: number; y: number }> = [
       { x: 0, y: -10 * u },
       { x: -10 * u, y: 8 * u },
       { x: 10 * u, y: 8 * u },
     ];
 
+    ctx.save();
+    // Counter-rotate the canvas-level rotation so the triangle formation stays fixed in world space
+    ctx.rotate(-radians);
+
     for (const pos of squadOffsets) {
       ctx.save();
       ctx.translate(pos.x, pos.y);
 
-      // Ground drop shadow
+      // 1. Fixed World-Space South-East Ground Drop Shadow
       ctx.beginPath();
-      ctx.ellipse(1 * u, 2 * u, 6.5 * u, 5 * u, 0, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(0, 0, 0, 0.48)";
+      ctx.ellipse(1.6 * u, 2.4 * u, 6.5 * u, 5 * u, 0, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
       ctx.fill();
+
+      // 2. Rotate individual soldier on their own axis by `radians`
+      ctx.save();
+      ctx.rotate(radians);
 
       // Armored Shoulder Pauldrons (Faction Primary & Secondary)
       traceChamferedRect(ctx, -6.5 * u, -3.5 * u, 13 * u, 7 * u, 2.5 * u);
@@ -1216,7 +1848,7 @@ export function drawLeonardoUnitBody(
       ctx.fillRect(-6 * u, -2.5 * u, 3.5 * u, 5 * u);
       ctx.fillRect(2.5 * u, -2.5 * u, 3.5 * u, 5 * u);
 
-      // Weapon / Equipment assembly pointing North (-Y)
+      // Weapon / Equipment assembly pointing along soldier's aim axis (-Y)
       if (kind === "RIFLE_INFANTRY") {
         // Long-barreled pulse assault rifle with muzzle flash suppressor
         ctx.fillStyle = "#1e293b";
@@ -1250,19 +1882,29 @@ export function drawLeonardoUnitBody(
       ctx.lineWidth = 1.1 * u;
       ctx.stroke();
 
-      // Glowing cyan optical visor strip on north side of helmet
+      // Glowing cyan optical visor strip on front side of helmet
       ctx.fillStyle = "#38bdf8";
       ctx.fillRect(-2.5 * u, -3.8 * u, 5 * u, 1.8 * u);
 
       ctx.restore();
+
+      // 3. Fixed World-Space North-West Specular Helmet Highlight
+      ctx.beginPath();
+      ctx.arc(-1.4 * u, -1.4 * u, 1.5 * u, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(255, 255, 255, 0.65)";
+      ctx.fill();
+
+      ctx.restore();
     }
+
+    ctx.restore();
     return;
   }
 
   if (kind === "CONSTRUCTOR_BOT") {
-    // Robotic Construction Unit: compact tracked chassis, hazard chevrons, dual articulated welding arms + cyan plasma arc
-    ctx.fillStyle = "rgba(0, 0, 0, 0.48)";
-    traceChamferedRect(ctx, -13 * u, -15 * u, 28 * u, 32 * u, 4 * u);
+    // Fixed World-Space SE Ground Shadow
+    ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
+    traceChamferedRect(ctx, -14 * u + shadowVec.x, -16 * u + shadowVec.y, 28 * u, 32 * u, 4 * u);
     ctx.fill();
 
     // Twin Heavy Servo Tracks
@@ -1288,9 +1930,15 @@ export function drawLeonardoUnitBody(
     ctx.arc(5 * u, -24 * u, 2.4 * u, 0, Math.PI * 2);
     ctx.fill();
 
-    // Main Robotic Hull
+    // Main Robotic Hull shaded along World NW-SE Sun Axis
     traceChamferedRect(ctx, -11 * u, -12 * u, 22 * u, 25 * u, 4 * u);
-    ctx.fillStyle = fSpec.secondaryColor;
+    ctx.fillStyle = createWorldSunLinearGradient(
+      ctx,
+      radians,
+      14 * u,
+      fSpec.primaryColor,
+      fSpec.secondaryColor
+    );
     ctx.fill();
     ctx.strokeStyle = "#0f172a";
     ctx.lineWidth = 1.6 * u;
@@ -1310,13 +1958,15 @@ export function drawLeonardoUnitBody(
 
     ctx.fillStyle = "#38bdf8";
     ctx.fillRect(-4.5 * u, -6.5 * u, 9 * u, 2.6 * u);
+
+    drawWorldSpaceNwSpecularArc(ctx, radians, 9.5 * u, 10.5 * u, u, 0.44);
     return;
   }
 
   if (kind === "HARVESTER") {
-    // Super-Heavy Ore Harvester: massive articulated dump bed (benne), twin side cisterns, front rotary crusher drum
+    // Super-Heavy Ore Harvester (Lot 2 fixed sun shadow + Lot 3.2 EMPTY grooved metallic rear dump-bed)
     ctx.fillStyle = "rgba(0, 0, 0, 0.58)";
-    traceChamferedRect(ctx, -23 * u, -26 * u, 48 * u, 54 * u, 6 * u);
+    traceChamferedRect(ctx, -24 * u + shadowVec.x, -27 * u + shadowVec.y, 48 * u, 54 * u, 6 * u);
     ctx.fill();
 
     // 4 Wide Articulated Heavy Tracks
@@ -1340,27 +1990,21 @@ export function drawLeonardoUnitBody(
       ctx.fill();
     }
 
-    // Glowing active Tiberium/Spice crystals in front intake
-    ctx.fillStyle = "#10b981";
-    ctx.beginPath();
-    ctx.arc(-5 * u, -27 * u, 3.2 * u, 0, Math.PI * 2);
-    ctx.arc(5 * u, -27 * u, 3.2 * u, 0, Math.PI * 2);
-    ctx.arc(0, -28 * u, 4 * u, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "#a7f3d0";
-    ctx.beginPath();
-    ctx.arc(0, -28.5 * u, 2 * u, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Main Heavy Chassis Frame
+    // Main Heavy Chassis Frame shaded along World NW-SE Sun Axis
     traceChamferedRect(ctx, -19 * u, -22 * u, 38 * u, 48 * u, 5 * u);
-    ctx.fillStyle = fSpec.secondaryColor;
+    ctx.fillStyle = createWorldSunLinearGradient(
+      ctx,
+      radians,
+      22 * u,
+      fSpec.primaryColor,
+      fSpec.secondaryColor
+    );
     ctx.fill();
     ctx.strokeStyle = "#0f172a";
     ctx.lineWidth = 1.8 * u;
     ctx.stroke();
 
-    // Twin Pressurized Cylindrical Side Cisterns (Left & Right Flanks)
+    // Twin Pressurized Cylindrical Side Cisterns (Empty sight-glass in static sprite; filled dynamically in world-renderer)
     for (const cxOff of [-15.5 * u, 15.5 * u]) {
       traceChamferedRect(ctx, cxOff - 3.2 * u, -8 * u, 6.4 * u, 28 * u, 2.5 * u);
       ctx.fillStyle = "#475569";
@@ -1368,8 +2012,7 @@ export function drawLeonardoUnitBody(
       ctx.strokeStyle = "#cbd5e1";
       ctx.lineWidth = 1.2 * u;
       ctx.stroke();
-      // Luminescent green ore level sight-glass on each cistern
-      ctx.fillStyle = "#22c55e";
+      ctx.fillStyle = "#091526";
       ctx.fillRect(cxOff - 1.2 * u, -4 * u, 2.4 * u, 20 * u);
     }
 
@@ -1380,37 +2023,43 @@ export function drawLeonardoUnitBody(
     ctx.fillStyle = "#38bdf8";
     ctx.fillRect(-10 * u, -18 * u, 20 * u, 3.2 * u);
 
-    // Massive Rear Dump-Bed / Benne Industrielle (-6*u to +24*u)
+    // Lot 3.2: EMPTY Rear Dump-Bed / Benne Industrielle (-6*u to +23*u) with grooved metallic floor
     traceChamferedRect(ctx, -13 * u, -6 * u, 26 * u, 29 * u, 3.5 * u);
-    ctx.fillStyle = "#091526";
+    ctx.fillStyle = "#09101d";
     ctx.fill();
     ctx.strokeStyle = fSpec.primaryColor;
     ctx.lineWidth = 2 * u;
     ctx.stroke();
 
-    // Structural Dump-Bed Ribs & Glowing Ore Mound Inside Benne
-    ctx.fillStyle = "#059669";
+    // Inner recessed metallic hopper floor & longitudinal/transverse steel ribs
+    ctx.fillStyle = "#162032";
     ctx.fillRect(-10.5 * u, -3.5 * u, 21 * u, 24 * u);
-    ctx.fillStyle = "#10b981";
+    ctx.strokeStyle = "#334155";
+    ctx.lineWidth = 1.1 * u;
     ctx.beginPath();
-    ctx.ellipse(0, 8 * u, 9.5 * u, 10.5 * u, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "#6ee7b7";
-    ctx.beginPath();
-    ctx.ellipse(-2 * u, 5 * u, 5.5 * u, 6 * u, 0, 0, Math.PI * 2);
-    ctx.fill();
+    for (const rx of [-6.5 * u, -2.2 * u, 2.2 * u, 6.5 * u]) {
+      ctx.moveTo(rx, -3 * u);
+      ctx.lineTo(rx, 20 * u);
+    }
+    for (const ry of [1 * u, 6.5 * u, 12 * u, 17 * u]) {
+      ctx.moveTo(-10 * u, ry);
+      ctx.lineTo(10 * u, ry);
+    }
+    ctx.stroke();
 
     // Transverse Hydraulic Cross-Bars over the Dump Bed
     ctx.fillStyle = "#64748b";
     ctx.fillRect(-12 * u, 2 * u, 24 * u, 2.2 * u);
     ctx.fillRect(-12 * u, 12 * u, 24 * u, 2.2 * u);
+
+    drawWorldSpaceNwSpecularArc(ctx, radians, 16 * u, 19 * u, u, 0.42);
     return;
   }
 
   if (kind === "RECON_BUGGY") {
-    // Fast 4x4 All-Terrain Recon Buggy with lugged tires, roll cage, aggressive hood & headlights
-    ctx.fillStyle = "rgba(0, 0, 0, 0.45)";
-    traceChamferedRect(ctx, -11 * u, -16 * u, 24 * u, 34 * u, 4 * u);
+    // Fixed World-Space SE Ground Shadow
+    ctx.fillStyle = "rgba(0, 0, 0, 0.48)";
+    traceChamferedRect(ctx, -12 * u + shadowVec.x, -17 * u + shadowVec.y, 24 * u, 34 * u, 4 * u);
     ctx.fill();
 
     // 4 Lugged Off-Road Tires
@@ -1419,7 +2068,7 @@ export function drawLeonardoUnitBody(
     drawDetailedTrack(ctx, -14 * u, 5 * u, 4 * u, 10 * u, 3);
     drawDetailedTrack(ctx, 10 * u, 5 * u, 4 * u, 10 * u, 3);
 
-    // Aggressive Tapered Body
+    // Aggressive Tapered Body shaded along World NW-SE Sun Axis
     ctx.beginPath();
     ctx.moveTo(0, -19 * u);
     ctx.lineTo(10 * u, -9 * u);
@@ -1427,7 +2076,13 @@ export function drawLeonardoUnitBody(
     ctx.lineTo(-10 * u, 16 * u);
     ctx.lineTo(-10 * u, -9 * u);
     ctx.closePath();
-    ctx.fillStyle = fSpec.secondaryColor;
+    ctx.fillStyle = createWorldSunLinearGradient(
+      ctx,
+      radians,
+      14 * u,
+      fSpec.primaryColor,
+      fSpec.secondaryColor
+    );
     ctx.fill();
     ctx.strokeStyle = "#0f172a";
     ctx.lineWidth = 1.5 * u;
@@ -1451,13 +2106,15 @@ export function drawLeonardoUnitBody(
     ctx.fillStyle = "#fef08a";
     ctx.fillRect(-6 * u, -17 * u, 3 * u, 2 * u);
     ctx.fillRect(3 * u, -17 * u, 3 * u, 2 * u);
+
+    drawWorldSpaceNwSpecularArc(ctx, radians, 8.5 * u, 12 * u, u, 0.42);
     return;
   }
 
   if (kind === "MAMMOTH_TANK") {
-    // Super-Heavy Quad-Track Tank with double reactive glacis & dorsal reactor
-    ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
-    traceChamferedRect(ctx, -20 * u, -23 * u, 42 * u, 48 * u, 6 * u);
+    // Fixed World-Space SE Ground Shadow
+    ctx.fillStyle = "rgba(0, 0, 0, 0.56)";
+    traceChamferedRect(ctx, -21 * u + shadowVec.x, -24 * u + shadowVec.y, 42 * u, 48 * u, 6 * u);
     ctx.fill();
 
     // 4 Independent Quad-Tracks
@@ -1466,7 +2123,7 @@ export function drawLeonardoUnitBody(
     drawDetailedTrack(ctx, -22 * u, 4 * u, 6 * u, 18 * u, 6);
     drawDetailedTrack(ctx, 16 * u, 4 * u, 6 * u, 18 * u, 6);
 
-    // Heavy Armored Chassis
+    // Heavy Armored Chassis shaded along World NW-SE Sun Axis
     traceChamferedRect(ctx, -17 * u, -20 * u, 34 * u, 42 * u, 5 * u);
     ctx.fillStyle = fSpec.secondaryColor;
     ctx.fill();
@@ -1476,7 +2133,13 @@ export function drawLeonardoUnitBody(
 
     // Double Reactive Front Glacis Plates
     traceChamferedRect(ctx, -14 * u, -17 * u, 28 * u, 32 * u, 4 * u);
-    ctx.fillStyle = fSpec.primaryColor;
+    ctx.fillStyle = createWorldSunLinearGradient(
+      ctx,
+      radians,
+      18 * u,
+      fSpec.primaryColor,
+      fSpec.secondaryColor
+    );
     ctx.fill();
 
     // Dorsal Energy Core & Rear Exhaust Vents
@@ -1484,20 +2147,28 @@ export function drawLeonardoUnitBody(
     ctx.fillStyle = "#fef08a";
     ctx.fillRect(-11 * u, -19 * u, 4 * u, 2 * u);
     ctx.fillRect(7 * u, -19 * u, 4 * u, 2 * u);
+
+    drawWorldSpaceNwSpecularArc(ctx, radians, 14.5 * u, 17.5 * u, u, 0.45);
     return;
   }
 
   if (kind === "MCV") {
-    // Giant Mobile Construction Vehicle: heavy tracks, armored cab, folded crane & assembly module
-    ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
-    traceChamferedRect(ctx, -19 * u, -23 * u, 40 * u, 48 * u, 5 * u);
+    // Fixed World-Space SE Ground Shadow
+    ctx.fillStyle = "rgba(0, 0, 0, 0.56)";
+    traceChamferedRect(ctx, -20 * u + shadowVec.x, -24 * u + shadowVec.y, 40 * u, 48 * u, 5 * u);
     ctx.fill();
 
     drawDetailedTrack(ctx, -21 * u, -21 * u, 5 * u, 42 * u, 11);
     drawDetailedTrack(ctx, 16 * u, -21 * u, 5 * u, 42 * u, 11);
 
     traceChamferedRect(ctx, -16 * u, -21 * u, 32 * u, 44 * u, 5 * u);
-    ctx.fillStyle = fSpec.secondaryColor;
+    ctx.fillStyle = createWorldSunLinearGradient(
+      ctx,
+      radians,
+      20 * u,
+      fSpec.primaryColor,
+      fSpec.secondaryColor
+    );
     ctx.fill();
     ctx.strokeStyle = "#0f172a";
     ctx.lineWidth = 1.8 * u;
@@ -1521,6 +2192,8 @@ export function drawLeonardoUnitBody(
     ctx.moveTo(-6 * u, 12 * u);
     ctx.lineTo(6 * u, -3 * u);
     ctx.stroke();
+
+    drawWorldSpaceNwSpecularArc(ctx, radians, 14 * u, 18 * u, u, 0.44);
     return;
   }
 
@@ -1528,8 +2201,16 @@ export function drawLeonardoUnitBody(
   const hullW = 28 * u;
   const hullH = kind === "ARTILLERY" ? 40 * u : 36 * u;
 
-  ctx.fillStyle = "rgba(0, 0, 0, 0.48)";
-  traceChamferedRect(ctx, -hullW * 0.5 - 2 * u, -hullH * 0.5 + 2 * u, hullW + 6 * u, hullH, 4 * u);
+  // Fixed World-Space SE Ground Shadow
+  ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
+  traceChamferedRect(
+    ctx,
+    -hullW * 0.5 - 3 * u + shadowVec.x,
+    -hullH * 0.5 + shadowVec.y,
+    hullW + 6 * u,
+    hullH,
+    4 * u
+  );
   ctx.fill();
 
   // Left & Right Cleated Tracks
@@ -1544,7 +2225,7 @@ export function drawLeonardoUnitBody(
   ctx.lineWidth = 1.6 * u;
   ctx.stroke();
 
-  // Beveled Front Glacis & Side Skirts in Faction Primary Color
+  // Beveled Front Glacis & Side Skirts shaded along fixed World NW-SE Sun Axis
   traceChamferedRect(
     ctx,
     -hullW * 0.5 + 3 * u,
@@ -1553,25 +2234,37 @@ export function drawLeonardoUnitBody(
     hullH - 9 * u,
     3 * u
   );
-  ctx.fillStyle = fSpec.primaryColor;
+  ctx.fillStyle = createWorldSunLinearGradient(
+    ctx,
+    radians,
+    16 * u,
+    fSpec.primaryColor,
+    fSpec.secondaryColor
+  );
   ctx.fill();
 
   // Rear Engine Louvers & Exhaust Pipes
   drawVentLouvers(ctx, -8 * u, hullH * 0.5 - 6 * u, 16 * u, 4 * u, 3);
+
+  drawWorldSpaceNwSpecularArc(ctx, radians, hullW * 0.42, hullH * 0.42, u, 0.44);
 }
 
 /**
  * 4. High-Precision Vector Unit Turret Renderer
  * Note: `ctx` is already translated to `(sizePx/2, sizePx/2)` and rotated (`-Y` = aim direction).
+ * Lot 2: Uses `angleIndex` (`0..15`) so the turret cast shadow and NW specular highlight stay locked to the world sun.
  */
 export function drawLeonardoUnitTurret(
   ctx: VectorDrawingContext,
   faction: FactionId,
   kind: UnitKind,
-  sizePx: number
+  sizePx: number,
+  angleIndex = 0
 ): void {
   const fSpec = FACTIONS[faction];
   const u = sizePx / 64;
+  const radians = (angleIndex / 16) * Math.PI * 2;
+  const shadowVec = toLocalSunVector(1.8 * u, 2.2 * u, radians);
 
   if (kind === "RECON_BUGGY") {
     // Rotary Heavy Machine Gun Mount with Frontal Shield & Ammo Belt
@@ -1586,7 +2279,13 @@ export function drawLeonardoUnitTurret(
     ctx.lineTo(5 * u, -2 * u);
     ctx.lineTo(-5 * u, -2 * u);
     ctx.closePath();
-    ctx.fillStyle = fSpec.primaryColor;
+    ctx.fillStyle = createWorldSunLinearGradient(
+      ctx,
+      radians,
+      6 * u,
+      fSpec.primaryColor,
+      fSpec.secondaryColor
+    );
     ctx.fill();
     ctx.strokeStyle = "#0f172a";
     ctx.lineWidth = 1.2 * u;
@@ -1599,6 +2298,18 @@ export function drawLeonardoUnitTurret(
   }
 
   if (kind === "MEDIUM_TANK") {
+    // Fixed World-Space SE Turret Cast Shadow onto Hull Deck
+    ctx.fillStyle = "rgba(0, 0, 0, 0.44)";
+    traceChamferedRect(
+      ctx,
+      -9.5 * u + shadowVec.x,
+      -9.5 * u + shadowVec.y,
+      19 * u,
+      19 * u,
+      4.5 * u
+    );
+    ctx.fill();
+
     // 105mm Main Cannon with Thermal Sleeve & Muzzle Brake
     ctx.fillStyle = "#cbd5e1";
     ctx.fillRect(-2.2 * u, -25 * u, 4.4 * u, 18 * u);
@@ -1609,15 +2320,21 @@ export function drawLeonardoUnitTurret(
     ctx.fillStyle = "#334155";
     ctx.fillRect(-4.5 * u, -12 * u, 9 * u, 5 * u);
 
-    // Beveled Octagonal Turret
+    // Beveled Octagonal Turret shaded along World NW-SE Sun Axis
     traceChamferedRect(ctx, -9.5 * u, -9.5 * u, 19 * u, 19 * u, 4.5 * u);
-    ctx.fillStyle = fSpec.primaryColor;
+    ctx.fillStyle = createWorldSunLinearGradient(
+      ctx,
+      radians,
+      11 * u,
+      fSpec.primaryColor,
+      fSpec.secondaryColor
+    );
     ctx.fill();
     ctx.strokeStyle = "#0f172a";
     ctx.lineWidth = 1.6 * u;
     ctx.stroke();
 
-    // Commander's Cupola Hatch & Smoke Grenade Launchers
+    // Commander's Cupola Hatch
     ctx.beginPath();
     ctx.arc(3 * u, 2 * u, 3.5 * u, 0, Math.PI * 2);
     ctx.fillStyle = fSpec.secondaryColor;
@@ -1625,10 +2342,24 @@ export function drawLeonardoUnitTurret(
     ctx.strokeStyle = "#cbd5e1";
     ctx.lineWidth = 1 * u;
     ctx.stroke();
+
+    drawWorldSpaceNwSpecularArc(ctx, radians, 7.5 * u, 7.5 * u, u, 0.48);
     return;
   }
 
   if (kind === "ARTILLERY") {
+    // Fixed World-Space SE Launcher Shadow
+    ctx.fillStyle = "rgba(0, 0, 0, 0.44)";
+    traceChamferedRect(
+      ctx,
+      -8.5 * u + shadowVec.x,
+      -14 * u + shadowVec.y,
+      17 * u,
+      24 * u,
+      3 * u
+    );
+    ctx.fill();
+
     // Long-Range Inclined Missile/Howitzer Launcher Ramp with Hydraulic Struts & Optics
     traceChamferedRect(ctx, -8.5 * u, -14 * u, 17 * u, 24 * u, 3 * u);
     ctx.fillStyle = fSpec.secondaryColor;
@@ -1640,16 +2371,36 @@ export function drawLeonardoUnitTurret(
     // Long Barrel / Launch Rail
     ctx.fillStyle = "#e2e8f0";
     ctx.fillRect(-3 * u, -26 * u, 6 * u, 20 * u);
-    ctx.fillStyle = fSpec.primaryColor;
+    ctx.fillStyle = createWorldSunLinearGradient(
+      ctx,
+      radians,
+      10 * u,
+      fSpec.primaryColor,
+      fSpec.secondaryColor
+    );
     ctx.fillRect(-5.5 * u, -11 * u, 11 * u, 16 * u);
 
     // Targeting Optical Sensor
     ctx.fillStyle = "#38bdf8";
     ctx.fillRect(4 * u, -13 * u, 3 * u, 3 * u);
+
+    drawWorldSpaceNwSpecularArc(ctx, radians, 6.5 * u, 10 * u, u, 0.45);
     return;
   }
 
   if (kind === "MAMMOTH_TANK") {
+    // Fixed World-Space SE Heavy Turret Shadow
+    ctx.fillStyle = "rgba(0, 0, 0, 0.48)";
+    traceChamferedRect(
+      ctx,
+      -11.5 * u + shadowVec.x,
+      -11.5 * u + shadowVec.y,
+      23 * u,
+      23 * u,
+      5.5 * u
+    );
+    ctx.fill();
+
     // Twin 120mm Heavy Cannons with Double Muzzle Brakes & Thermal Sleeves
     for (const bx of [-6 * u, 2.4 * u]) {
       ctx.fillStyle = "#e2e8f0";
@@ -1666,22 +2417,22 @@ export function drawLeonardoUnitTurret(
     ctx.fillRect(-14.5 * u, -9.5 * u, 3 * u, 2 * u);
     ctx.fillRect(11.5 * u, -9.5 * u, 3 * u, 2 * u);
 
-    // Massive Beveled Heavy Turret
+    // Massive Beveled Heavy Turret shaded along World NW-SE Sun Axis
     traceChamferedRect(ctx, -11.5 * u, -11.5 * u, 23 * u, 23 * u, 5.5 * u);
-    ctx.fillStyle = fSpec.primaryColor;
+    ctx.fillStyle = createWorldSunLinearGradient(
+      ctx,
+      radians,
+      13 * u,
+      fSpec.primaryColor,
+      fSpec.secondaryColor
+    );
     ctx.fill();
     ctx.strokeStyle = "#0f172a";
     ctx.lineWidth = 1.8 * u;
     ctx.stroke();
 
-    // Specular NW Turret Roof Highlight
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.4)";
-    ctx.lineWidth = 1.2 * u;
-    ctx.beginPath();
-    ctx.moveTo(-8 * u, 4 * u);
-    ctx.lineTo(-8 * u, -8 * u);
-    ctx.lineTo(4 * u, -8 * u);
-    ctx.stroke();
+    // Specular NW Turret Roof Highlight locked to World-Space North-West
+    drawWorldSpaceNwSpecularArc(ctx, radians, 8.5 * u, 8.5 * u, u, 0.5);
   }
 }
 

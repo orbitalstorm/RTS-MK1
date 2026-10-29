@@ -19,7 +19,9 @@ import {
   PanelRightOpen,
   Play,
   Send,
+  ShieldAlert,
   ShieldCheck,
+  Skull,
   Smartphone,
   SquareDashedMousePointer,
   Swords,
@@ -633,7 +635,7 @@ export default function GameMatchPage() {
             nextSel.delete(ent.id);
             setSelectedEntities(nextSel);
             useRtsGameStore.setState({
-              evaBannerText: `EVA : CONSTRUCTION ANNULÉE (${bSpec.name.toUpperCase()}) — CRÉDITS REMBOURSÉS`,
+              evaBannerText: `EVA : Construction annulée (${bSpec.name}) — Crédits remboursés`,
             });
             return;
           }
@@ -716,7 +718,7 @@ export default function GameMatchPage() {
       if (!valid) {
         useRtsGameStore.setState({
           evaBannerText:
-            "EVA : ZONE DE DÉPLOIEMENT INVALIDE — CLIQUEZ SUR UN EMPLACEMENT VERT PRÈS DE LA BASE",
+            "EVA : Zone de déploiement invalide — Cliquez sur un emplacement vert près de la base",
         });
         return;
       }
@@ -726,7 +728,7 @@ export default function GameMatchPage() {
       if (!paidInQueue && (myEcon?.credits ?? 0) < spec.cost) {
         useRtsGameStore.setState({
           evaBannerText:
-            "EVA : CRÉDITS INSUFFISANTS POUR POSER CE PATRON (CLIC DROIT POUR DÉSÉLECTIONNER L'OUTIL)",
+            "EVA : Crédits insuffisants pour poser ce patron (Clic droit pour désélectionner l'outil)",
         });
         return;
       }
@@ -997,8 +999,8 @@ export default function GameMatchPage() {
     useRtsGameStore.setState({
       evaBannerText:
         targetSet.size > 0
-          ? `EVA : ${targetSet.size} UNITÉ(S) SÉLECTIONNÉE(S) — TOUCHEZ LA CARTE POUR DÉPLACER OU ATTAQUER`
-          : "EVA : AUCUNE UNITÉ DISPONIBLE SUR LE SECTEUR",
+          ? `EVA : ${targetSet.size} unité(s) sélectionnée(s) — Touchez la carte pour déplacer ou attaquer`
+          : "EVA : Aucune unité disponible sur le secteur",
     });
   }
 
@@ -1292,7 +1294,7 @@ export default function GameMatchPage() {
       if (!valid) {
         useRtsGameStore.setState({
           evaBannerText:
-            "EVA : ZONE INVALIDE — TOUCHEZ UN EMPLACEMENT VERT PRÈS DE LA BASE",
+            "EVA : Zone invalide — Touchez un emplacement vert près de la base",
         });
         return;
       }
@@ -1302,7 +1304,7 @@ export default function GameMatchPage() {
       if (!paidInQueue && (myEcon?.credits ?? 0) < spec.cost) {
         useRtsGameStore.setState({
           evaBannerText:
-            "EVA : CRÉDITS INSUFFISANTS POUR POSER CE PATRON",
+            "EVA : Crédits insuffisants pour poser ce patron",
         });
         return;
       }
@@ -1418,19 +1420,19 @@ export default function GameMatchPage() {
   // Screen 1: Asynchronous Batched OffscreenCanvas Sprite Atlas Rasterization Progress
   if (!atlas) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-obsidian p-6 font-mono text-slate-100">
+      <div className="flex min-h-screen items-center justify-center bg-obsidian p-6 font-sans text-slate-100">
         <Card className="w-full max-w-lg p-6 space-y-4">
           <div className="flex items-center gap-3 text-amber-400">
             <Layers className="h-6 w-6 shrink-0" />
-            <h2 className="text-base sm:text-lg font-bold uppercase tracking-wider">
-              Génération Procédurale OffscreenCanvas &rarr; ImageBitmap
+            <h2 className="text-base sm:text-lg font-bold tracking-wide">
+              Génération procédurale OffscreenCanvas &rarr; ImageBitmap
             </h2>
           </div>
           <p className="text-xs sm:text-sm text-slate-300">{atlasStage}</p>
           <DiscretizedProgressBar ratio={atlasProgress / 100} tone="amber" />
           <div className="flex justify-between text-xs sm:text-sm text-slate-300">
             <span>Rastérisation Vectorielle / Bitmap 16-Angles</span>
-            <span className="font-bold text-amber-300">{atlasProgress}%</span>
+            <span className="font-bold tabular-nums text-amber-300">{atlasProgress}%</span>
           </div>
         </Card>
       </div>
@@ -1440,7 +1442,7 @@ export default function GameMatchPage() {
   // Screen 2: Lobby Waiting Room / Single Active Match Mutex FIFO Queue
   if (lobby && (lobby.status === "WAITING" || lobby.status === "QUEUED")) {
     return (
-      <div className="min-h-dvh bg-obsidian p-3 sm:p-6 font-mono text-slate-100">
+      <div className="min-h-dvh bg-obsidian p-3 sm:p-6 font-sans text-slate-100">
         <div className="mx-auto max-w-4xl space-y-4 sm:space-y-6">
           <Card className="p-4 sm:p-6 space-y-4 sm:space-y-5">
             <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
@@ -1490,8 +1492,8 @@ export default function GameMatchPage() {
                 <div className="flex items-center gap-3">
                   <Lock className="h-5 w-5 text-amber-400" />
                   <div>
-                    <div className="font-bold uppercase">
-                      Verrou de Salon Unique Actif — En File d&apos;Attente FIFO
+                    <div className="font-bold">
+                      Verrou de salon unique actif — En file d&apos;attente FIFO
                     </div>
                     <div className="text-slate-300">
                       Une partie est actuellement en cours ({overview.activeLobbyName}). Votre salon démarrera automatiquement dès la libération du verrou.
@@ -1500,15 +1502,15 @@ export default function GameMatchPage() {
                 </div>
                 <Badge className="border-amber-400 bg-amber-500/30 text-sm font-bold text-amber-200">
                   <Clock className="h-4 w-4" />
-                  POSITION #{lobby.queuePosition ?? 1}
+                  Position #{lobby.queuePosition ?? 1}
                 </Badge>
               </div>
             )}
 
             {/* Players Table & Faction Switcher */}
             <div className="space-y-2">
-              <h3 className="text-xs sm:text-sm font-bold uppercase text-slate-300">
-                Commandants Présents ({lobby.players.length}/{lobby.maxPlayers})
+              <h3 className="text-xs sm:text-sm font-bold text-slate-300">
+                Commandants présents ({lobby.players.length}/{lobby.maxPlayers})
               </h3>
               <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
                 {lobby.players.map((p) => (
@@ -1600,7 +1602,7 @@ export default function GameMatchPage() {
 
   // Screen 3: Active Tactical RTS Battlefield (1 World Canvas + Classic C&C Sidebar HUD with 1 Radar Canvas)
   return (
-    <div className="flex h-dvh w-dvw flex-col overflow-hidden bg-obsidian font-mono text-slate-100 select-none">
+    <div className="flex h-dvh w-dvw flex-col overflow-hidden bg-obsidian font-sans text-slate-100 select-none">
       {/* Mobile Portrait Orientation Advisory Banner (automatically hidden in Landscape & Desktop) */}
       <div className="flex sm:hidden portrait:flex landscape:hidden shrink-0 items-center justify-between border-b border-amber-500/40 bg-amber-950/90 px-3 py-1.5 text-xs text-amber-200">
         <div className="flex items-center gap-2">
@@ -1822,21 +1824,102 @@ export default function GameMatchPage() {
               )}
             </div>
 
-            {/* Victory / Defeat End-of-Match Overlay */}
+            {/* Victory / Game Over (Defeat) End-of-Match Overlay */}
             {winnerPlayerId && (
-              <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-950/80 p-4 sm:p-6">
-                <Card className="max-w-md p-5 sm:p-6 text-center space-y-4">
-                  <Trophy className="mx-auto h-12 w-12 text-amber-400" />
-                  <h2 className="text-xl sm:text-2xl font-bold uppercase tracking-widest text-amber-400">
-                    {winnerPlayerId === playerId ? "VICTOIRE TOTALE !" : "FIN DE L'OPÉRATION"}
-                  </h2>
-                  <p className="text-sm text-slate-300">
-                    Le verrou de salon unique a été libéré proprement et les statistiques du commandant ont été enregistrées.
-                  </p>
-                  <Button variant="tactical" onClick={handleLeave} className="w-full">
-                    Retourner à la Sélection du Clan
-                  </Button>
-                </Card>
+              <div
+                data-testid="match-end-overlay"
+                className="absolute inset-0 z-20 flex items-center justify-center bg-slate-950/85 p-4 sm:p-6 backdrop-blur-sm"
+              >
+                {winnerPlayerId === playerId ? (
+                  <Card
+                    data-testid="match-victory-card"
+                    className="w-full max-w-md border-amber-500/60 bg-slate-950/95 p-6 sm:p-7 text-center space-y-5 shadow-2xl"
+                  >
+                    <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full border-2 border-amber-400/60 bg-amber-500/15 shadow-inner">
+                      <Trophy
+                        data-testid="victory-trophy-icon"
+                        className="h-10 w-10 text-amber-400"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Badge className="border-amber-500/50 bg-amber-500/15 text-amber-300">
+                        <ShieldCheck className="h-3.5 w-3.5 text-amber-400" />
+                        <span>Opération victorieuse • Secteur pacifié</span>
+                      </Badge>
+                      <h2 className="text-2xl sm:text-3xl font-extrabold tracking-wide text-amber-400">
+                        Victoire Totale !
+                      </h2>
+                      <p className="text-sm leading-relaxed text-slate-300">
+                        Toutes les forces hostiles ont été neutralisées. Le commandement central salue votre supériorité stratégique sur ce secteur.
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 rounded border border-amber-500/30 bg-slate-900/80 p-3 text-left text-xs">
+                      <div>
+                        <div className="text-slate-400">Clan victorieux</div>
+                        <div className="mt-0.5 font-bold text-amber-300">
+                          {FACTIONS[faction].name}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-slate-400">Secteur tactique</div>
+                        <div className="mt-0.5 font-bold tabular-nums text-slate-200">
+                          Seed #{mapSeed || 1}
+                        </div>
+                      </div>
+                    </div>
+
+                    <Button variant="tactical" size="lg" onClick={handleLeave} className="w-full">
+                      Retourner à la sélection du clan
+                    </Button>
+                  </Card>
+                ) : (
+                  <Card
+                    data-testid="match-gameover-card"
+                    className="w-full max-w-md border-red-500/60 bg-slate-950/95 p-6 sm:p-7 text-center space-y-5 shadow-2xl"
+                  >
+                    <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full border-2 border-red-500/60 bg-red-500/15 shadow-inner">
+                      <Skull
+                        data-testid="gameover-skull-icon"
+                        className="h-10 w-10 text-red-400"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Badge className="border-red-500/60 bg-red-500/20 text-red-300">
+                        <ShieldAlert className="h-3.5 w-3.5 text-red-400" />
+                        <span>Signal EVA interrompu • Base anéantie</span>
+                      </Badge>
+                      <h2 className="text-2xl sm:text-3xl font-extrabold tracking-wide text-red-400">
+                        GAME OVER — Défaite Tactique
+                      </h2>
+                      <p className="text-sm leading-relaxed text-slate-300">
+                        Votre chantier de construction et vos forces sur le terrain ont été détruits. Le commandement ennemi a pris le contrôle du secteur.
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 rounded border border-red-900/60 bg-red-950/30 p-3 text-left text-xs">
+                      <div>
+                        <div className="text-slate-400">Bilan tactique</div>
+                        <div className="mt-0.5 font-bold text-red-300">
+                          Base détruite (Échec)
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-slate-400">Forces victorieuses</div>
+                        <div className="mt-0.5 truncate font-bold text-slate-200">
+                          {lobby?.players.find((p) => p.playerId === winnerPlayerId)
+                            ?.commanderName ?? "Commandement hostile"}
+                        </div>
+                      </div>
+                    </div>
+
+                    <Button variant="danger" size="lg" onClick={handleLeave} className="w-full">
+                      Retourner à la sélection du clan
+                    </Button>
+                  </Card>
+                )}
               </div>
             )}
           </div>

@@ -300,10 +300,10 @@ export function renderMinimapRadar(input: MinimapRenderInput): void {
     }
 
     ctx.fillStyle = lowPower ? "#ef4444" : "#cbd5e1";
-    ctx.font = "bold 14px monospace";
+    ctx.font = 'bold 14px Inter, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
     ctx.textAlign = "center";
     ctx.fillText(
-      lowPower ? "ÉNERGIE FAIBLE — RADAR COUPÉ" : "DÔME RADAR REQUIS",
+      lowPower ? "Énergie faible — Radar coupé" : "Dôme Radar requis",
       width * 0.5,
       height * 0.5 + 4
     );

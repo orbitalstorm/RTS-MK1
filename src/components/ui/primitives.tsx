@@ -9,7 +9,7 @@ export function cn(...inputs: ClassValue[]): string {
 }
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 rounded border text-xs sm:text-sm font-bold uppercase tracking-wider transition-colors focus-visible:outline-none disabled:pointer-events-none disabled:opacity-45",
+  "inline-flex items-center justify-center gap-2 rounded border text-xs sm:text-sm font-sans font-bold tracking-wide transition-colors focus-visible:outline-none disabled:pointer-events-none disabled:opacity-45",
   {
     variants: {
       variant: {
@@ -77,7 +77,7 @@ export function Badge({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 rounded border px-2.5 py-0.5 text-xs font-mono font-bold uppercase tracking-wider",
+        "inline-flex items-center gap-1.5 rounded border px-2.5 py-0.5 text-xs font-sans font-bold tracking-wide",
         className
       )}
       {...props}

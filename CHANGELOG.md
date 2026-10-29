@@ -2,6 +2,20 @@
 
 All notable changes to **RTS-MK1** (`https://rts-mk1.orbital8.cloud`) follow strict non-reusable `v1.x.y` versioning.
 
+## [v1.11.1] — 2026-10-29
+
+### Fixed & Changed
+- **Root-Cause Fix for French Diacritic & Accented Glyph Rendering (`src/app/layout.tsx`, `tailwind.config.ts`, `src/components/ui/primitives.tsx`, `src/components/lobby/portal-command-center.tsx`, `src/components/hud/classic-sidebar-hud.tsx`, `src/app/game/[lobbyId]/page.tsx`, `src/store/game-store.ts`, `src/renderer/minimap-renderer.ts`)**:
+  - **Self-Hosted `Inter` & `JetBrains Mono` Webfonts with Full `latin` + `latin-ext` Subsets**:
+    - Bundled `Inter` (`--font-sans`) and `JetBrains_Mono` (`--font-mono`) via `next/font/google` in `src/app/layout.tsx` with `subsets: ["latin", "latin-ext"]` so Next.js self-hosts `.woff2` files containing native French accented glyphs (`é, è, ê, ë, à, â, ù, û, ô, î, ï, ç, œ`) with uniform x-height and stroke metrics.
+    - Eliminated `ui-monospace` and generic `monospace` from `tailwind.config.ts` and switched root UI containers (`layout.tsx`, `portal-command-center.tsx`, `classic-sidebar-hud.tsx`, `page.tsx`, `primitives.tsx`) from `font-mono` to `font-sans` (with `tabular-nums` for numeric counters), preventing browsers from resolving `ui-monospace` to local small-caps/ASCII-only system fonts where accented letters fell back to tall capital-sized glyphs.
+  - **Natural-Case French Accents Without Forced Capital Diacritics**:
+    - Removed forced `uppercase` (`text-transform: uppercase`) from `Button` and `Badge` (`src/components/ui/primitives.tsx`), portal headings/buttons (`src/components/lobby/portal-command-center.tsx`), HUD headers (`src/components/hud/classic-sidebar-hud.tsx`), radar canvas offline text (`src/renderer/minimap-renderer.ts`), and EVA status banners (`src/store/game-store.ts`, `src/app/game/[lobbyId]/page.tsx`), ensuring accented characters render naturally as lowercase (`é`, `è`, `ê`, `à`) rather than forced capital accented letters.
+- **Coherent Victory vs. Game Over (Defeat) End-of-Match Screen (`src/app/game/[lobbyId]/page.tsx`, `src/store/game-store.ts`)**:
+  - Replaced the single generic end-of-match card (which previously displayed a golden `Trophy` cup even after losing a match) with two distinct, context-coherent tactical screens inside `data-testid="match-end-overlay"`:
+    - **Victory (`winnerPlayerId === playerId`, `data-testid="match-victory-card"`)**: Displays the golden `Trophy` medallion (`data-testid="victory-trophy-icon"`), *"Opération victorieuse • Secteur pacifié"* badge, *"Victoire Totale !"* title, victorious clan & map seed summary, and *"Retourner à la sélection du clan"* CTA.
+    - **Game Over / Defeat (`winnerPlayerId !== playerId`, `data-testid="match-gameover-card"`)**: Displays a crimson `Skull` medallion (`data-testid="gameover-skull-icon"`, zero trophy cup), *"Signal EVA interrompu • Base anéantie"* alert badge with `ShieldAlert`, *"GAME OVER — Défaite Tactique"* title, defeat narrative explaining the destruction of the command base, tactical summary (*"Base détruite (Échec)"* + victorious enemy commander), and a crimson `variant="danger"` *"Retourner à la sélection du clan"* button.
+
 ## [v1.11.0] — 2026-10-29
 
 ### Added & Changed

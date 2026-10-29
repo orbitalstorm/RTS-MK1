@@ -194,7 +194,7 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
         .map((req) => BUILDINGS[req].name)
         .join(", ");
       useRtsGameStore.setState({
-        evaBannerText: `EVA : PRÉREQUIS REQUIS POUR ${item.name.toUpperCase()} (${missingNames})`,
+        evaBannerText: `EVA : Prérequis requis pour ${item.name} (${missingNames})`,
       });
       return;
     }
@@ -206,7 +206,7 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
       }
       if (!canAfford) {
         useRtsGameStore.setState({
-          evaBannerText: `EVA : CRÉDITS INSUFFISANTS (${item.cost} CR REQUIS POUR ${item.name.toUpperCase()})`,
+          evaBannerText: `EVA : Crédits insuffisants (${item.cost} cr requis pour ${item.name})`,
         });
         return;
       }
@@ -219,14 +219,14 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
 
     if (activeSlot.activeItem !== null) {
       useRtsGameStore.setState({
-        evaBannerText: "EVA : FILE DE PRODUCTION OCCUPÉE DANS CETTE CATÉGORIE",
+        evaBannerText: "EVA : File de production occupée dans cette catégorie",
       });
       return;
     }
 
     if (!canAfford) {
       useRtsGameStore.setState({
-        evaBannerText: `EVA : CRÉDITS INSUFFISANTS (${item.cost} CR REQUIS POUR ${item.name.toUpperCase()})`,
+        evaBannerText: `EVA : Crédits insuffisants (${item.cost} cr requis pour ${item.name})`,
       });
       return;
     }
@@ -250,7 +250,7 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
     : "";
 
   return (
-    <aside className="relative flex h-full w-80 sm:w-96 lg:w-[400px] xl:w-[432px] shrink-0 flex-col border-l border-slate-800 bg-tactical text-slate-100 select-none font-mono">
+    <aside className="relative flex h-full w-80 sm:w-96 lg:w-[400px] xl:w-[432px] shrink-0 flex-col border-l border-slate-800 bg-tactical text-slate-100 select-none font-sans">
       {/* Floating Tactical Hover Menu (Appears when hovering any grid item or tool pictogram) */}
       {hoveredItem && (
         <div
@@ -430,7 +430,7 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
               <Coins className="h-4 w-4 text-amber-400 shrink-0" />
               <span>CR</span>
             </div>
-            <div className="text-sm sm:text-base font-extrabold tracking-tight text-amber-400">
+            <div className="text-sm sm:text-base font-extrabold tracking-tight tabular-nums text-amber-400">
               {credits.toLocaleString()}{" "}
               <span className="text-xs font-semibold text-slate-400">
                 /{Math.round(maxStorage / 1000)}k
@@ -441,9 +441,9 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
           <div className="flex items-center justify-between rounded border border-slate-500/40 bg-slate-900 px-2.5 py-1.5">
             <div className="flex items-center gap-1.5 text-xs font-bold text-slate-200">
               <Coins className="h-4 w-4 text-slate-300 shrink-0" />
-              <span>ARGENT</span>
+              <span>Argent</span>
             </div>
-            <div className="text-sm sm:text-base font-extrabold tracking-tight text-slate-100">
+            <div className="text-sm sm:text-base font-extrabold tracking-tight tabular-nums text-slate-100">
               {silverOre.toLocaleString()}{" "}
               <span className="text-xs font-semibold text-slate-400">Ag</span>
             </div>
@@ -455,9 +455,9 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
           <div className="flex items-center justify-between text-xs sm:text-sm font-bold">
             <span className="flex items-center gap-1.5 text-slate-200">
               <Zap className="h-4 w-4 text-amber-400" />
-              ÉNERGIE
+              Énergie
             </span>
-            <span className={lowPower ? "text-red-400 font-extrabold" : "text-emerald-300 font-bold"}>
+            <span className={lowPower ? "text-red-400 font-extrabold tabular-nums" : "text-emerald-300 font-bold tabular-nums"}>
               {powerConsumed} / {powerProduced} MW
             </span>
           </div>
@@ -471,7 +471,7 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
 
       {/* Second Canvas Element: Tactical Radar Minimap */}
       <div className="border-b border-slate-800 bg-slate-950 px-3 py-2">
-        <div className="flex items-center justify-between text-xs sm:text-sm uppercase text-slate-300">
+        <div className="flex items-center justify-between text-xs sm:text-sm text-slate-300">
           <button
             type="button"
             onClick={() => {
@@ -637,10 +637,10 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
           <div className="flex items-center justify-between rounded border border-amber-500/40 bg-slate-900/90 px-2.5 py-1.5 text-xs">
             <span className="font-bold text-amber-300">
               {repairMode
-                ? "OUTIL : RÉPARATION ACTIVE"
+                ? "Outil : Réparation active"
                 : sellMode
-                  ? "OUTIL : VENTE (50%) ACTIVE"
-                  : "OUTIL : TIR FORCÉ AU SOL"}
+                  ? "Outil : Vente (50%) active"
+                  : "Outil : Tir forcé au sol"}
             </span>
             <button
               type="button"
@@ -679,10 +679,10 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
               <span>{meta.label}</span>
               {qSlot?.readyToPlace ? (
                 <span className="mt-1 rounded bg-emerald-500/30 px-1.5 py-0.5 text-xs font-bold text-emerald-300">
-                  PRÊT
+                  Prêt
                 </span>
               ) : qSlot?.activeItem ? (
-                <span className="mt-1 rounded bg-amber-500/30 px-1.5 py-0.5 text-xs font-bold text-amber-300">
+                <span className="mt-1 rounded bg-amber-500/30 px-1.5 py-0.5 text-xs font-bold tabular-nums text-amber-300">
                   {Math.round(qSlot.progressRatio * 100)}%
                 </span>
               ) : null}
@@ -815,7 +815,7 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
                       <Lock className="h-3.5 w-3.5" />
                     </span>
                   ) : isActiveBlueprint ? (
-                    <span className="rounded border border-emerald-400/60 bg-slate-950/90 px-1.5 py-0.5 text-xs font-bold uppercase text-emerald-300 shadow">
+                    <span className="rounded border border-emerald-400/60 bg-slate-950/90 px-1.5 py-0.5 text-xs font-bold text-emerald-300 shadow">
                       {item.isRepeatable ? "Cont." : "Patron"}
                     </span>
                   ) : isBuildingThis ? (

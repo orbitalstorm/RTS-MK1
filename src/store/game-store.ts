@@ -183,7 +183,7 @@ export const useRtsGameStore = create<RtsGameStoreState>((set, get) => ({
   repairMode: false,
   forceAttackMode: false,
   audioMuted: false,
-  evaBannerText: "LIAISON TACTIQUE EVA PRÊTE",
+  evaBannerText: "EVA : Liaison tactique prête",
 
   setCommanderIdentity: (playerId, commanderName, faction) => {
     set({ playerId, commanderName, faction });
@@ -247,7 +247,7 @@ export const useRtsGameStore = create<RtsGameStoreState>((set, get) => ({
       }
 
       if (msg.type === "ERROR") {
-        set({ lastError: msg.message, evaBannerText: `ALERTE : ${msg.message}` });
+        set({ lastError: msg.message, evaBannerText: `Alerte : ${msg.message}` });
         return;
       }
 
@@ -286,11 +286,11 @@ export const useRtsGameStore = create<RtsGameStoreState>((set, get) => ({
       forceAttackMode: false,
       evaBannerText: b
         ? b.kind === "SILVER_MINE"
-          ? "EVA : PATRON SÉLECTIONNÉ (MINE D'ARGENT) — PLACEZ L'EMPREINTE SUR UN ROCHER ARGENTÉ 2×2"
+          ? "EVA : Patron sélectionné (Mine d'Argent) — Placez l'empreinte sur un rocher argenté 2×2"
           : isRepeatableBuildingKind(b.kind)
-            ? `EVA : POSE CONTINUE (${BUILDINGS[b.kind].name.toUpperCase()}) — CLIQUEZ SUR LA CARTE POUR POSER`
-            : `EVA : PATRON SÉLECTIONNÉ (${BUILDINGS[b.kind].name.toUpperCase()}) — PLACEZ L'EMPREINTE SUR UNE DALLE EN BÉTON`
-        : "LIAISON TACTIQUE EVA PRÊTE",
+            ? `EVA : Pose continue (${BUILDINGS[b.kind].name}) — Cliquez sur la carte pour poser`
+            : `EVA : Patron sélectionné (${BUILDINGS[b.kind].name}) — Placez l'empreinte sur une dalle en béton`
+        : "EVA : Liaison tactique prête",
     }),
   setSellMode: (enabled) =>
     set({
@@ -387,7 +387,7 @@ function applySnapshot(
     hudRevision: st.hudRevision + 1,
     ownedBuildingsKey,
     lastHudEconomySig,
-    evaBannerText: `SYNCHRONISATION SNAPSHOT COMPLÈTE — SEED CARTE #${snap.mapSeed} (${snap.mapWidth}×${snap.mapHeight})`,
+    evaBannerText: `EVA : Synchronisation complète — Seed carte #${snap.mapSeed} (${snap.mapWidth}×${snap.mapHeight})`,
   });
 }
 
@@ -540,20 +540,27 @@ function applyDelta(
   for (const ev of delta.acousticEvents) {
     if (ev.targetPlayerId && ev.targetPlayerId !== st.playerId) continue;
     if (ev.soundKind === "EVA_CONSTRUCTION_COMPLETE") {
-      evaBannerText = "EVA : CONSTRUCTION TERMINÉE — PRÊT À DÉPLOYER";
+      evaBannerText = "EVA : Construction terminée — Prêt à déployer";
     } else if (ev.soundKind === "EVA_BUILDING_DEPLOYED") {
-      evaBannerText = "EVA : STRUCTURE DÉPLOYÉE SUR LA GRILLE";
+      evaBannerText = "EVA : Structure déployée sur la grille";
     } else if (ev.soundKind === "EVA_LOW_POWER") {
-      evaBannerText = "EVA : ÉNERGIE FAIBLE — PRODUCTION RALENTIE & RADAR COUPÉ";
+      evaBannerText = "EVA : Énergie faible — Production ralentie et radar coupé";
     } else if (ev.soundKind === "EVA_SILOS_NEEDED") {
-      evaBannerText = "EVA : SILOS NÉCESSAIRES — CAPACITÉ MAXIMALE ATTEINTE";
+      evaBannerText = "EVA : Silos nécessaires — Capacité maximale atteinte";
     } else if (ev.soundKind === "EVA_BASE_UNDER_ATTACK") {
-      evaBannerText = "EVA : ALERTE ! NOTRE BASE EST ATTAQUÉE !";
+      evaBannerText = "EVA : Alerte ! Notre base est attaquée !";
     } else if (ev.soundKind === "EVA_UNIT_READY") {
-      evaBannerText = "EVA : UNITÉ PRÊTE AU COMBAT";
+      evaBannerText = "EVA : Unité prête au combat";
     } else if (ev.soundKind === "EVA_UNIT_LOST") {
-      evaBannerText = "EVA : UNITÉ PERDUE";
+      evaBannerText = "EVA : Unité perdue";
     }
+  }
+
+  if (delta.winnerPlayerId && delta.winnerPlayerId !== st.winnerPlayerId) {
+    evaBannerText =
+      delta.winnerPlayerId === st.playerId
+        ? "EVA : Victoire totale — Secteur pacifié"
+        : "EVA : Défaite tactique — Base de commandement anéantie";
   }
 
   if (delta.acousticEvents.length > 0) {

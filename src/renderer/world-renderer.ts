@@ -501,7 +501,7 @@ function getOrBuildStaticTerrainCache(
   atlas: ProceduralSpriteAtlas,
   terrainGrid: readonly number[]
 ): CacheSurface | null {
-  if (atlas.disposed || atlas.terrainTiles.size === 0) {
+  if (atlas.disposed) {
     return null;
   }
 
@@ -756,11 +756,46 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
         if (bmp) {
           ctx.save();
           if (buildProg < 1) {
-            ctx.globalAlpha = 0.35 + buildProg * 0.65;
+            // 3-Stage Construction Opacity Progression (Lot 4.2: 0-33% foundation, 34-66% frame, 67-99% armor)
+            const stageAlpha =
+              buildProg < 0.34
+                ? 0.24 + (buildProg / 0.34) * 0.22
+                : buildProg < 0.67
+                  ? 0.46 + ((buildProg - 0.34) / 0.33) * 0.26
+                  : 0.72 + ((buildProg - 0.67) / 0.33) * 0.27;
+            ctx.globalAlpha = stageAlpha;
           }
           ctx.drawImage(bmp, px, py, bw, bh);
           ctx.restore();
         }
+      }
+
+      if (spec.category === "DEFENSE" && !isWall) {
+        const turretAngle = prev
+          ? interpolateAngleIndex16(prev.turretAngleIndex, ent.turretAngleIndex, alpha)
+          : ent.turretAngleIndex;
+        const turretBmp = atlas.buildingTurrets?.get(
+          `${ent.faction}:${ent.kind}:${turretAngle}`
+        );
+        if (turretBmp && buildProg >= 0.34) {
+          ctx.save();
+          if (buildProg < 1) {
+            ctx.globalAlpha = 0.45 + ((buildProg - 0.34) / 0.66) * 0.54;
+          }
+          ctx.drawImage(turretBmp, px, py, bw, bh);
+          ctx.restore();
+        }
+        drawDefenseTurretActivationOverlay(
+          ctx,
+          ent,
+          px,
+          py,
+          bw,
+          bh,
+          turretAngle,
+          frameNowMs,
+          Boolean(turretBmp)
+        );
       }
 
       if (buildProg < 1) {
@@ -782,22 +817,8 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
           ? Math.max(0, Math.min(1, ownerEcon.credits / ownerEcon.maxStorage))
           : 0.35;
 
-      drawBuildingLiveAnimation(ctx, ent, px, py, bw, bh, frameNowMs, storageFillRatio);
-
-      if (spec.category === "DEFENSE" && !isWall) {
-        const turretAngle = prev
-          ? interpolateAngleIndex16(prev.turretAngleIndex, ent.turretAngleIndex, alpha)
-          : ent.turretAngleIndex;
-        drawDefenseTurretActivationOverlay(
-          ctx,
-          ent,
-          px,
-          py,
-          bw,
-          bh,
-          turretAngle,
-          frameNowMs
-        );
+      if (buildProg >= 0.67) {
+        drawBuildingLiveAnimation(ctx, ent, px, py, bw, bh, frameNowMs, storageFillRatio);
       }
 
       if (ent.hp < ent.maxHp * 0.55) {
@@ -811,7 +832,7 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
       } else if (isSelected) {
         drawHealthBar(ctx, px + 2, py - 8, bw - 4, 4, ent.hp, ent.maxHp);
         ctx.save();
-        ctx.font = "bold 11px monospace";
+        ctx.font = 'bold 11px Inter, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
         ctx.textAlign = "center";
         ctx.fillStyle = "rgba(9, 13, 22, 0.92)";
         ctx.fillRect(px - 6, py - 23, bw + 12, 14);
@@ -995,10 +1016,16 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
     const ghostBmp = atlas.buildings.get(
       `${placementPreview.faction}:${placementPreview.buildingKind}`
     );
+    const ghostTurretBmp = atlas.buildingTurrets?.get(
+      `${placementPreview.faction}:${placementPreview.buildingKind}:0`
+    );
     if (ghostBmp) {
       ctx.save();
       ctx.globalAlpha = 0.72;
       ctx.drawImage(ghostBmp, px, py, bw, bh);
+      if (ghostTurretBmp) {
+        ctx.drawImage(ghostTurretBmp, px, py, bw, bh);
+      }
       ctx.restore();
     }
 
@@ -1074,13 +1101,13 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
     ctx.stroke();
 
     // Floating blueprint label above the cursor footprint
-    const labelText = `PATRON : ${spec.name.toUpperCase()} (${spec.footprintW}×${spec.footprintH})`;
+    const labelText = `Patron : ${spec.name} (${spec.footprintW}×${spec.footprintH})`;
     const subText = placementPreview.valid
-      ? "CLIC GAUCHE : POSER LE PATRON"
+      ? "Clic gauche : Poser le patron"
       : placementPreview.buildingKind === "SILVER_MINE"
-        ? "REQUIS : ROCHER ARGENTÉ 2×2 INTÉGRAL"
-        : "REQUIS : DALLE BÉTON LIBRE PRÈS DE LA BASE";
-    ctx.font = "bold 11px monospace";
+        ? "Requis : Rocher argenté 2×2 intégral"
+        : "Requis : Dalle béton libre près de la base";
+    ctx.font = 'bold 11px Inter, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
     ctx.textAlign = "center";
     const boxW = Math.max(bw + 20, Math.max(labelText.length, subText.length) * 6.8 + 16);
     const boxX = px + bw * 0.5 - boxW * 0.5;
@@ -1507,8 +1534,10 @@ function drawVerticalStorageGauge(
 }
 
 /**
- * Renders blueprint ("patron positionné au sol"), scaffolding & a cyan assembly progress bar
- * while a Constructor Bot builds the structure, plus the tunnel entrance outline on Silver Mines.
+ * Renders 3-stage construction animations (Lot 4.2):
+ * - Phase 1 (0–33%): Semelle & quadrillage laser (foundation pad, corner pilings & orthogonal laser grid)
+ * - Phase 2 (34–66%): Charpente & arcs de soudure (structural steel truss girders & electric welding arcs)
+ * - Phase 3 (67–99%): Blindage & allumage (clamping armor plates, calibration scanline & systems power-up)
  */
 function drawConstructionProgressOverlay(
   ctx: CanvasRenderingContext2D,
@@ -1520,11 +1549,15 @@ function drawConstructionProgressOverlay(
   frameNowMs: number,
   isSilverMine = false
 ): void {
+  const clamped = Math.max(0, Math.min(1, buildProgress));
   const pulse = 0.5 + 0.5 * Math.sin(frameNowMs * 0.014);
+  const cx = px + bw * 0.5;
+  const cy = py + bh * 0.5;
+
   ctx.save();
 
   // Holographic blueprint ground grid ("patron positionné au sol")
-  ctx.fillStyle = `rgba(14, 165, 233, ${(0.12 + (1 - buildProgress) * 0.14).toFixed(2)})`;
+  ctx.fillStyle = `rgba(14, 165, 233, ${(0.1 + (1 - clamped) * 0.14).toFixed(2)})`;
   ctx.fillRect(px + 2, py + 2, bw - 4, bh - 4);
 
   ctx.strokeStyle = `rgba(56, 189, 248, ${(0.5 + pulse * 0.4).toFixed(2)})`;
@@ -1532,6 +1565,121 @@ function drawConstructionProgressOverlay(
   ctx.setLineDash([3, 3]);
   ctx.strokeRect(px + 2, py + 2, bw - 4, bh - 4);
   ctx.setLineDash([]);
+
+  if (clamped < 0.34) {
+    // PHASE 1 (0–33%): Semelle & Quadrillage Laser
+    const p1 = clamped / 0.34;
+    // Excavated foundation bed & 4 corner anchor pilings
+    ctx.fillStyle = "rgba(15, 23, 42, 0.55)";
+    ctx.fillRect(px + 4, py + 4, bw - 8, bh - 8);
+
+    // Orthogonal laser surveying grid (quadrillage laser)
+    ctx.strokeStyle = `rgba(56, 189, 248, ${(0.38 + pulse * 0.35).toFixed(2)})`;
+    ctx.lineWidth = 1.0;
+    ctx.beginPath();
+    for (const frac of [0.25, 0.5, 0.75]) {
+      ctx.moveTo(px + 4, py + bh * frac);
+      ctx.lineTo(px + bw - 4, py + bh * frac);
+      ctx.moveTo(px + bw * frac, py + 4);
+      ctx.lineTo(px + bw * frac, py + bh - 4);
+    }
+    ctx.stroke();
+
+    // Sweeping laser surveying beam across the semelle
+    const scanY = py + 4 + ((frameNowMs * 0.04) % Math.max(8, bh - 8));
+    ctx.strokeStyle = "#7dd3fc";
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(px + 3, scanY);
+    ctx.lineTo(px + bw - 3, scanY);
+    ctx.stroke();
+
+    // 4 Corner laser anchor pilings
+    const pSize = 3 + p1 * 2;
+    ctx.fillStyle = "#38bdf8";
+    ctx.fillRect(px + 3, py + 3, pSize, pSize);
+    ctx.fillRect(px + bw - 3 - pSize, py + 3, pSize, pSize);
+    ctx.fillRect(px + 3, py + bh - 3 - pSize, pSize, pSize);
+    ctx.fillRect(px + bw - 3 - pSize, py + bh - 3 - pSize, pSize, pSize);
+  } else if (clamped < 0.67) {
+    // PHASE 2 (34–66%): Charpente Métallique & Arcs de Soudure
+    const insetX = Math.max(5, bw * 0.14);
+    const insetY = Math.max(5, bh * 0.14);
+
+    // Structural steel truss girders & diagonal X-bracing (charpente)
+    ctx.strokeStyle = "#94a3b8";
+    ctx.lineWidth = 1.8;
+    ctx.strokeRect(px + insetX, py + insetY, bw - insetX * 2, bh - insetY * 2);
+
+    ctx.strokeStyle = "#64748b";
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(px + insetX, py + insetY);
+    ctx.lineTo(px + bw - insetX, py + bh - insetY);
+    ctx.moveTo(px + bw - insetX, py + insetY);
+    ctx.lineTo(px + insetX, py + bh - insetY);
+    ctx.moveTo(cx, py + insetY);
+    ctx.lineTo(cx, py + bh - insetY);
+    ctx.stroke();
+
+    // Active electric welding arcs (arcs de soudure) with radiating spark rays
+    const arcAngles = [frameNowMs * 0.008, frameNowMs * 0.008 + Math.PI];
+    for (let i = 0; i < arcAngles.length; i++) {
+      const ang = arcAngles[i]!;
+      const wx = cx + Math.cos(ang) * (bw * 0.24);
+      const wy = cy + Math.sin(ang) * (bh * 0.24);
+      const sparkR = 2.5 + pulse * 2.2;
+
+      ctx.beginPath();
+      ctx.arc(wx, wy, sparkR * 1.7, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(56, 189, 248, 0.38)";
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.arc(wx, wy, sparkR * 0.75, 0, Math.PI * 2);
+      ctx.fillStyle = i === 0 ? "#ffffff" : "#fef08a";
+      ctx.fill();
+
+      // Welding spark rays
+      ctx.strokeStyle = "#fef08a";
+      ctx.lineWidth = 1.1;
+      ctx.beginPath();
+      for (let sIdx = 0; sIdx < 4; sIdx++) {
+        const sAng = ang + (sIdx * Math.PI) / 2 + 0.4;
+        ctx.moveTo(wx, wy);
+        ctx.lineTo(wx + Math.cos(sAng) * (sparkR * 2.1), wy + Math.sin(sAng) * (sparkR * 2.1));
+      }
+      ctx.stroke();
+    }
+  } else {
+    // PHASE 3 (67–99%): Blindage & Allumage Systèmes
+    const p3 = (clamped - 0.67) / 0.33;
+    const scanY = py + 4 + (bh - 8) * (1 - p3);
+
+    // Descending armor calibration scanline
+    ctx.strokeStyle = "#4ade80";
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(px + 3, scanY);
+    ctx.lineTo(px + bw - 3, scanY);
+    ctx.stroke();
+
+    // Sequential system power-up beacons (allumage)
+    const activeLed = Math.floor(frameNowMs / 160) % 4;
+    const ledCoords: Array<[number, number]> = [
+      [px + 6, py + 6],
+      [px + bw - 6, py + 6],
+      [px + bw - 6, py + bh - 10],
+      [px + 6, py + bh - 10],
+    ];
+    for (let i = 0; i < ledCoords.length; i++) {
+      const [lx, ly] = ledCoords[i]!;
+      ctx.beginPath();
+      ctx.arc(lx, ly, i === activeLed ? 2.6 : 1.8, 0, Math.PI * 2);
+      ctx.fillStyle = i === activeLed ? "#4ade80" : "#38bdf8";
+      ctx.fill();
+    }
+  }
 
   // Prominent entrance portal outline for Silver Mine ("la partie affichée lors de sa construction est l'entrée")
   if (isSilverMine) {
@@ -1552,10 +1700,10 @@ function drawConstructionProgressOverlay(
   const barW = bw - 6;
   const barX = px + 3;
   const barY = py + bh - 6;
-  ctx.fillStyle = "rgba(9, 13, 22, 0.85)";
+  ctx.fillStyle = "rgba(9, 13, 22, 0.88)";
   ctx.fillRect(barX - 1, barY - 1, barW + 2, 5);
-  ctx.fillStyle = "#38bdf8";
-  ctx.fillRect(barX, barY, barW * Math.max(0, Math.min(1, buildProgress)), 3);
+  ctx.fillStyle = clamped < 0.34 ? "#38bdf8" : clamped < 0.67 ? "#facc15" : "#4ade80";
+  ctx.fillRect(barX, barY, barW * clamped, 3);
   ctx.restore();
 }
 
@@ -1618,7 +1766,8 @@ function drawDefenseTurretActivationOverlay(
   bw: number,
   bh: number,
   turretAngleIndex: number,
-  frameNowMs: number
+  frameNowMs: number,
+  hasAtlasTurret = false
 ): void {
   const isAlert = ent.stateLabel === "ALERT";
   const isAttacking = ent.stateLabel === "ATTACKING";
@@ -1651,7 +1800,7 @@ function drawDefenseTurretActivationOverlay(
     ctx.restore();
   }
 
-  // 2. Rotating turret weapon mount / Obelisk apex pre-charge
+  // 2. Rotating turret status optic / Obelisk apex pre-charge
   if (ent.kind === "OBELISK") {
     if (isAlert || isAttacking) {
       const crystalY = py + bh * 0.16;
@@ -1669,20 +1818,22 @@ function drawDefenseTurretActivationOverlay(
     ctx.translate(cx, cy);
     ctx.rotate(radians);
     if (ent.kind === "GUARD_TOWER") {
-      // Rotating Twin Vulcan Barrels & Active Sensor Pod
-      ctx.fillStyle = "#e2e8f0";
-      ctx.fillRect(-3.2, -bh * 0.42, 2.0, bh * 0.36);
-      ctx.fillRect(1.2, -bh * 0.42, 2.0, bh * 0.36);
+      if (!hasAtlasTurret) {
+        ctx.fillStyle = "#e2e8f0";
+        ctx.fillRect(-3.2, -bh * 0.42, 2.0, bh * 0.36);
+        ctx.fillRect(1.2, -bh * 0.42, 2.0, bh * 0.36);
+      }
       ctx.beginPath();
-      ctx.arc(0, 0, 3.2, 0, Math.PI * 2);
+      ctx.arc(0, 0.8, 2.4, 0, Math.PI * 2);
       ctx.fillStyle = isAttacking ? "#ef4444" : isAlert ? "#f59e0b" : "#38bdf8";
       ctx.fill();
     } else if (ent.kind === "SAM_SITE") {
-      // Rotating Missile Launcher Pod Orientation Indicator
-      ctx.fillStyle = "#94a3b8";
-      ctx.fillRect(-4.5, -bh * 0.34, 9.0, bh * 0.28);
+      if (!hasAtlasTurret) {
+        ctx.fillStyle = "#94a3b8";
+        ctx.fillRect(-4.5, -bh * 0.34, 9.0, bh * 0.28);
+      }
       ctx.beginPath();
-      ctx.arc(0, -bh * 0.34, 2.4, 0, Math.PI * 2);
+      ctx.arc(0, -bh * 0.12, 2.2, 0, Math.PI * 2);
       ctx.fillStyle = isAttacking ? "#ef4444" : isAlert ? "#f59e0b" : "#38bdf8";
       ctx.fill();
     }
@@ -2028,17 +2179,70 @@ function drawUnitLiveAnimation(
   ctx.fill();
 
   if (ent.kind === "HARVESTER") {
-    // Dynamic fill-level glow on the Harvester's dump-bed (benne) & side cisterns
-    if (ent.cargoOre > 0) {
-      const cargoRatio = Math.max(0.15, Math.min(1, ent.cargoOre / HARVESTER_MAX_LOAD));
-      const glowR = (5 + cargoRatio * 8) * (0.9 + pulse * 0.15);
-      const bGrad = ctx.createRadialGradient(0, 4, 1, 0, 4, glowR);
-      bGrad.addColorStop(0, `rgba(167, 243, 208, ${(0.38 + cargoRatio * 0.5).toFixed(3)})`);
-      bGrad.addColorStop(0.55, `rgba(16, 185, 129, ${(0.22 + cargoRatio * 0.4).toFixed(3)})`);
+    // Lot 3.2: Progressive emerald ore crystal fill (0%..100%) in the Harvester's rear dump-bed (benne) & side cisterns
+    const hu = (s * 1.24) / 64;
+    const cargoRatio = Math.max(0, Math.min(1, ent.cargoOre / HARVESTER_MAX_LOAD));
+    if (cargoRatio > 0) {
+      // 1. Progressive sight-glass level on twin side cisterns
+      const gaugeMaxH = 20 * hu;
+      const gaugeFillH = gaugeMaxH * cargoRatio;
+      const gaugeTopY = 16 * hu - gaugeFillH;
+      ctx.fillStyle = "#22c55e";
+      ctx.fillRect(-15.5 * hu - 1.2 * hu, gaugeTopY, 2.4 * hu, gaugeFillH);
+      ctx.fillRect(15.5 * hu - 1.2 * hu, gaugeTopY, 2.4 * hu, gaugeFillH);
+
+      // 2. Progressive emerald ore bed inside the grooved metallic rear dump-bed (-10.5*hu..+10.5*hu, -3.5*hu..+20.5*hu)
+      const bedMaxH = 24 * hu;
+      const bedFillH = Math.max(3 * hu, bedMaxH * cargoRatio);
+      ctx.fillStyle = "#047857";
+      ctx.fillRect(-10.2 * hu, -3.2 * hu, 20.4 * hu, bedFillH);
+
+      // 3. Multi-faceted emerald crystal clusters scaling in count (1..7) and size with cargoRatio
+      const crystalDefs: ReadonlyArray<[number, number, number, number]> = [
+        [0, 0.5, 4.2, 3.0],
+        [-5.2, 3.2, 3.8, 2.6],
+        [5.0, 3.8, 3.9, 2.7],
+        [-2.4, 8.2, 4.5, 3.2],
+        [3.6, 10.0, 4.1, 2.9],
+        [-4.8, 14.2, 4.0, 2.8],
+        [1.8, 16.5, 4.6, 3.3],
+      ];
+      const activeCrystalCount = Math.max(1, Math.ceil(cargoRatio * crystalDefs.length));
+      for (let i = 0; i < activeCrystalCount; i++) {
+        const [cxOff, cyOff, rxBase, ryBase] = crystalDefs[i]!;
+        const cyClamped = Math.min(-3.2 * hu + bedFillH - 1.8 * hu, cyOff * hu);
+        const rx = rxBase * hu * (0.65 + cargoRatio * 0.35);
+        const ry = ryBase * hu * (0.65 + cargoRatio * 0.35);
+
+        ctx.beginPath();
+        ctx.moveTo(cxOff * hu, cyClamped - ry);
+        ctx.lineTo(cxOff * hu + rx, cyClamped);
+        ctx.lineTo(cxOff * hu, cyClamped + ry);
+        ctx.lineTo(cxOff * hu - rx, cyClamped);
+        ctx.closePath();
+        ctx.fillStyle = i % 2 === 0 ? "#10b981" : "#34d399";
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.arc(cxOff * hu - rx * 0.25, cyClamped - ry * 0.25, Math.max(0.8, rx * 0.38), 0, Math.PI * 2);
+        ctx.fillStyle = "#a7f3d0";
+        ctx.fill();
+      }
+
+      // Re-draw the two transverse hydraulic cross-bars on top of the ore mound so crystals sit inside the benne
+      ctx.fillStyle = "#64748b";
+      ctx.fillRect(-12 * hu, 2 * hu, 24 * hu, 2.2 * hu);
+      ctx.fillRect(-12 * hu, 12 * hu, 24 * hu, 2.2 * hu);
+
+      // 4. Radial luminescent emerald glow proportional to cargoRatio
+      const glowR = (4.5 + cargoRatio * 8.5) * (0.9 + pulse * 0.15);
+      const bGrad = ctx.createRadialGradient(0, 6 * hu, 1, 0, 6 * hu, glowR);
+      bGrad.addColorStop(0, `rgba(167, 243, 208, ${(0.32 + cargoRatio * 0.52).toFixed(3)})`);
+      bGrad.addColorStop(0.55, `rgba(16, 185, 129, ${(0.18 + cargoRatio * 0.42).toFixed(3)})`);
       bGrad.addColorStop(1, "rgba(5, 150, 105, 0)");
       ctx.fillStyle = bGrad;
       ctx.beginPath();
-      ctx.arc(0, 4, glowR, 0, Math.PI * 2);
+      ctx.arc(0, 6 * hu, glowR, 0, Math.PI * 2);
       ctx.fill();
     }
 
