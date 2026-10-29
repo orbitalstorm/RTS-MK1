@@ -9,8 +9,19 @@ import {
   vectorToAngleIndex16,
 } from "../src/engine/pathfinding/astar";
 import { RtsSimulation } from "../src/engine/simulation";
-import { listRecentMatchSeedLogs } from "../src/server/db";
+import { GET as getMapsApiRoute } from "../src/app/api/maps/route";
+import {
+  deleteCustomMapById,
+  getCustomMapById,
+  listCustomMaps,
+  listRecentMatchSeedLogs,
+  upsertCustomMap,
+} from "../src/server/db";
 import { LobbyManager } from "../src/server/lobby-manager";
+import {
+  createStarterCustomMapFromSeed,
+  CustomMapDocumentSchema,
+} from "../src/shared/schemas/custom-map";
 import { TacticalCamera } from "../src/renderer/camera";
 import {
   BattlefieldVfxManager,
@@ -320,7 +331,7 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
   });
 
   it("v1.2.0 — supports Game Juice camera shake, shortest-arc 16-angle interpolation, and 2x Hi-DPI sprite scale", () => {
-    expect(APP_VERSION).toBe("1.13.0");
+    expect(APP_VERSION).toBe("1.14.0");
     expect(SPRITE_ATLAS_SCALE).toBe(2);
 
     // Zero trauma produces zero offset
@@ -1537,7 +1548,7 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
   });
 
   it("v1.11.0 — enlarges global UI typography (zero text-[8px..11px] classes) and makes construction grid icons fill 100% of each tile", () => {
-    expect(APP_VERSION).toBe("1.13.0");
+    expect(APP_VERSION).toBe("1.14.0");
 
     const srcRoot = path.join(process.cwd(), "src");
     const collectSourceFiles = (dir: string): string[] => {
@@ -1804,5 +1815,144 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
     );
     expect(worldRendererSrc).toContain('if (ent.entityType === "TREE")');
     expect(worldRendererSrc).toContain("if (hasFog && !exploredCells.has(tileIdx)) {");
+  });
+
+  it("v1.14.0 (ORB-22) — supports entering a custom seed number OR selecting a saved server map from the Map Editor on the start screen", async () => {
+    // 1. Verify custom_maps SQLite repository & /api/maps endpoint
+    const starterMaps = listCustomMaps();
+    expect(starterMaps.length).toBeGreaterThanOrEqual(3);
+
+    const customTestMap = createStarterCustomMapFromSeed({
+      id: "test_editor_map_orb22",
+      name: "Vallée Tactique ORB-22",
+      author: "Commandant Test",
+      description: "Carte testée depuis l'éditeur vers le serveur RTS-MK1",
+      seed: 42424242,
+      sizePreset: "SKIRMISH_4X", // 144x144
+    });
+    customTestMap.spawns[0]!.startingCredits = 8500;
+    customTestMap.placedEntities.push({
+      id: "preplaced_tank_orb22",
+      x: 24,
+      y: 24,
+      ownerSlot: 0,
+      faction: "GDI",
+      entityType: "UNIT",
+      kind: "MAMMOTH_TANK",
+      angleIndex: 4,
+      hpRatio: 1,
+    });
+
+    const parsedDoc = CustomMapDocumentSchema.parse(customTestMap);
+    const { summary: savedSummary } = upsertCustomMap(parsedDoc);
+    expect(savedSummary.id).toBe("test_editor_map_orb22");
+    expect(savedSummary.width).toBe(144);
+    expect(savedSummary.height).toBe(144);
+
+    const loadedDoc = getCustomMapById("test_editor_map_orb22");
+    expect(loadedDoc).not.toBeNull();
+    expect(loadedDoc?.name).toBe("Vallée Tactique ORB-22");
+
+    // Verify GET /api/maps and GET /api/maps?id=test_editor_map_orb22
+    const listRes = await getMapsApiRoute(new Request("http://localhost:3000/api/maps"));
+    expect(listRes.status).toBe(200);
+    const listJson = (await listRes.json()) as { ok: boolean; maps: Array<{ id: string }> };
+    expect(listJson.ok).toBe(true);
+    expect(listJson.maps.some((m) => m.id === "test_editor_map_orb22")).toBe(true);
+
+    const detailRes = await getMapsApiRoute(
+      new Request("http://localhost:3000/api/maps?id=test_editor_map_orb22")
+    );
+    expect(detailRes.status).toBe(200);
+    const detailJson = (await detailRes.json()) as {
+      ok: boolean;
+      map: { id: string; width: number; height: number };
+    };
+    expect(detailJson.ok).toBe(true);
+    expect(detailJson.map.width).toBe(144);
+    expect(detailJson.map.height).toBe(144);
+
+    // 2. Verify LOBBY_CREATE Zod schema accepts both mapSeed and customMapId
+    const parsedSeedCreate = ClientLobbyActionSchema.parse({
+      type: "LOBBY_CREATE",
+      playerId: "p_seed",
+      commanderName: "Solomon",
+      faction: "GDI",
+      lobbyName: "Seed Match",
+      withAiBot: true,
+      autoStart: true,
+      mapSeed: 777888999,
+    });
+    expect(parsedSeedCreate.type).toBe("LOBBY_CREATE");
+
+    const parsedCustomMapCreate = ClientLobbyActionSchema.parse({
+      type: "LOBBY_CREATE",
+      playerId: "p_map",
+      commanderName: "Kane",
+      faction: "NOD",
+      lobbyName: "Editor Map Match",
+      withAiBot: true,
+      autoStart: true,
+      customMapId: "test_editor_map_orb22",
+    });
+    expect(parsedCustomMapCreate.type).toBe("LOBBY_CREATE");
+
+    // 3. Verify LobbyManager + RtsSimulation loads customMapId (144x144, custom credits, pre-placed entities)
+    const manager = new LobbyManager();
+    const createdLobby = manager.createLobby({
+      playerId: "p_host",
+      commanderName: "Commandant ORB-22",
+      faction: "GDI",
+      lobbyName: "Opération Vallée",
+      withAiBot: true,
+      mapSeed: 42424242,
+      customMapId: "test_editor_map_orb22",
+    });
+    expect(createdLobby.customMapId).toBe("test_editor_map_orb22");
+    expect(createdLobby.customMapName).toBe("Vallée Tactique ORB-22");
+    expect(createdLobby.mapWidth).toBe(144);
+    expect(createdLobby.mapHeight).toBe(144);
+
+    const startRes = manager.requestStartMatch(createdLobby.lobbyId, "p_host");
+    expect(startRes.startedImmediately).toBe(true);
+
+    const sim = createdLobby.simulation;
+    expect(sim).not.toBeNull();
+    expect(sim!.width).toBe(144);
+    expect(sim!.height).toBe(144);
+    expect(sim!.customMapId).toBe("test_editor_map_orb22");
+
+    const snapshot = sim!.getFullSnapshot();
+    expect(snapshot.mapWidth).toBe(144);
+    expect(snapshot.mapHeight).toBe(144);
+    expect(
+      snapshot.players.find((p) => p.playerId === "p_host")?.credits
+    ).toBe(8500);
+    expect(
+      sim!
+        .getAllEntities()
+        .some(
+          (e) =>
+            e.ownerId === "p_host" &&
+            e.kind === "MAMMOTH_TANK" &&
+            Math.round(e.transform.x) === 24
+        )
+    ).toBe(true);
+
+    manager.leaveLobby(createdLobby.lobbyId, "p_host");
+    deleteCustomMapById("test_editor_map_orb22");
+
+    // 4. Verify PortalCommandCenter start screen exposes seed input, random seed button, and saved server map selector
+    const portalSrc = fs.readFileSync(
+      path.resolve(__dirname, "../src/components/lobby/portal-command-center.tsx"),
+      "utf8"
+    );
+    expect(portalSrc).toContain('data-testid="map-configuration-panel"');
+    expect(portalSrc).toContain('data-testid="map-seed-input"');
+    expect(portalSrc).toContain('data-testid="random-seed-button"');
+    expect(portalSrc).toContain('data-testid="saved-map-select"');
+    expect(portalSrc).toContain('data-testid="refresh-maps-button"');
+    expect(portalSrc).toContain("/api/maps");
+    expect(portalSrc).toContain("customMapId: selectedMapId");
   });
 });

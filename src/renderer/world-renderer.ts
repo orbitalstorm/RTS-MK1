@@ -349,11 +349,13 @@ function drawUnifiedOrganicTerrainCell(
   terrainGrid: readonly number[],
   tx: number,
   ty: number,
-  s: number
+  s: number,
+  mapWidth = MAP_WIDTH_TILES,
+  mapHeight = MAP_HEIGHT_TILES
 ): void {
   const px = tx * s;
   const py = ty * s;
-  const mask = computeTerrainNeighborMask(terrainGrid, tx, ty, MAP_WIDTH_TILES, MAP_HEIGHT_TILES);
+  const mask = computeTerrainNeighborMask(terrainGrid, tx, ty, mapWidth, mapHeight);
   const palette = getStratumPalette(mask.centerKind);
 
   if (mask.isInterior) {
@@ -364,9 +366,9 @@ function drawUnifiedOrganicTerrainCell(
   }
 
   const neighborAt = (nx: number, ny: number): number => {
-    const cx = Math.max(0, Math.min(MAP_WIDTH_TILES - 1, nx));
-    const cy = Math.max(0, Math.min(MAP_HEIGHT_TILES - 1, ny));
-    return normalizeBaseTerrainKind(terrainGrid[cy * MAP_WIDTH_TILES + cx] ?? 0);
+    const cx = Math.max(0, Math.min(mapWidth - 1, nx));
+    const cy = Math.max(0, Math.min(mapHeight - 1, ny));
+    return normalizeBaseTerrainKind(terrainGrid[cy * mapWidth + cx] ?? 0);
   };
 
   const nKind = neighborAt(tx, ty - 1);
@@ -576,9 +578,14 @@ function drawUnifiedOrganicTerrainCell(
   }
 }
 
+let cachedTerrainMapW = 0;
+let cachedTerrainMapH = 0;
+
 function getOrBuildStaticTerrainCache(
   atlas: ProceduralSpriteAtlas,
-  terrainGrid: readonly number[]
+  terrainGrid: readonly number[],
+  mapWidth = MAP_WIDTH_TILES,
+  mapHeight = MAP_HEIGHT_TILES
 ): CacheSurface | null {
   if (atlas.disposed) {
     return null;
@@ -588,22 +595,32 @@ function getOrBuildStaticTerrainCache(
   if (
     cachedTerrainSurface !== null &&
     cachedTerrainAtlas === atlas &&
-    cachedTerrainSignature === sig
+    cachedTerrainSignature === sig &&
+    cachedTerrainMapW === mapWidth &&
+    cachedTerrainMapH === mapHeight
   ) {
     return cachedTerrainSurface;
   }
 
+  const worldPixelsW = mapWidth * TILE_PIXEL_SIZE;
+  const worldPixelsH = mapHeight * TILE_PIXEL_SIZE;
+
   let isFreshSurface = false;
-  if (!cachedTerrainSurface || !cachedTerrainCtx) {
+  if (
+    !cachedTerrainSurface ||
+    !cachedTerrainCtx ||
+    cachedTerrainMapW !== mapWidth ||
+    cachedTerrainMapH !== mapHeight
+  ) {
     isFreshSurface = true;
     try {
       if (typeof OffscreenCanvas !== "undefined") {
-        cachedTerrainSurface = new OffscreenCanvas(WORLD_TOTAL_PIXELS_W, WORLD_TOTAL_PIXELS_H);
+        cachedTerrainSurface = new OffscreenCanvas(worldPixelsW, worldPixelsH);
         cachedTerrainCtx = cachedTerrainSurface.getContext("2d");
       } else if (typeof document !== "undefined") {
         const canvas = document.createElement("canvas");
-        canvas.width = WORLD_TOTAL_PIXELS_W;
-        canvas.height = WORLD_TOTAL_PIXELS_H;
+        canvas.width = worldPixelsW;
+        canvas.height = worldPixelsH;
         cachedTerrainSurface = canvas;
         cachedTerrainCtx = canvas.getContext("2d");
       }
@@ -620,7 +637,7 @@ function getOrBuildStaticTerrainCache(
   cachedTerrainCtx.imageSmoothingQuality = "high";
 
   const s = TILE_PIXEL_SIZE;
-  const total = MAP_WIDTH_TILES * MAP_HEIGHT_TILES;
+  const total = mapWidth * mapHeight;
 
   // Incremental 3x3 neighborhood update when a few tiles degrade or are paved with Concrete Slabs
   if (!isFreshSurface && cachedTerrainAtlas === atlas && cachedNormalizedGrid?.length === total) {
@@ -629,14 +646,14 @@ function getOrBuildStaticTerrainCache(
       const norm = normalizeBaseTerrainKind(terrainGrid[i] ?? 0);
       if (cachedNormalizedGrid[i] !== norm) {
         cachedNormalizedGrid[i] = norm;
-        const cx = i % MAP_WIDTH_TILES;
-        const cy = Math.floor(i / MAP_WIDTH_TILES);
+        const cx = i % mapWidth;
+        const cy = Math.floor(i / mapWidth);
         for (let dy = -1; dy <= 1; dy++) {
           for (let dx = -1; dx <= 1; dx++) {
             const nx = cx + dx;
             const ny = cy + dy;
-            if (nx >= 0 && ny >= 0 && nx < MAP_WIDTH_TILES && ny < MAP_HEIGHT_TILES) {
-              dirtyTiles.add(ny * MAP_WIDTH_TILES + nx);
+            if (nx >= 0 && ny >= 0 && nx < mapWidth && ny < mapHeight) {
+              dirtyTiles.add(ny * mapWidth + nx);
             }
           }
         }
@@ -645,9 +662,9 @@ function getOrBuildStaticTerrainCache(
 
     if (dirtyTiles.size > 0 && dirtyTiles.size <= 64) {
       for (const idx of dirtyTiles) {
-        const tx = idx % MAP_WIDTH_TILES;
-        const ty = Math.floor(idx / MAP_WIDTH_TILES);
-        drawUnifiedOrganicTerrainCell(cachedTerrainCtx, terrainGrid, tx, ty, s);
+        const tx = idx % mapWidth;
+        const ty = Math.floor(idx / mapWidth);
+        drawUnifiedOrganicTerrainCell(cachedTerrainCtx, terrainGrid, tx, ty, s, mapWidth, mapHeight);
       }
       cachedTerrainSignature = sig;
       return cachedTerrainSurface;
@@ -661,14 +678,16 @@ function getOrBuildStaticTerrainCache(
     cachedNormalizedGrid[i] = normalizeBaseTerrainKind(terrainGrid[i] ?? 0);
   }
 
-  for (let ty = 0; ty < MAP_HEIGHT_TILES; ty++) {
-    for (let tx = 0; tx < MAP_WIDTH_TILES; tx++) {
-      drawUnifiedOrganicTerrainCell(cachedTerrainCtx, terrainGrid, tx, ty, s);
+  for (let ty = 0; ty < mapHeight; ty++) {
+    for (let tx = 0; tx < mapWidth; tx++) {
+      drawUnifiedOrganicTerrainCell(cachedTerrainCtx, terrainGrid, tx, ty, s, mapWidth, mapHeight);
     }
   }
 
   cachedTerrainAtlas = atlas;
   cachedTerrainSignature = sig;
+  cachedTerrainMapW = mapWidth;
+  cachedTerrainMapH = mapHeight;
   return cachedTerrainSurface;
 }
 
@@ -717,9 +736,11 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
 
   const bounds = camera.getVisibleTileBounds();
   const s = TILE_PIXEL_SIZE;
+  const mapWidth = camera.mapWidthTiles || MAP_WIDTH_TILES;
+  const mapHeight = camera.mapHeightTiles || MAP_HEIGHT_TILES;
 
   // 1. Draw static terrain from OffscreenCanvas cache in a single blit + dynamic crystalline ore overlay
-  const staticTerrainCache = getOrBuildStaticTerrainCache(atlas, terrainGrid);
+  const staticTerrainCache = getOrBuildStaticTerrainCache(atlas, terrainGrid, mapWidth, mapHeight);
   if (staticTerrainCache) {
     const srcX = bounds.minX * s;
     const srcY = bounds.minY * s;
@@ -730,20 +751,20 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
 
   const hasFog = exploredCells.size > 0;
   for (let ty = bounds.minY; ty <= bounds.maxY; ty++) {
-    const rowOffset = ty * MAP_WIDTH_TILES;
+    const rowOffset = ty * mapWidth;
     for (let tx = bounds.minX; tx <= bounds.maxX; tx++) {
       const idx = rowOffset + tx;
       if (hasFog && !exploredCells.has(idx)) {
         continue;
       }
       if (!staticTerrainCache) {
-        drawUnifiedOrganicTerrainCell(ctx, terrainGrid, tx, ty, s);
+        drawUnifiedOrganicTerrainCell(ctx, terrainGrid, tx, ty, s, mapWidth, mapHeight);
       }
       const oreAmt = oreGrid[idx] ?? 0;
       if (oreAmt > 0) {
         drawActiveOreFormation(ctx, tx, ty, tx * s, ty * s, s, oreAmt, frameNowMs);
       } else if (terrainGrid[idx] === TERRAIN_KIND.SILVER_ORE) {
-        drawSilverOreBoulderTile(ctx, terrainGrid, tx, ty, tx * s, ty * s, s, frameNowMs);
+        drawSilverOreBoulderTile(ctx, terrainGrid, tx, ty, tx * s, ty * s, s, frameNowMs, mapWidth, mapHeight);
       }
     }
   }
@@ -759,7 +780,7 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
       ent.entityType === "BUILDING" &&
       (ent.kind === "CONCRETE_WALL" || ent.kind === "SANDBAG_WALL")
     ) {
-      const wIdx = Math.round(ent.y) * MAP_WIDTH_TILES + Math.round(ent.x);
+      const wIdx = Math.round(ent.y) * mapWidth + Math.round(ent.x);
       wallTileMap.set(wIdx, ent.kind as BuildingKind);
     }
   }
@@ -786,7 +807,7 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
       continue;
     }
 
-    const tileIdx = Math.round(interpY) * MAP_WIDTH_TILES + Math.round(interpX);
+    const tileIdx = Math.round(interpY) * mapWidth + Math.round(interpX);
     const isAllied = ent.ownerId === localPlayerId;
     if (ent.entityType === "TREE") {
       if (hasFog && !exploredCells.has(tileIdx)) {
@@ -812,15 +833,15 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
         const tx = Math.round(ent.x);
         const ty = Math.round(ent.y);
         const connN =
-          ty > 0 && wallTileMap.get((ty - 1) * MAP_WIDTH_TILES + tx) === ent.kind;
+          ty > 0 && wallTileMap.get((ty - 1) * mapWidth + tx) === ent.kind;
         const connE =
-          tx < MAP_WIDTH_TILES - 1 &&
-          wallTileMap.get(ty * MAP_WIDTH_TILES + (tx + 1)) === ent.kind;
+          tx < mapWidth - 1 &&
+          wallTileMap.get(ty * mapWidth + (tx + 1)) === ent.kind;
         const connS =
-          ty < MAP_HEIGHT_TILES - 1 &&
-          wallTileMap.get((ty + 1) * MAP_WIDTH_TILES + tx) === ent.kind;
+          ty < mapHeight - 1 &&
+          wallTileMap.get((ty + 1) * mapWidth + tx) === ent.kind;
         const connW =
-          tx > 0 && wallTileMap.get(ty * MAP_WIDTH_TILES + (tx - 1)) === ent.kind;
+          tx > 0 && wallTileMap.get(ty * mapWidth + (tx - 1)) === ent.kind;
 
         drawConnectedWallEntity(
           ctx,
@@ -1086,7 +1107,7 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
 
   // 4. Smooth diagonal Fog of War & Unexplored Shroud (eliminates rectangular staircase effect)
   if (hasFog) {
-    renderSmoothFogAndShroud(ctx, bounds, s, exploredCells, visibleCells);
+    renderSmoothFogAndShroud(ctx, bounds, s, exploredCells, visibleCells, mapWidth, mapHeight);
   }
 
   // 5. Draw building placement blueprint footprint preview under the cursor (rendered on top of fog so always visible)
@@ -1116,9 +1137,9 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
       for (let dx = 0; dx < spec.footprintW; dx++) {
         const tx = placementPreview.tileX + dx;
         const ty = placementPreview.tileY + dy;
-        const idx = ty * MAP_WIDTH_TILES + tx;
+        const idx = ty * mapWidth + tx;
         const cellTerrain =
-          tx >= 0 && ty >= 0 && tx < MAP_WIDTH_TILES && ty < MAP_HEIGHT_TILES
+          tx >= 0 && ty >= 0 && tx < mapWidth && ty < mapHeight
             ? (terrainGrid[idx] ?? 0)
             : -1;
         const tileFoundationOk =
@@ -1243,7 +1264,9 @@ function renderSmoothFogAndShroud(
   bounds: { minX: number; maxX: number; minY: number; maxY: number },
   s: number,
   exploredCells: ReadonlySet<number>,
-  visibleCells: ReadonlySet<number>
+  visibleCells: ReadonlySet<number>,
+  mapWidth = MAP_WIDTH_TILES,
+  mapHeight = MAP_HEIGHT_TILES
 ): void {
   const r = s * 0.5;
 
@@ -1319,13 +1342,13 @@ function renderSmoothFogAndShroud(
   };
 
   const inBounds = (tx: number, ty: number): boolean =>
-    tx >= 0 && ty >= 0 && tx < MAP_WIDTH_TILES && ty < MAP_HEIGHT_TILES;
+    tx >= 0 && ty >= 0 && tx < mapWidth && ty < mapHeight;
 
   // Pass 1: Fog of War (explored but outside current sight)
   renderSmoothMaskPass(
     (tx, ty) => {
       if (!inBounds(tx, ty)) return true;
-      return !visibleCells.has(ty * MAP_WIDTH_TILES + tx);
+      return !visibleCells.has(ty * mapWidth + tx);
     },
     "rgba(7, 10, 18, 0.56)",
     0
@@ -1335,7 +1358,7 @@ function renderSmoothFogAndShroud(
   renderSmoothMaskPass(
     (tx, ty) => {
       if (!inBounds(tx, ty)) return true;
-      return !exploredCells.has(ty * MAP_WIDTH_TILES + tx);
+      return !exploredCells.has(ty * mapWidth + tx);
     },
     "#040609",
     0.5
@@ -2443,11 +2466,13 @@ function drawSilverOreBoulderTile(
   px: number,
   py: number,
   s: number,
-  frameNowMs: number
+  frameNowMs: number,
+  mapWidth = MAP_WIDTH_TILES,
+  mapHeight = MAP_HEIGHT_TILES
 ): void {
   const isSilverAt = (x: number, y: number): boolean => {
-    if (x < 0 || y < 0 || x >= MAP_WIDTH_TILES || y >= MAP_HEIGHT_TILES) return false;
-    return terrainGrid[y * MAP_WIDTH_TILES + x] === TERRAIN_KIND.SILVER_ORE;
+    if (x < 0 || y < 0 || x >= mapWidth || y >= mapHeight) return false;
+    return terrainGrid[y * mapWidth + x] === TERRAIN_KIND.SILVER_ORE;
   };
 
   // If this tile is the top-left corner of a 2x2 Silver Ore boulder, render the unified 2x2 rock formation

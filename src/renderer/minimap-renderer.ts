@@ -88,13 +88,15 @@ function createMinimapSurface(
 function getOrBuildMinimapTerrainCache(
   width: number,
   height: number,
+  mapW: number,
+  mapH: number,
   terrainGrid: readonly number[]
 ): MinimapSurface | null {
   if (width <= 0 || height <= 0 || terrainGrid.length === 0) {
     return null;
   }
 
-  const sig = computeTerrainSignature(terrainGrid);
+  const sig = computeTerrainSignature(terrainGrid) ^ (mapW << 16) ^ mapH;
   if (
     cachedMinimapSurface !== null &&
     cachedWidth === width &&
@@ -114,16 +116,16 @@ function getOrBuildMinimapTerrainCache(
   const surface = cachedMinimapSurface;
   const offCtx = cachedMinimapCtx;
 
-  const scaleX = width / MAP_WIDTH_TILES;
-  const scaleY = height / MAP_HEIGHT_TILES;
+  const scaleX = width / mapW;
+  const scaleY = height / mapH;
   const cellH = Math.ceil(scaleY);
 
   offCtx.fillStyle = "#33261a";
   offCtx.fillRect(0, 0, width, height);
 
-  for (let y = 0; y < MAP_HEIGHT_TILES; y++) {
-    const rowOffset = y * MAP_WIDTH_TILES;
-    for (let x = 0; x < MAP_WIDTH_TILES; x++) {
+  for (let y = 0; y < mapH; y++) {
+    const rowOffset = y * mapW;
+    for (let x = 0; x < mapW; x++) {
       const idx = rowOffset + x;
       const t = terrainGrid[idx] ?? 0;
       if (t === TERRAIN_KIND.DIRT || t === TERRAIN_KIND.ORE) continue; // Base dirt color already filled (#33261a); dynamic ore drawn in composite layer
@@ -156,11 +158,13 @@ function getOrBuildMinimapTerrainCache(
 function getOrBuildMinimapCompositeCache(
   width: number,
   height: number,
+  mapW: number,
+  mapH: number,
   terrainGrid: readonly number[],
   oreGrid: readonly number[],
   exploredCells: ReadonlySet<number>
 ): MinimapSurface | null {
-  const terrainCache = getOrBuildMinimapTerrainCache(width, height, terrainGrid);
+  const terrainCache = getOrBuildMinimapTerrainCache(width, height, mapW, mapH, terrainGrid);
   if (!terrainCache) return null;
 
   const terrainSig = cachedTerrainSig;
@@ -193,17 +197,17 @@ function getOrBuildMinimapCompositeCache(
   const compCtx = cachedCompositeCtx;
   compCtx.drawImage(terrainCache, 0, 0, width, height);
 
-  const scaleX = width / MAP_WIDTH_TILES;
-  const scaleY = height / MAP_HEIGHT_TILES;
+  const scaleX = width / mapW;
+  const scaleY = height / mapH;
   const cellH = Math.ceil(scaleY);
   const hasFog = exploredSize > 0;
 
   // Horizontal span batching for live ore tiles
   compCtx.fillStyle = "#16a34a";
-  for (let y = 0; y < MAP_HEIGHT_TILES; y++) {
-    const rowOffset = y * MAP_WIDTH_TILES;
+  for (let y = 0; y < mapH; y++) {
+    const rowOffset = y * mapW;
     let spanStart = -1;
-    for (let x = 0; x < MAP_WIDTH_TILES; x++) {
+    for (let x = 0; x < mapW; x++) {
       const idx = rowOffset + x;
       const isVisibleOre = (oreGrid[idx] ?? 0) > 0 && (!hasFog || exploredCells.has(idx));
       if (isVisibleOre) {
@@ -222,7 +226,7 @@ function getOrBuildMinimapCompositeCache(
       compCtx.fillRect(
         spanStart * scaleX,
         y * scaleY,
-        Math.ceil((MAP_WIDTH_TILES - spanStart) * scaleX),
+        Math.ceil((mapW - spanStart) * scaleX),
         cellH
       );
     }
@@ -231,10 +235,10 @@ function getOrBuildMinimapCompositeCache(
   // Horizontal span batching for unexplored shroud tiles
   if (hasFog) {
     compCtx.fillStyle = "#070a0f";
-    for (let y = 0; y < MAP_HEIGHT_TILES; y++) {
-      const rowOffset = y * MAP_WIDTH_TILES;
+    for (let y = 0; y < mapH; y++) {
+      const rowOffset = y * mapW;
       let spanStart = -1;
-      for (let x = 0; x < MAP_WIDTH_TILES; x++) {
+      for (let x = 0; x < mapW; x++) {
         const idx = rowOffset + x;
         if (!exploredCells.has(idx)) {
           if (spanStart === -1) spanStart = x;
@@ -252,7 +256,7 @@ function getOrBuildMinimapCompositeCache(
         compCtx.fillRect(
           spanStart * scaleX,
           y * scaleY,
-          Math.ceil((MAP_WIDTH_TILES - spanStart) * scaleX),
+          Math.ceil((mapW - spanStart) * scaleX),
           cellH
         );
       }
@@ -317,23 +321,25 @@ export function renderMinimapRadar(input: MinimapRenderInput): void {
     return;
   }
 
-  const scaleX = width / MAP_WIDTH_TILES;
-  const scaleY = height / MAP_HEIGHT_TILES;
+  const mapW = camera.mapWidthTiles || MAP_WIDTH_TILES;
+  const mapH = camera.mapHeightTiles || MAP_HEIGHT_TILES;
+  const scaleX = width / mapW;
+  const scaleY = height / mapH;
   const cellW = Math.ceil(scaleX);
   const cellH = Math.ceil(scaleY);
 
   const compositeCache =
     typeof ctx.drawImage === "function"
-      ? getOrBuildMinimapCompositeCache(width, height, terrainGrid, oreGrid, exploredCells)
+      ? getOrBuildMinimapCompositeCache(width, height, mapW, mapH, terrainGrid, oreGrid, exploredCells)
       : null;
 
   if (compositeCache) {
     ctx.drawImage(compositeCache, 0, 0, width, height);
   } else {
     // Fallback direct tile fill when OffscreenCanvas is unavailable
-    for (let y = 0; y < MAP_HEIGHT_TILES; y++) {
-      for (let x = 0; x < MAP_WIDTH_TILES; x++) {
-        const idx = y * MAP_WIDTH_TILES + x;
+    for (let y = 0; y < mapH; y++) {
+      for (let x = 0; x < mapW; x++) {
+        const idx = y * mapW + x;
         if (exploredCells.size > 0 && !exploredCells.has(idx)) {
           continue;
         }
@@ -367,7 +373,7 @@ export function renderMinimapRadar(input: MinimapRenderInput): void {
 
   // Draw units, buildings & trees blips
   for (const ent of entities.values()) {
-    const idx = Math.round(ent.y) * MAP_WIDTH_TILES + Math.round(ent.x);
+    const idx = Math.round(ent.y) * mapW + Math.round(ent.x);
     if (ent.entityType === "TREE") {
       if (exploredCells.size > 0 && !exploredCells.has(idx)) {
         continue;

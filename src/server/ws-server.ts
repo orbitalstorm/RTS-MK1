@@ -4,7 +4,7 @@ import { APP_VERSION, SIM_TICK_MS, WATCHDOG_INTERVAL_MS } from "../shared/consta
 import { ClientLobbyActionSchema, type ClientMessage } from "../shared/schemas/commands";
 import { validateEnv } from "../shared/schemas/env";
 import type { ServerMessage } from "../shared/schemas/lobby";
-import { upsertCommanderProfile } from "./db";
+import { listCustomMaps, upsertCommanderProfile } from "./db";
 import { LobbyManager } from "./lobby-manager";
 
 interface SocketSession {
@@ -47,6 +47,12 @@ export function createRtsRealtimeServer(customPort?: number) {
     if (req.url === "/overview") {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(lobbyManager.getOverview()));
+      return;
+    }
+
+    if (req.url === "/maps" || req.url === "/ws/maps") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ maps: listCustomMaps(60) }));
       return;
     }
 
@@ -166,6 +172,7 @@ export function createRtsRealtimeServer(customPort?: number) {
           lobbyName: msg.lobbyName,
           withAiBot: msg.withAiBot,
           mapSeed: msg.mapSeed,
+          customMapId: msg.customMapId,
         });
         session.lobbyId = lobby.lobbyId;
         if (msg.autoStart) {

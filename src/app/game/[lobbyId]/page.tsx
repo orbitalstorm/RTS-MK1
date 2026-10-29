@@ -77,11 +77,13 @@ function canPlaceBuildingOnGrid(
   nowMs = performance.now()
 ): boolean {
   const spec = BUILDINGS[buildingKind];
+  const mapW = st.mapWidth || MAP_WIDTH_TILES;
+  const mapH = st.mapHeight || MAP_HEIGHT_TILES;
   if (
     tileX < 0 ||
     tileY < 0 ||
-    tileX + spec.footprintW > MAP_WIDTH_TILES ||
-    tileY + spec.footprintH > MAP_HEIGHT_TILES
+    tileX + spec.footprintW > mapW ||
+    tileY + spec.footprintH > mapH
   ) {
     return false;
   }
@@ -105,7 +107,7 @@ function canPlaceBuildingOnGrid(
     for (let dx = 0; dx < spec.footprintW; dx++) {
       const tx = tileX + dx;
       const ty = tileY + dy;
-      const idx = ty * MAP_WIDTH_TILES + tx;
+      const idx = ty * mapW + tx;
       const cellTerrain = st.terrainGrid[idx] ?? 0;
       if (!canPlaceBuildingOnTerrainTile(buildingKind, cellTerrain)) {
         return false;
@@ -285,6 +287,10 @@ export default function GameMatchPage() {
   useEffect(() => {
     if (!mapSeed) return;
     const st = useRtsGameStore.getState();
+    cameraRef.current.setMapDimensions(
+      st.mapWidth || MAP_WIDTH_TILES,
+      st.mapHeight || MAP_HEIGHT_TILES
+    );
     for (const ent of st.currEntities.values()) {
       if (ent.ownerId === playerId && ent.kind === "CONSTRUCTION_YARD") {
         if (cameraRef.current.zoom === 1 && zoomLevel !== 1) {
@@ -428,6 +434,11 @@ export default function GameMatchPage() {
 
       const st = useRtsGameStore.getState();
       const cam = cameraRef.current;
+      const mapW = st.mapWidth || MAP_WIDTH_TILES;
+      const mapH = st.mapHeight || MAP_HEIGHT_TILES;
+      if (cam.mapWidthTiles !== mapW || cam.mapHeightTiles !== mapH) {
+        cam.setMapDimensions(mapW, mapH);
+      }
 
       // Smooth keyboard camera pan
       const keys = keysPressedRef.current;

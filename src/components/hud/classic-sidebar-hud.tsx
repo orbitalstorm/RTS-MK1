@@ -76,6 +76,8 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
   const playerId = useRtsGameStore((s) => s.playerId);
   const faction = useRtsGameStore((s) => s.faction);
   const mapSeed = useRtsGameStore((s) => s.mapSeed);
+  const mapWidth = useRtsGameStore((s) => s.mapWidth) || MAP_WIDTH_TILES;
+  const mapHeight = useRtsGameStore((s) => s.mapHeight) || MAP_HEIGHT_TILES;
   const hudRevision = useRtsGameStore((s) => s.hudRevision);
   const ownedBuildingsKey = useRtsGameStore((s) => s.ownedBuildingsKey);
   const placementBuilding = useRtsGameStore((s) => s.placementBuilding);
@@ -152,7 +154,7 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
     if (rect.width <= 0 || rect.height <= 0) return;
     const relX = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
     const relY = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
-    onMinimapClickTile(Math.floor(relX * MAP_WIDTH_TILES), Math.floor(relY * MAP_HEIGHT_TILES));
+    onMinimapClickTile(Math.floor(relX * mapWidth), Math.floor(relY * mapHeight));
   }
 
   function handleMinimapPointer(e: React.MouseEvent<HTMLCanvasElement>): void {
@@ -493,13 +495,13 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
               <span
                 data-testid="hud-map-seed"
                 className="rounded border border-slate-700 bg-slate-900 px-2 py-0.5 text-xs font-bold text-amber-300"
-                title={`Carte procédurale ${MAP_WIDTH_TILES}×${MAP_HEIGHT_TILES} | Seed #${mapSeed}`}
+                title={`Carte ${mapWidth}×${mapHeight} | Seed #${mapSeed}`}
               >
                 SEED #{mapSeed}
               </span>
             )}
             <span className={lowPower ? "text-red-400 font-extrabold text-xs" : "text-emerald-400 font-bold text-xs"}>
-              {lowPower ? "SURCHARGE" : `${MAP_WIDTH_TILES}×${MAP_HEIGHT_TILES}`}
+              {lowPower ? "SURCHARGE" : `${mapWidth}×${mapHeight}`}
             </span>
           </div>
         </div>

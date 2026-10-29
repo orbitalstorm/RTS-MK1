@@ -39,6 +39,8 @@ export interface RtsGameStoreState {
   // Simulation state (synchronized via FullSnapshot + 20Hz TickDeltas)
   tickId: number;
   mapSeed: number;
+  mapWidth: number;
+  mapHeight: number;
   lastTickReceivedAt: number;
   tickDurationMs: number;
   terrainGrid: number[];
@@ -159,6 +161,8 @@ export const useRtsGameStore = create<RtsGameStoreState>((set, get) => ({
 
   tickId: 0,
   mapSeed: 0,
+  mapWidth: MAP_WIDTH_TILES,
+  mapHeight: MAP_HEIGHT_TILES,
   lastTickReceivedAt: 0,
   tickDurationMs: 50,
   terrainGrid: new Array<number>(MAP_WIDTH_TILES * MAP_HEIGHT_TILES).fill(0),
@@ -372,6 +376,8 @@ function applySnapshot(
     currentLobbyId: snap.lobbyId,
     tickId: snap.tickId,
     mapSeed: snap.mapSeed,
+    mapWidth: snap.mapWidth,
+    mapHeight: snap.mapHeight,
     lastTickReceivedAt: performance.now(),
     tickDurationMs: 50,
     terrainGrid: [...snap.terrainGrid],
@@ -460,7 +466,7 @@ function applyDelta(
 
   if (delta.oreUpdates.length > 0) {
     for (const u of delta.oreUpdates) {
-      const idx = u.tileY * MAP_WIDTH_TILES + u.tileX;
+      const idx = u.tileY * st.mapWidth + u.tileX;
       st.oreGrid[idx] = u.oreAmount;
       if (u.oreAmount === 0 && st.terrainGrid[idx] === 3) {
         st.terrainGrid[idx] = 0;
@@ -470,7 +476,7 @@ function applyDelta(
 
   if (delta.terrainUpdates && delta.terrainUpdates.length > 0) {
     for (const t of delta.terrainUpdates) {
-      const idx = t.tileY * MAP_WIDTH_TILES + t.tileX;
+      const idx = t.tileY * st.mapWidth + t.tileX;
       st.terrainGrid[idx] = t.terrainKind;
     }
   }

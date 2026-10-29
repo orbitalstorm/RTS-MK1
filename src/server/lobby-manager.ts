@@ -1,10 +1,13 @@
 import { RtsSimulation } from "../engine/simulation";
 import {
   generateRandomMapSeed,
+  MAP_HEIGHT_TILES,
+  MAP_WIDTH_TILES,
   normalizeMapSeed,
   WATCHDOG_DISCONNECT_TIMEOUT_MS,
   type FactionId,
 } from "../shared/constants";
+import type { CustomMapDocument } from "../shared/schemas/custom-map";
 import {
   ServerMutexOverviewSchema,
   type LobbyChatEntry,
@@ -14,13 +17,18 @@ import {
   type ServerMutexOverview,
 } from "../shared/schemas/lobby";
 import type { FullSnapshot, TickDelta } from "../shared/schemas/deltas";
-import { recordMatchOutcome, recordMatchSeedLog } from "./db";
+import { getCustomMapById, recordMatchOutcome, recordMatchSeedLog } from "./db";
 
 export interface ManagedLobby {
   lobbyId: string;
   name: string;
   hostPlayerId: string;
   mapSeed: number;
+  customMapId: string | null;
+  customMapName: string | null;
+  customMapDoc: CustomMapDocument | null;
+  mapWidth: number;
+  mapHeight: number;
   status: LobbyStatus;
   players: LobbyPlayer[];
   maxPlayers: number;
@@ -64,14 +72,25 @@ export class LobbyManager {
     lobbyName: string;
     withAiBot: boolean;
     mapSeed?: number;
+    customMapId?: string;
+    customMap?: CustomMapDocument | null;
     nowMs?: number;
   }): ManagedLobby {
     const now = params.nowMs ?? Date.now();
     const lobbyId = `sector_${this.nextLobbySeq++}_${now.toString(36).slice(-4)}`;
+    const resolvedCustomMap =
+      params.customMap ??
+      (params.customMapId ? getCustomMapById(params.customMapId) : null);
+
     const mapSeed =
       params.mapSeed !== undefined
         ? normalizeMapSeed(params.mapSeed)
-        : generateRandomMapSeed(now + this.nextLobbySeq * 7919);
+        : resolvedCustomMap
+          ? normalizeMapSeed(resolvedCustomMap.seed)
+          : generateRandomMapSeed(now + this.nextLobbySeq * 7919);
+
+    const mapWidth = resolvedCustomMap ? resolvedCustomMap.width : MAP_WIDTH_TILES;
+    const mapHeight = resolvedCustomMap ? resolvedCustomMap.height : MAP_HEIGHT_TILES;
 
     const players: LobbyPlayer[] = [
       {
@@ -95,11 +114,20 @@ export class LobbyManager {
       });
     }
 
+    const mapDesc = resolvedCustomMap
+      ? `Carte serveur "${resolvedCustomMap.name}" (${mapWidth}×${mapHeight}, Seed #${mapSeed})`
+      : `Seed carte #${mapSeed} (${mapWidth}×${mapHeight})`;
+
     const lobby: ManagedLobby = {
       lobbyId,
       name: params.lobbyName.trim() || `Opération ${lobbyId.toUpperCase()}`,
       hostPlayerId: params.playerId,
       mapSeed,
+      customMapId: resolvedCustomMap ? resolvedCustomMap.id : null,
+      customMapName: resolvedCustomMap ? resolvedCustomMap.name : null,
+      customMapDoc: resolvedCustomMap,
+      mapWidth,
+      mapHeight,
       status: "WAITING",
       players,
       maxPlayers: 4,
@@ -110,7 +138,7 @@ export class LobbyManager {
         {
           id: `msg_${now}`,
           commanderName: "EVA CENTRAL",
-          message: `Salon "${params.lobbyName}" initialisé (Seed carte #${mapSeed}). Verrou serveur prêt.`,
+          message: `Salon "${params.lobbyName}" initialisé (${mapDesc}). Verrou serveur prêt.`,
           timestamp: now,
         },
       ],
@@ -270,6 +298,10 @@ export class LobbyManager {
     lobby.status = "STARTING";
     lobby.startedAt = nowMs;
     lobby.lastHumanHeartbeatAt = nowMs;
+    const customMap =
+      lobby.customMapDoc ??
+      (lobby.customMapId ? getCustomMapById(lobby.customMapId) : null);
+
     lobby.simulation = new RtsSimulation(
       lobby.lobbyId,
       lobby.players.map((p) => ({
@@ -278,10 +310,12 @@ export class LobbyManager {
         faction: p.faction,
         isAi: p.isAi,
       })),
-      { seed: lobby.mapSeed }
+      { seed: lobby.mapSeed, customMap }
     );
+    lobby.mapWidth = lobby.simulation.width;
+    lobby.mapHeight = lobby.simulation.height;
     console.info(
-      `[RTS-MK1][MAP_SEED] Partie démarrée | lobbyId=${lobby.lobbyId} | lobbyName="${lobby.name}" | seed=${lobby.mapSeed} | taille=${lobby.simulation.width}x${lobby.simulation.height}`
+      `[RTS-MK1][MAP_SEED] Partie démarrée | lobbyId=${lobby.lobbyId} | lobbyName="${lobby.name}" | seed=${lobby.mapSeed} | customMap=${lobby.customMapId ?? "PROCEDURAL"} | taille=${lobby.simulation.width}x${lobby.simulation.height}`
     );
     recordMatchSeedLog({
       lobbyId: lobby.lobbyId,
@@ -291,10 +325,13 @@ export class LobbyManager {
       mapHeight: lobby.simulation.height,
     });
     lobby.status = "IN_PROGRESS";
+    const mapLabel = lobby.customMapName
+      ? `Carte "${lobby.customMapName}", Seed #${lobby.mapSeed}, ${lobby.simulation.width}×${lobby.simulation.height}`
+      : `Seed carte #${lobby.mapSeed}, ${lobby.simulation.width}×${lobby.simulation.height}`;
     lobby.chat.push({
       id: `start_${nowMs}`,
       commanderName: "EVA CENTRAL",
-      message: `Verrou de salon unique acquis. Simulation déterministe 20 Hz démarrée (Seed carte #${lobby.mapSeed}, ${lobby.simulation.width}×${lobby.simulation.height}).`,
+      message: `Verrou de salon unique acquis. Simulation déterministe 20 Hz démarrée (${mapLabel}).`,
       timestamp: nowMs,
     });
   }
@@ -490,6 +527,10 @@ export class LobbyManager {
           name: l.name,
           hostPlayerId: l.hostPlayerId,
           mapSeed: l.mapSeed,
+          customMapId: l.customMapId,
+          customMapName: l.customMapName,
+          mapWidth: l.mapWidth,
+          mapHeight: l.mapHeight,
           status: l.status,
           queuePosition: l.status === "QUEUED" && qIdx !== -1 ? qIdx + 1 : null,
           players: l.players,

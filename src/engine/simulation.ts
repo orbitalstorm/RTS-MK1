@@ -45,6 +45,11 @@ import {
   type TreeKind,
   type UnitKind,
 } from "../shared/constants";
+import type {
+  CustomMapDocument,
+  EditorPlacedEntity,
+  SpawnPointSpec,
+} from "../shared/schemas/custom-map";
 import {
   FullSnapshotSchema,
   TickDeltaSchema,
@@ -131,8 +136,10 @@ export class RtsSimulation {
 
   public readonly lobbyId: string;
   public readonly mapSeed: number;
-  public readonly width: number = MAP_WIDTH_TILES;
-  public readonly height: number = MAP_HEIGHT_TILES;
+  public readonly customMapId: string | null;
+  public readonly customMapName: string | null;
+  public readonly width: number;
+  public readonly height: number;
   public readonly terrainGrid: number[];
   public readonly terrainDamageGrid: number[];
   public readonly oreGrid: number[];
@@ -161,23 +168,118 @@ export class RtsSimulation {
   constructor(
     lobbyId: string,
     participants: readonly MatchParticipantInit[],
-    options?: { seed?: number | string }
+    options?: { seed?: number | string; customMap?: CustomMapDocument | null }
   ) {
     this.lobbyId = lobbyId;
+    const customMap = options?.customMap ?? null;
+    this.customMapId = customMap ? customMap.id : null;
+    this.customMapName = customMap ? customMap.name : null;
+    this.width = customMap ? customMap.width : MAP_WIDTH_TILES;
+    this.height = customMap ? customMap.height : MAP_HEIGHT_TILES;
     this.mapSeed =
-      options?.seed !== undefined ? normalizeMapSeed(options.seed) : normalizeMapSeed(lobbyId);
+      options?.seed !== undefined
+        ? normalizeMapSeed(options.seed)
+        : customMap
+          ? normalizeMapSeed(customMap.seed)
+          : normalizeMapSeed(lobbyId);
 
-    const generated = generateProceduralMap({
-      seed: this.mapSeed,
-      width: this.width,
-      height: this.height,
-    });
-    this.terrainGrid = generated.terrainGrid;
-    this.terrainDamageGrid = new Array<number>(this.width * this.height).fill(0);
-    this.oreGrid = generated.oreGrid;
-    this.spawnPads = generated.spawnPads;
-    this.orePatches = generated.orePatches;
-    this.silverDeposits = generated.silverDeposits;
+    let treesToSpawn: ReadonlyArray<ProceduralTreePlacement> = [];
+    let resolvedSpawns: ReadonlyArray<SpawnPointSpec> = [];
+
+    if (customMap) {
+      this.terrainGrid = [...customMap.terrainGrid];
+      this.terrainDamageGrid = new Array<number>(this.width * this.height).fill(0);
+      this.oreGrid = [...customMap.oreGrid];
+      this.orePatches = [];
+      this.silverDeposits = customMap.silverDeposits.map((s) => ({
+        id: s.id,
+        kind: s.kind,
+        quadrantIndex: null,
+        x: s.x,
+        y: s.y,
+      }));
+
+      for (const dep of customMap.silverDeposits) {
+        for (let dy = 0; dy <= 1; dy++) {
+          for (let dx = 0; dx <= 1; dx++) {
+            const tx = dep.x + dx;
+            const ty = dep.y + dy;
+            if (tx >= 0 && ty >= 0 && tx < this.width && ty < this.height) {
+              this.terrainGrid[ty * this.width + tx] = TERRAIN_KIND.SILVER_ORE;
+              this.oreGrid[ty * this.width + tx] = 0;
+            }
+          }
+        }
+      }
+
+      if (customMap.spawns.length >= 2) {
+        resolvedSpawns = [...customMap.spawns].sort((a, b) => a.slotIndex - b.slotIndex);
+      } else {
+        const fallbackProc = generateProceduralMap({
+          seed: this.mapSeed,
+          width: this.width,
+          height: this.height,
+        });
+        resolvedSpawns = fallbackProc.spawnPads.map((pad, idx) => ({
+          slotIndex: idx,
+          label: `Spawn ${idx + 1}`,
+          x: pad.x,
+          y: pad.y,
+          faction: "ANY",
+          startingCredits: STARTING_CREDITS,
+          includeConcretePad: true,
+          includeStoneHalo: true,
+          includeInitialBase: true,
+        }));
+      }
+
+      for (const sp of resolvedSpawns) {
+        if (sp.includeConcretePad) {
+          for (let dy = 0; dy < SPAWN_CONCRETE_PAD_SIZE; dy++) {
+            for (let dx = 0; dx < SPAWN_CONCRETE_PAD_SIZE; dx++) {
+              const tx = sp.x + dx;
+              const ty = sp.y + dy;
+              if (tx >= 0 && ty >= 0 && tx < this.width && ty < this.height) {
+                this.terrainGrid[ty * this.width + tx] = TERRAIN_KIND.CONCRETE_SLAB;
+                this.oreGrid[ty * this.width + tx] = 0;
+              }
+            }
+          }
+        }
+      }
+
+      this.spawnPads = resolvedSpawns.map((s) => ({ x: s.x, y: s.y }));
+      treesToSpawn = customMap.trees.map((t) => ({
+        x: t.x,
+        y: t.y,
+        kind: t.kind,
+        scale: t.scale,
+      }));
+    } else {
+      const generated = generateProceduralMap({
+        seed: this.mapSeed,
+        width: this.width,
+        height: this.height,
+      });
+      this.terrainGrid = generated.terrainGrid;
+      this.terrainDamageGrid = new Array<number>(this.width * this.height).fill(0);
+      this.oreGrid = generated.oreGrid;
+      this.spawnPads = generated.spawnPads;
+      this.orePatches = generated.orePatches;
+      this.silverDeposits = generated.silverDeposits;
+      treesToSpawn = generated.trees;
+      resolvedSpawns = generated.spawnPads.map((pad, idx) => ({
+        slotIndex: idx,
+        label: `Spawn ${idx + 1}`,
+        x: pad.x,
+        y: pad.y,
+        faction: "ANY",
+        startingCredits: STARTING_CREDITS,
+        includeConcretePad: true,
+        includeStoneHalo: true,
+        includeInitialBase: true,
+      }));
+    }
 
     const logEntry: SimulationSeedLogEntry = {
       lobbyId: this.lobbyId,
@@ -191,7 +293,7 @@ export class RtsSimulation {
       RtsSimulation.seedLogs.shift();
     }
     console.info(
-      `[RTS-MK1][MAP_SEED] Simulation initialisée | lobbyId=${this.lobbyId} | mapSeed=${this.mapSeed} | mapSize=${this.width}x${this.height}`
+      `[RTS-MK1][MAP_SEED] Simulation initialisée | lobbyId=${this.lobbyId} | mapSeed=${this.mapSeed} | customMap=${this.customMapId ?? "PROCEDURAL"} | mapSize=${this.width}x${this.height}`
     );
 
     this.reservationGrid = new SpatialReservationGrid(this.width, this.height, this.terrainGrid);
@@ -202,13 +304,42 @@ export class RtsSimulation {
       participants.map((p) => p.playerId)
     );
 
+    // Match each participant to a spawn slot (preferring matching faction if explicitly configured)
+    const usedSpawnIndices = new Set<number>();
+    const participantAssignedSpawns: SpawnPointSpec[] = [];
+    const slotToParticipant = new Map<number, MatchParticipantInit>();
+
     participants.forEach((p, idx) => {
+      let chosenIdx = resolvedSpawns.findIndex(
+        (sp, sIdx) => !usedSpawnIndices.has(sIdx) && sp.faction === p.faction
+      );
+      if (chosenIdx === -1) {
+        chosenIdx = resolvedSpawns.findIndex((_, sIdx) => !usedSpawnIndices.has(sIdx));
+      }
+      if (chosenIdx === -1) {
+        chosenIdx = idx % resolvedSpawns.length;
+      }
+      usedSpawnIndices.add(chosenIdx);
+      const chosenSpawn = resolvedSpawns[chosenIdx]!;
+      participantAssignedSpawns.push(chosenSpawn);
+      slotToParticipant.set(chosenSpawn.slotIndex, p);
+      if (!slotToParticipant.has(idx)) {
+        slotToParticipant.set(idx, p);
+      }
+    });
+
+    participants.forEach((p, idx) => {
+      const assignedSpawn = participantAssignedSpawns[idx]!;
+      const initialCredits = customMap
+        ? Math.max(500, assignedSpawn.startingCredits ?? STARTING_CREDITS)
+        : STARTING_CREDITS;
+
       this.players.set(p.playerId, {
         playerId: p.playerId,
         commanderName: p.commanderName,
         faction: p.faction,
         isAi: p.isAi,
-        credits: STARTING_CREDITS,
+        credits: initialCredits,
         silverOre: 0,
         maxStorage: BASE_STORAGE_CAPACITY,
         powerProduced: 0,
@@ -224,12 +355,35 @@ export class RtsSimulation {
         queues: createEmptyQueues(),
       });
 
-      const corner = this.spawnPads[idx % this.spawnPads.length]!;
+      const corner = { x: assignedSpawn.x, y: assignedSpawn.y };
       this.playerSpawnPads.set(p.playerId, corner);
-      this.spawnInitialBase(p.playerId, p.faction, corner.x, corner.y);
+      if (assignedSpawn.includeInitialBase !== false) {
+        this.spawnInitialBase(p.playerId, p.faction, corner.x, corner.y);
+      }
     });
 
-    this.spawnProceduralTrees(generated.trees);
+    if (customMap && customMap.placedEntities.length > 0) {
+      this.spawnCustomPlacedEntities(customMap.placedEntities, slotToParticipant);
+    }
+
+    // Safety net: if a custom map disabled includeInitialBase and placed 0 entities for a participant, spawn their initial base
+    participants.forEach((p, idx) => {
+      const assignedSpawn = participantAssignedSpawns[idx]!;
+      if (assignedSpawn.includeInitialBase === false) {
+        let hasOwnedEntity = false;
+        for (const ent of this.entities.values()) {
+          if (ent.ownerId === p.playerId) {
+            hasOwnedEntity = true;
+            break;
+          }
+        }
+        if (!hasOwnedEntity) {
+          this.spawnInitialBase(p.playerId, p.faction, assignedSpawn.x, assignedSpawn.y);
+        }
+      }
+    });
+
+    this.spawnProceduralTrees(treesToSpawn);
     this.rebuildSpatialReservations();
     this.recomputeAllPlayerEconomies();
     this.fogManager.recomputeTickVisibility(
@@ -274,6 +428,54 @@ export class RtsSimulation {
       }
       if (!this.reservationGrid.isTilePassable(t.x, t.y, undefined, false)) continue;
       this.createTreeEntity(t.kind, t.x, t.y, t.scale);
+    }
+  }
+
+  private spawnCustomPlacedEntities(
+    placedEntities: ReadonlyArray<EditorPlacedEntity>,
+    slotToParticipant: ReadonlyMap<number, MatchParticipantInit>
+  ): void {
+    for (const item of placedEntities) {
+      let ownerId = "neutral";
+      let faction: FactionId = item.faction;
+      if (item.ownerSlot !== "NEUTRAL") {
+        const assignedParticipant = slotToParticipant.get(item.ownerSlot);
+        if (assignedParticipant) {
+          ownerId = assignedParticipant.playerId;
+          faction = assignedParticipant.faction;
+        }
+      }
+
+      if (item.entityType === "BUILDING") {
+        const bKind = item.kind as BuildingKind;
+        const bSpec = BUILDINGS[bKind];
+        if (!bSpec) continue;
+        if (
+          item.x < 0 ||
+          item.y < 0 ||
+          item.x + bSpec.footprintW > this.width ||
+          item.y + bSpec.footprintH > this.height
+        ) {
+          continue;
+        }
+        const bld = this.createBuildingEntity(ownerId, faction, bKind, item.x, item.y);
+        if (item.hpRatio < 1) {
+          bld.health.hp = Math.max(1, Math.round(bld.health.maxHp * item.hpRatio));
+        }
+      } else if (item.entityType === "UNIT") {
+        const uKind = item.kind as UnitKind;
+        const uSpec = UNITS[uKind];
+        if (!uSpec) continue;
+        if (item.x < 0 || item.y < 0 || item.x >= this.width || item.y >= this.height) {
+          continue;
+        }
+        const unit = this.createUnitEntity(ownerId, faction, uKind, item.x, item.y);
+        unit.transform.angleIndex = Math.max(0, Math.min(15, Math.round(item.angleIndex)));
+        unit.transform.turretAngleIndex = unit.transform.angleIndex;
+        if (item.hpRatio < 1) {
+          unit.health.hp = Math.max(1, Math.round(unit.health.maxHp * item.hpRatio));
+        }
+      }
     }
   }
 

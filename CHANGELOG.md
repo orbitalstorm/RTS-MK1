@@ -2,6 +2,16 @@
 
 All notable changes to **RTS-MK1** (`https://rts-mk1.orbital8.cloud`) follow strict non-reusable `v1.x.y` versioning.
 
+## [v1.14.0] — 2026-10-29
+
+### Added & Changed
+- **Start Screen Seed Number Input & Saved Server Map Selector (`src/components/lobby/portal-command-center.tsx`, `src/app/api/maps/route.ts`, `src/server/db/index.ts`, `src/shared/schemas/custom-map.ts`, `src/shared/schemas/commands.ts`, `src/shared/schemas/lobby.ts`, `src/server/lobby-manager.ts`, `src/engine/simulation.ts`)**:
+  - Added the **Théâtre d'opérations** configuration panel on the start screen (`PortalCommandCenter`) allowing the commander to:
+    1. Enter any custom procedural **Seed Number** (`data-testid="map-seed-input"`) or generate a random seed (`data-testid="random-seed-button"`).
+    2. Select a **Saved Server Map** (`data-testid="saved-map-select"` and interactive cards `data-testid="saved-map-card-<id>"`) published from the Map Editor (`devtools-rts-mk1`, shared SQLite `custom_maps` table & `/app/data/custom-maps/*.rtsmap.json`) or official starter maps, with live refresh (`data-testid="refresh-maps-button"`).
+  - Added `GET /api/maps` and `GET /api/maps?id=<id>` endpoints backed by SQLite `custom_maps` with automatic disk synchronization from `/app/data/custom-maps/*.rtsmap.json`.
+  - Updated `RtsSimulation`, `LobbyManager`, `useRtsGameStore`, `TacticalCamera`, `world-renderer.ts`, `minimap-renderer.ts`, and `ClassicSidebarHud` to support custom maps of any dimensions (`32×32` to `256×256`), custom terrain/ore grids, custom spawns & starting credits, silver deposits, trees, and pre-placed buildings/units.
+
 ## [v1.13.0] — 2026-10-29
 
 ### Added & Changed

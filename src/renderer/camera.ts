@@ -14,9 +14,21 @@ export class TacticalCamera {
   public zoom = 1.0;
   public viewportWidth = 960;
   public viewportHeight = 640;
+  public mapWidthTiles = MAP_WIDTH_TILES;
+  public mapHeightTiles = MAP_HEIGHT_TILES;
   public shakeTrauma = 0;
   public shakeOffsetX = 0;
   public shakeOffsetY = 0;
+
+  public setMapDimensions(widthTiles: number, heightTiles: number): void {
+    const nextW = Math.max(32, Math.floor(widthTiles));
+    const nextH = Math.max(32, Math.floor(heightTiles));
+    if (this.mapWidthTiles !== nextW || this.mapHeightTiles !== nextH) {
+      this.mapWidthTiles = nextW;
+      this.mapHeightTiles = nextH;
+      this.clamp();
+    }
+  }
 
   public addShakeTrauma(amount: number): void {
     if (!Number.isFinite(amount) || amount <= 0) return;
@@ -87,8 +99,8 @@ export class TacticalCamera {
   }
 
   public clamp(): void {
-    const maxWorldW = MAP_WIDTH_TILES * TILE_PIXEL_SIZE;
-    const maxWorldH = MAP_HEIGHT_TILES * TILE_PIXEL_SIZE;
+    const maxWorldW = this.mapWidthTiles * TILE_PIXEL_SIZE;
+    const maxWorldH = this.mapHeightTiles * TILE_PIXEL_SIZE;
     const maxX = Math.max(0, maxWorldW - this.viewportWidth / this.zoom);
     const maxY = Math.max(0, maxWorldH - this.viewportHeight / this.zoom);
     this.x = Math.max(0, Math.min(maxX, this.x));
@@ -99,8 +111,8 @@ export class TacticalCamera {
     const worldX = this.x + screenX / this.zoom;
     const worldY = this.y + screenY / this.zoom;
     return {
-      tileX: Math.max(0, Math.min(MAP_WIDTH_TILES - 1, Math.floor(worldX / TILE_PIXEL_SIZE))),
-      tileY: Math.max(0, Math.min(MAP_HEIGHT_TILES - 1, Math.floor(worldY / TILE_PIXEL_SIZE))),
+      tileX: Math.max(0, Math.min(this.mapWidthTiles - 1, Math.floor(worldX / TILE_PIXEL_SIZE))),
+      tileY: Math.max(0, Math.min(this.mapHeightTiles - 1, Math.floor(worldY / TILE_PIXEL_SIZE))),
     };
   }
 
@@ -117,11 +129,11 @@ export class TacticalCamera {
     const minX = Math.max(0, Math.floor(this.x / TILE_PIXEL_SIZE) - 1);
     const minY = Math.max(0, Math.floor(this.y / TILE_PIXEL_SIZE) - 1);
     const maxX = Math.min(
-      MAP_WIDTH_TILES - 1,
+      this.mapWidthTiles - 1,
       Math.ceil((this.x + this.viewportWidth / this.zoom) / TILE_PIXEL_SIZE) + 1
     );
     const maxY = Math.min(
-      MAP_HEIGHT_TILES - 1,
+      this.mapHeightTiles - 1,
       Math.ceil((this.y + this.viewportHeight / this.zoom) / TILE_PIXEL_SIZE) + 1
     );
     return { minX, maxX, minY, maxY };
