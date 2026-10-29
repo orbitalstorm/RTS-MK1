@@ -10,6 +10,7 @@ import {
 } from "../../shared/constants";
 import {
   getActiveVectorVariant,
+  resolveVariantMorphology,
   type VectorVariantProposal,
 } from "../../shared/schemas/vector-variants";
 
@@ -284,7 +285,18 @@ export const ProductionItemVectorIcon = React.memo(function ProductionItemVector
   const isBuilding = Object.prototype.hasOwnProperty.call(BUILDINGS, itemKind);
   const assetKey = `${isBuilding ? "BUILDING" : "UNIT"}:${itemKind}`;
   const activeVariant = variantOverride ?? getActiveVectorVariant(assetKey);
-  const isCustomVariant = activeVariant.variantId !== "v1_classic_mk1";
+  const morphology = resolveVariantMorphology(activeVariant);
+  const isCustomVariant = morphology !== "CLASSIC_MK1";
+  const energyHex =
+    activeVariant.dna.energyCoreHue === "CYAN_PLASMA"
+      ? "#38bdf8"
+      : activeVariant.dna.energyCoreHue === "EMERALD_TIBERIUM"
+        ? "#10b981"
+        : activeVariant.dna.energyCoreHue === "CRIMSON_LASER"
+          ? "#ef4444"
+          : activeVariant.dna.energyCoreHue === "VIOLET_QUANTUM"
+            ? "#a855f7"
+            : "#facc15";
   const pColor = fSpec.primaryColor;
   const sColor = fSpec.secondaryColor;
   const uid = `${faction}-${itemKind}-${activeVariant.variantId}`;
@@ -1092,39 +1104,92 @@ export const ProductionItemVectorIcon = React.memo(function ProductionItemVector
         />
         {isCustomVariant && (
           <>
-            <polygon
-              points="46,6 58,6 58,15 46,15"
-              fill="#090d16"
-              stroke={pColor}
-              strokeWidth="1"
-            />
-            <circle
-              cx="52"
-              cy="10.5"
-              r="2.2"
-              fill={
-                activeVariant.dna.energyCoreHue === "CYAN_PLASMA"
-                  ? "#38bdf8"
-                  : activeVariant.dna.energyCoreHue === "EMERALD_TIBERIUM"
-                    ? "#10b981"
-                    : activeVariant.dna.energyCoreHue === "CRIMSON_LASER"
-                      ? "#ef4444"
-                      : activeVariant.dna.energyCoreHue === "VIOLET_QUANTUM"
-                        ? "#a855f7"
-                        : "#facc15"
-              }
-            />
-            <polyline
-              points="6,50 14,58 58,58"
-              fill="none"
-              stroke={pColor}
-              strokeWidth="1.5"
-              strokeDasharray={
-                activeVariant.dna.hazardStripeMode === "DOUBLE_CHEVRON"
-                  ? "3 2"
-                  : undefined
-              }
-            />
+            {morphology === "BASTION_CATAPHRACT" && (
+              <>
+                {/* V2 Bastion Cataphract: Heavy Corner Bastion Turrets + Front Serrated Dozer Plow */}
+                <polygon
+                  points="8,44 19,53 31,48 16,38"
+                  fill={pColor}
+                  stroke="#090d16"
+                  strokeWidth="1.4"
+                />
+                <circle cx="11" cy="14" r="4.5" fill="#1e293b" stroke={pColor} strokeWidth="1.4" />
+                <circle cx="53" cy="14" r="4.5" fill="#1e293b" stroke={pColor} strokeWidth="1.4" />
+                <circle cx="53" cy="50" r="4.5" fill="#1e293b" stroke={pColor} strokeWidth="1.4" />
+                <rect x="44" y="6" width="14" height="8" fill="#090d16" stroke={pColor} strokeWidth="1" />
+                <text x="51" y="12" fill={energyHex} fontSize="6" fontWeight="bold" textAnchor="middle">
+                  V2
+                </text>
+              </>
+            )}
+            {morphology === "TOKAMAK_MAGLEV" && (
+              <>
+                {/* V3 Tokamak / Mag-Lev: Concentric Plasma Containment Torus & Ion Thruster Nodes */}
+                <ellipse
+                  cx="32"
+                  cy="34"
+                  rx="22"
+                  ry="12"
+                  fill="none"
+                  stroke={energyHex}
+                  strokeWidth="2"
+                  strokeDasharray="5 2.5"
+                />
+                <circle cx="14" cy="40" r="3.6" fill="#090d16" stroke={energyHex} strokeWidth="1.6" />
+                <circle cx="50" cy="30" r="3.6" fill="#090d16" stroke={energyHex} strokeWidth="1.6" />
+                <circle cx="32" cy="24" r="5" fill={energyHex} opacity="0.85" />
+                <circle cx="32" cy="24" r="2.3" fill="#ffffff" />
+                <rect x="44" y="6" width="14" height="8" fill="#090d16" stroke={energyHex} strokeWidth="1" />
+                <text x="51" y="12" fill={energyHex} fontSize="6" fontWeight="bold" textAnchor="middle">
+                  V3
+                </text>
+              </>
+            )}
+            {morphology === "STEALTH_DELTA_DRONE" && (
+              <>
+                {/* V4 Stealth Delta: Swept F-117 Faceted Delta Wings + Orbiting Recon Drone */}
+                <polygon
+                  points="32,9 56,36 42,40 32,27 22,40 8,36"
+                  fill="#090d16"
+                  fillOpacity="0.72"
+                  stroke={energyHex}
+                  strokeWidth="1.5"
+                />
+                <circle cx="16" cy="14" r="3.2" fill="#090d16" stroke={energyHex} strokeWidth="1.3" />
+                <line x1="11" y1="14" x2="21" y2="14" stroke={energyHex} strokeWidth="1.1" />
+                <rect x="44" y="6" width="14" height="8" fill="#090d16" stroke={energyHex} strokeWidth="1" />
+                <text x="51" y="12" fill={energyHex} fontSize="6" fontWeight="bold" textAnchor="middle">
+                  V4
+                </text>
+              </>
+            )}
+            {(morphology === "MECH_CATAMARAN" || morphology === "ZIGGURAT_HEX_SWARM") && (
+              <>
+                {/* V5+ Mech / Hex-Triad: Articulated Spider-Mech Legs & Twin Hex Reactor Pods */}
+                <polyline
+                  points="20,36 10,42 8,53"
+                  fill="none"
+                  stroke={energyHex}
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                />
+                <polyline
+                  points="44,34 54,40 56,51"
+                  fill="none"
+                  stroke={energyHex}
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                />
+                <polygon
+                  points="32,10 42,16 42,26 32,32 22,26 22,16"
+                  fill="#090d16"
+                  fillOpacity="0.75"
+                  stroke={energyHex}
+                  strokeWidth="1.6"
+                />
+                <circle cx="32" cy="21" r="3.2" fill={energyHex} />
+              </>
+            )}
           </>
         )}
       </g>

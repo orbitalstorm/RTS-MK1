@@ -592,9 +592,10 @@ function normalizeVectorVariantsStateCompleteness(state: VectorVariantsState): V
   for (const descriptor of VECTOR_ASSET_ELEMENTS) {
     const key = descriptor.assetKey;
     const baseList = initial.catalog[key] ?? [];
+    const baseById = new Map(baseList.map((bp) => [bp.variantId, bp]));
     const currentList = mergedCatalog[key] ?? [];
     const existingIds = new Set(currentList.map((p) => p.variantId));
-    const combined = [...currentList];
+    const combined = currentList.map((p) => baseById.get(p.variantId) ?? p);
     for (const bp of baseList) {
       if (!existingIds.has(bp.variantId)) {
         combined.push(bp);

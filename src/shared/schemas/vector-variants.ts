@@ -301,6 +301,71 @@ export const StyleArchetypeSchema = z.enum([
 ]);
 export type StyleArchetype = z.infer<typeof StyleArchetypeSchema>;
 
+export const VectorAnimationModeSchema = z.enum([
+  "IDLE",
+  "MOVE",
+  "ATTACK",
+  "SPECIAL",
+]);
+export type VectorAnimationMode = z.infer<typeof VectorAnimationModeSchema>;
+
+export interface VectorAnimationModeDescriptor {
+  id: VectorAnimationMode;
+  label: string;
+  shortLabel: string;
+  description: string;
+}
+
+export const VECTOR_ANIMATION_MODES: ReadonlyArray<VectorAnimationModeDescriptor> = [
+  {
+    id: "IDLE",
+    label: "Veille & Systèmes Actifs",
+    shortLabel: "Veille (Idle)",
+    description:
+      "Rotation radar, pulsation des réacteurs, balayage optique, houle et brise.",
+  },
+  {
+    id: "MOVE",
+    label: "Déplacement & Cinématique",
+    shortLabel: "Mouvement",
+    description:
+      "Marche articulée de l'infanterie/méchas, roulement des chenilles, lévitation Mag-Lev et poussière.",
+  },
+  {
+    id: "ATTACK",
+    label: "Combat, Tir & Surcharge",
+    shortLabel: "Attaque / Tir",
+    description:
+      "Recul des canons, flashs de bouche, salves de missiles, jet de flammes et faisceaux laser.",
+  },
+  {
+    id: "SPECIAL",
+    label: "Action Spéciale & Production",
+    shortLabel: "Spécial / Prod.",
+    description:
+      "Ouverture des hangars, grues de soudure plasma, concassage de minerai et résonance cristalline.",
+  },
+];
+
+export const StructuralMorphologySchema = z.enum([
+  "CLASSIC_MK1",
+  "BASTION_CATAPHRACT",
+  "TOKAMAK_MAGLEV",
+  "STEALTH_DELTA_DRONE",
+  "MECH_CATAMARAN",
+  "ZIGGURAT_HEX_SWARM",
+]);
+export type StructuralMorphology = z.infer<typeof StructuralMorphologySchema>;
+
+export const MORPHOLOGY_LABELS: Record<StructuralMorphology, string> = {
+  CLASSIC_MK1: "Architecture Classique MK1",
+  BASTION_CATAPHRACT: "Citadelle Octogonale / Cataphracte Lourd",
+  TOKAMAK_MAGLEV: "Anneau Tokamak / Aéroglisseur Mag-Lev",
+  STEALTH_DELTA_DRONE: "Losange Furtif / Delta 8×8 & Drone",
+  MECH_CATAMARAN: "Double-Coque Catamaran / Marcheur Mécha",
+  ZIGGURAT_HEX_SWARM: "Pyramide Ziggurat / Tri-Pod & Phalange",
+};
+
 export const VectorVariantDnaSchema = z.object({
   silhouetteProfile: SilhouetteProfileSchema,
   armorChamferScale: z.number().min(0.4).max(2.0),
@@ -897,47 +962,47 @@ const TREE_VARIANT_PRESETS: ReadonlyArray<{
 }> = [
   {
     suffix: "v1_classic_mk1",
-    title: "V1 — Silhouette Botanique Classique (Référence v1.13)",
+    title: "V1 — Silhouette Botanique Classique (Tronc Unique)",
     archetype: "MILITARY_MK1",
     canopyStyle: "CLASSIC",
     primary: "#15803d",
     secondary: "#14532d",
     accent: "#22c55e",
     trunk: "#5c4028",
-    note: "Canopée étagée de référence avec balancement éolien doux et ombre portée elliptique.",
+    note: "Canopée étagée de référence à tronc unique, balancement éolien doux et ombre portée elliptique.",
   },
   {
     suffix: "v2_heavy_bastion",
-    title: "V2 — Sylvestre Ancien Multi-Étagé Dense",
+    title: "V2 — Bosquet Ancien Multi-Troncs & Racines Apparentes",
     archetype: "HEAVY_BASTION",
     canopyStyle: "DENSE_MULTI_TIER",
     primary: "#166534",
     secondary: "#052e16",
     accent: "#4ade80",
     trunk: "#452c1a",
-    note: "Couronne foliaire élargie à strates supplémentaires, racines apparentes et feuillage émeraude profond.",
+    note: "Morphologie forestière complète : groupe de 3 troncs anciens entrelacés sur contreforts rocheux moussus et triple canopée.",
   },
   {
     suffix: "v3_experimental_apex",
-    title: "V3 — Flore Mutante Bioluminescente (Tiberium)",
+    title: "V3 — Obélisque Végétal Cristallin & Spores en Lévitation",
     archetype: "APEX_PLASMA",
     canopyStyle: "CRYSTAL_MUTATED",
     primary: "#0d9488",
     secondary: "#115e59",
     accent: "#5eead4",
     trunk: "#334155",
-    note: "Essence mutée aux frondes turquoise-émeraude dotée de bourgeons cristallins luminescents.",
+    note: "Architecture xéno-botanique : cristaux prismatiques émeraude-cyan poussant sur un tronc minéralisé avec orbes de spores en orbite.",
   },
   {
     suffix: "v4_tactical_vanguard",
-    title: "V4 — Essence Dorée Automnale & Hautes Terres",
+    title: "V4 — Bonsaï Géant Pleureur d'Automne & Arche Racinaire",
     archetype: "DESERT_STORM",
     canopyStyle: "ANCIENT_AUTUMN",
     primary: "#b45309",
     secondary: "#78350f",
     accent: "#fbbf24",
     trunk: "#4a3222",
-    note: "Feuillage ambre-cuivré de haute visibilité offrant un contraste remarquable sur l'herbe et la pierre.",
+    note: "Grand arbre pleureur asymétrique sculpté par le vent avec tronc courbe, lanternes de résine dorée et chute de feuilles ambrées.",
   },
 ];
 
@@ -963,7 +1028,7 @@ const BUILDING_AND_UNIT_BUILT_IN_ARCHETYPES: ReadonlyArray<{
   {
     suffix: "v1_classic_mk1",
     versionNumber: 1,
-    titlePrefix: "V1 — Standard Militaire MK1 (Référence v1.12)",
+    titlePrefix: "V1 — Standard Militaire MK1 (Architecture Classique)",
     styleArchetype: "MILITARY_MK1",
     silhouetteProfile: "STANDARD",
     armorChamferScale: 1.0,
@@ -977,74 +1042,144 @@ const BUILDING_AND_UNIT_BUILT_IN_ARCHETYPES: ReadonlyArray<{
     energyCoreHue: "FACTION",
     specularContrast: 1.0,
     describeBuilding: (name) =>
-      `Architecture vectorielle officielle v1.12 de ${name} : fondation différenciée par clan, éclairage solaire Nord-Ouest fixe et sous-ensembles standards.`,
+      `Architecture vectorielle officielle v1.12 de ${name} : fondation rectangulaire différenciée par clan et superstructure militaire standard.`,
     describeUnit: (name) =>
-      `Châssis vectoriel officiel v1.12 de ${name} sur 16 angles avec éclairage solaire Nord-Ouest verrouillé en repère monde.`,
+      `Châssis vectoriel officiel v1.12 de ${name} : propulsion militaire standard et tourelle/armement de série sur 16 angles.`,
   },
   {
     suffix: "v2_heavy_bastion",
     versionNumber: 2,
-    titlePrefix: "V2 — Bastion Blindé Lourd (Blindage Réactif & Sponsons)",
+    titlePrefix: "V2 — Citadelle Octogonale & Châssis Cataphracte Quadri-Chenilles",
     styleArchetype: "HEAVY_BASTION",
     silhouetteProfile: "WIDENED_HEAVY",
     armorChamferScale: 1.35,
     hullWidthScale: 1.09,
     hullLengthScale: 1.04,
     turretProfile: "ARMORED_MANTLET",
-    barrelLengthScale: 1.12,
+    barrelLengthScale: 1.16,
     superstructureStyle: "REACTIVE_ERA_BLOCKS",
     hazardStripeMode: "DOUBLE_CHEVRON",
     rivetDensity: "HEAVY_BOLTED",
     energyCoreHue: "AMBER_THERMAL",
-    specularContrast: 1.2,
+    specularContrast: 1.25,
     describeBuilding: (name) =>
-      `Variante fortifiée de ${name} : ajout de sponsons latéraux blindés, tuiles de blindage réactif ERA, double rampe de chevrons d'alerte et boulonnage lourd.`,
+      `Refonte architecturale complète de ${name} en Citadelle Octogonale de Siège : 4 bastions d'angle circulaires, casemates en blindage réactif ERA, double portique industriel lourd et cheminées thermiques.`,
     describeUnit: (name) =>
-      `Version surblindée de ${name} : jupes latérales protège-chenilles/roues, plaques réactives ERA sur le glacis, mantelet de tourelle élargi et frein de bouche lourd.`,
+      `Refonte complète de ${name} en Cataphracte Lourd : 4 chenilles articulées déportées (ou exo-armures Juggernaut à bouclier balistique), lame de bulldozer en V à l'avant et tourelle casemate bimoteur + pod lance-roquettes.`,
   },
   {
     suffix: "v3_experimental_apex",
     versionNumber: 3,
-    titlePrefix: "V3 — Prototype Apex Plasma (Conduits & Surcharge Bobine)",
+    titlePrefix: "V3 — Anneau Tokamak & Aéroglisseur Mag-Lev à Turbines Ioniques",
     styleArchetype: "APEX_PLASMA",
     silhouetteProfile: "OCTAGONAL_BEVEL",
     armorChamferScale: 1.5,
-    hullWidthScale: 1.02,
+    hullWidthScale: 1.04,
     hullLengthScale: 1.08,
     turretProfile: "COIL_OVERCHARGE",
-    barrelLengthScale: 1.22,
+    barrelLengthScale: 1.24,
     superstructureStyle: "DUAL_REACTOR",
     hazardStripeMode: "MINIMAL_SPECULAR",
     rivetDensity: "HIGH",
     energyCoreHue: "CYAN_PLASMA",
-    specularContrast: 1.35,
+    specularContrast: 1.38,
     describeBuilding: (name) =>
-      `Prototype haute-énergie de ${name} : double cœur à plasma cyan, conduits cryogéniques lumineux, dôme télémétrique auxiliaire et arêtes spéculaires haute-précision.`,
+      `Refonte haute-technologie de ${name} en Complexe Annulaire Tokamak : plateforme circulaire à confinement magnétique, anneau de plasma exposé en rotation et dômes énergétiques en lévitation.`,
     describeUnit: (name) =>
-      `Prototype énergétique de ${name} : cellules plasma dorsales, bobines d'accélération magnétique sur le canon, optique laser et stabilisateurs arrières.`,
+      `Refonte futuriste de ${name} en Aéroglisseur Mag-Lev (sans chenilles) : lévitation sur 4 turbines ioniques lumineuses (ou propulseurs Jump-Jet ailés pour l'infanterie), coque catamaran fendue et canon Railgun électromagnétique.`,
   },
   {
     suffix: "v4_tactical_vanguard",
     versionNumber: 4,
-    titlePrefix: "V4 — Avant-Garde Tactique (Portiques Radar & Ailettes)",
+    titlePrefix: "V4 — Forteresse Losange Furtive & Châssis Delta 8×8 + Drone",
     styleArchetype: "TACTICAL_VANGUARD",
     silhouetteProfile: "ANGULAR_STEALTH",
     armorChamferScale: 0.82,
     hullWidthScale: 0.96,
-    hullLengthScale: 1.11,
+    hullLengthScale: 1.12,
     turretProfile: "FINNED_STABILIZER",
-    barrelLengthScale: 1.18,
+    barrelLengthScale: 1.2,
     superstructureStyle: "COMMAND_ANTENNA",
     hazardStripeMode: "PERIMETER_WARNING",
     rivetDensity: "MEDIUM",
     energyCoreHue: "EMERALD_TIBERIUM",
-    specularContrast: 1.15,
+    specularContrast: 1.18,
     describeBuilding: (name) =>
-      `Configuration de commandement avancé pour ${name} : mâts d'antennes télémétriques, déflecteurs angulaires furtifs, marquages périmétriques et cœur émeraude.`,
+      `Refonte furtive de ${name} en Losange Angulaire F-117 : plateforme rhomboïde orientée à 45°, ailes déflectrices radar en flèche inversée, baies souterraines et réseau laser télémétrique.`,
     describeUnit: (name) =>
-      `Configuration d'assaut longue-portée de ${name} : profil angulaire furtif, double antenne fouet, canon haute-vélocité à ailettes de stabilisation et marquages tactiques.`,
+      `Refonte tactique de ${name} en Châssis Delta Furtif 8×8 / Escouade Spec-Ops : facettes furtives angulaires, roues blindées multi-essieux (ou drone de combat tri-rotor accompagnant l'infanterie) et tourelle téléopérée à canon long.`,
   },
 ];
+
+export function resolveVariantMorphology(
+  proposal: VectorVariantProposal
+): StructuralMorphology {
+  if (proposal.variantId === "v1_classic_mk1" || proposal.versionNumber === 1) {
+    return "CLASSIC_MK1";
+  }
+  if (proposal.versionNumber === 2) {
+    return "BASTION_CATAPHRACT";
+  }
+  if (proposal.versionNumber === 3) {
+    return "TOKAMAK_MAGLEV";
+  }
+  if (proposal.versionNumber === 4) {
+    return "STEALTH_DELTA_DRONE";
+  }
+
+  const prompt = (proposal.directivePrompt ?? "").toLowerCase();
+  if (
+    prompt.includes("mecha") ||
+    prompt.includes("mécha") ||
+    prompt.includes("patte") ||
+    prompt.includes("walker") ||
+    prompt.includes("catamaran")
+  ) {
+    return "MECH_CATAMARAN";
+  }
+  if (
+    prompt.includes("ziggurat") ||
+    prompt.includes("pyramide") ||
+    prompt.includes("essaim") ||
+    prompt.includes("hex")
+  ) {
+    return "ZIGGURAT_HEX_SWARM";
+  }
+  if (
+    prompt.includes("hover") ||
+    prompt.includes("maglev") ||
+    prompt.includes("lévitation") ||
+    prompt.includes("plasma") ||
+    prompt.includes("tokamak")
+  ) {
+    return "TOKAMAK_MAGLEV";
+  }
+  if (
+    prompt.includes("furtif") ||
+    prompt.includes("stealth") ||
+    prompt.includes("drone") ||
+    prompt.includes("delta")
+  ) {
+    return "STEALTH_DELTA_DRONE";
+  }
+  if (
+    prompt.includes("bastion") ||
+    prompt.includes("bunker") ||
+    prompt.includes("dozer") ||
+    prompt.includes("lourd")
+  ) {
+    return "BASTION_CATAPHRACT";
+  }
+
+  const cycle: readonly StructuralMorphology[] = [
+    "MECH_CATAMARAN",
+    "ZIGGURAT_HEX_SWARM",
+    "BASTION_CATAPHRACT",
+    "TOKAMAK_MAGLEV",
+    "STEALTH_DELTA_DRONE",
+  ];
+  return cycle[(proposal.versionNumber - 5 + (proposal.dna.customSeed & 3)) % cycle.length]!;
+}
 
 export function createBuiltInVariantsForAsset(
   descriptor: VectorAssetElementDescriptor
@@ -1404,19 +1539,30 @@ export function synthesizeNewLeonardoVariantProposal(params: {
   ];
   const pickedTree = treePalettes[seed % treePalettes.length]!;
 
+  const cycleMorph: readonly StructuralMorphology[] = [
+    "MECH_CATAMARAN",
+    "ZIGGURAT_HEX_SWARM",
+    "BASTION_CATAPHRACT",
+    "TOKAMAK_MAGLEV",
+    "STEALTH_DELTA_DRONE",
+  ];
+  const previewMorph =
+    cycleMorph[(nextVersionNumber - 5 + (seed & 3)) % cycleMorph.length]!;
+  const morphLabel = MORPHOLOGY_LABELS[previewMorph];
+
   const archetypeLabel = ARCHETYPE_LABELS[chosenArchetype];
   const customTitleSuffix = promptText
-    ? ` — « ${promptText.slice(0, 38)}${promptText.length > 38 ? "…" : ""} »`
-    : ` (Série #${(seed % 900) + 100})`;
+    ? ` — « ${promptText.slice(0, 32)}${promptText.length > 32 ? "…" : ""} »`
+    : ` (${morphLabel})`;
 
   const title = `V${nextVersionNumber} — ${archetypeLabel}${customTitleSuffix}`;
 
   const leonardoNote =
     descriptor.category === "TERRAIN"
-      ? `Proposition V${nextVersionNumber} de Léonard pour ${descriptor.name} : géométrie ${terrainGeometryStyle}, dominante ${pickedTerrainColors.fill} et reliefs spéculaires ${pickedTerrainColors.highlight}.${promptText ? ` Consigne appliquée : "${promptText}".` : ""}`
+      ? `Refonte topographique V${nextVersionNumber} (${morphLabel}) pour ${descriptor.name} : géométrie ${terrainGeometryStyle}, strates ${pickedTerrainColors.fill} et reliefs spéculaires ${pickedTerrainColors.highlight}.${promptText ? ` Consigne appliquée : "${promptText}".` : ""}`
       : descriptor.category === "TREE"
-        ? `Proposition botanique V${nextVersionNumber} de Léonard pour ${descriptor.name} : canopée ${pickedTree.style}, feuillage ${pickedTree.primary}/${pickedTree.accent} et tronc ${pickedTree.trunk}.${promptText ? ` Consigne appliquée : "${promptText}".` : ""}`
-        : `Proposition V${nextVersionNumber} de Léonard pour ${descriptor.name} : profil ${silhouetteProfile} (largeur ×${hullWidthScale}, longueur ×${hullLengthScale}), superstructure ${superstructureStyle}, armement ${turretProfile} (canon ×${barrelLengthScale}) et noyau ${energyCoreHue}.${promptText ? ` Consigne appliquée : "${promptText}".` : ""}`;
+        ? `Refonte botanique V${nextVersionNumber} (${morphLabel}) pour ${descriptor.name} : canopée ${pickedTree.style}, feuillage ${pickedTree.primary}/${pickedTree.accent} et tronc ${pickedTree.trunk}.${promptText ? ` Consigne appliquée : "${promptText}".` : ""}`
+        : `Refonte structurelle V${nextVersionNumber} (${morphLabel}) pour ${descriptor.name} : châssis ${silhouetteProfile} (×${hullWidthScale}×${hullLengthScale}), architecture ${superstructureStyle}, armement ${turretProfile} (canon ×${barrelLengthScale}) et noyau ${energyCoreHue}.${promptText ? ` Consigne appliquée : "${promptText}".` : ""}`;
 
   return {
     variantId: `v${nextVersionNumber}_leonardo_${seed.toString(16).slice(0, 6)}`,

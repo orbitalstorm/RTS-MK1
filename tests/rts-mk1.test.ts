@@ -24,12 +24,15 @@ import {
   upsertCustomMap,
 } from "../src/server/db";
 import {
+  MORPHOLOGY_LABELS,
+  VECTOR_ANIMATION_MODES,
   VECTOR_ASSET_ELEMENTS,
   getActiveBuildingVariant,
   getActiveTerrainVariantByNumericKind,
   getActiveTreeVariant,
   getActiveUnitVariant,
   getActiveVectorConfigSignature,
+  resolveVariantMorphology,
 } from "../src/shared/schemas/vector-variants";
 import { LobbyManager } from "../src/server/lobby-manager";
 import {
@@ -345,7 +348,7 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
   });
 
   it("v1.2.0 — supports Game Juice camera shake, shortest-arc 16-angle interpolation, and 2x Hi-DPI sprite scale", () => {
-    expect(APP_VERSION).toBe("1.15.0");
+    expect(APP_VERSION).toBe("1.16.0");
     expect(SPRITE_ATLAS_SCALE).toBe(2);
 
     // Zero trauma produces zero offset
@@ -1562,7 +1565,7 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
   });
 
   it("v1.11.0 — enlarges global UI typography (zero text-[8px..11px] classes) and makes construction grid icons fill 100% of each tile", () => {
-    expect(APP_VERSION).toBe("1.15.0");
+    expect(APP_VERSION).toBe("1.16.0");
 
     const srcRoot = path.join(process.cwd(), "src");
     const collectSourceFiles = (dir: string): string[] => {
@@ -1971,7 +1974,7 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
   });
 
   it("v1.15.0 (ORB-23) — synchronizes Leonardo vector graphics variants across all 41 game elements (buildings, units, terrain tiles, trees) and supports unlimited new proposals", async () => {
-    expect(APP_VERSION).toBe("1.15.0");
+    expect(APP_VERSION).toBe("1.16.0");
     expect(VECTOR_ASSET_ELEMENTS.length).toBe(41);
 
     // 1. Reset to default V1 and check initial state
@@ -2017,6 +2020,12 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
     expect(getActiveVectorConfigSignature()).not.toBe(sigBefore);
 
     // 3. Request new proposals from Leonardo repeatedly and verify strictly increasing version numbers (V5, V6...)
+    const baseMaxVer = Math.max(
+      0,
+      ...(getVectorVariantsState().catalog["UNIT:MAMMOTH_TANK"] ?? []).map(
+        (v) => v.versionNumber
+      )
+    );
     const propRes = await postVectorVariantsApiRoute(
       new Request("http://localhost:4300/api/vector-variants", {
         method: "POST",
@@ -2039,10 +2048,10 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
     };
     expect(propJson.ok).toBe(true);
     expect(propJson.newlyCreated.length).toBe(2);
-    expect(propJson.newlyCreated[0]?.versionNumber).toBe(5);
-    expect(propJson.newlyCreated[1]?.versionNumber).toBe(6);
+    expect(propJson.newlyCreated[0]?.versionNumber).toBe(baseMaxVer + 1);
+    expect(propJson.newlyCreated[1]?.versionNumber).toBe(baseMaxVer + 2);
     const v6Id = propJson.newlyCreated[1]!.variantId;
-    expect(getActiveUnitVariant("MAMMOTH_TANK").versionNumber).toBe(6);
+    expect(getActiveUnitVariant("MAMMOTH_TANK").versionNumber).toBe(baseMaxVer + 2);
 
     // 4. Verify GET /api/vector-variants returns persisted state
     const getRes = await getVectorVariantsApiRoute();
@@ -2062,5 +2071,45 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
       action: "RESET_TO_DEFAULT",
       targetScope: "ALL",
     });
+  });
+
+  it("v1.16.0 (ORB-23) — implements genuinely distinct structural morphologies (V1..V6+) and multi-mode vector animations (IDLE, MOVE, ATTACK, SPECIAL)", () => {
+    const state = getVectorVariantsState();
+
+    // 1. Every asset's built-in V1..V4 variants resolve to 4 distinct structural morphologies
+    for (const el of VECTOR_ASSET_ELEMENTS) {
+      const variants = state.catalog[el.assetKey] ?? [];
+      expect(variants.length).toBeGreaterThanOrEqual(4);
+      expect(resolveVariantMorphology(variants[0]!)).toBe("CLASSIC_MK1");
+      expect(resolveVariantMorphology(variants[1]!)).toBe("BASTION_CATAPHRACT");
+      expect(resolveVariantMorphology(variants[2]!)).toBe("TOKAMAK_MAGLEV");
+      expect(resolveVariantMorphology(variants[3]!)).toBe("STEALTH_DELTA_DRONE");
+
+      for (const v of variants.slice(0, 4)) {
+        const morph = resolveVariantMorphology(v);
+        expect(MORPHOLOGY_LABELS[morph].length).toBeGreaterThan(8);
+      }
+    }
+
+    // 2. Verify all 4 animation modes (IDLE, MOVE, ATTACK, SPECIAL) are defined
+    expect(VECTOR_ANIMATION_MODES.map((m) => m.id)).toEqual([
+      "IDLE",
+      "MOVE",
+      "ATTACK",
+      "SPECIAL",
+    ]);
+
+    // 3. Verify dedicated leonardo-morphologies module implements distinct silhouettes and animation effects
+    const morphSrc = fs.readFileSync(
+      path.resolve(__dirname, "../src/renderer/generator/leonardo-morphologies.ts"),
+      "utf8"
+    );
+    expect(morphSrc).toContain("export function drawDistinctTerrainTileMorphology");
+    expect(morphSrc).toContain("export function drawDistinctTreeMorphology");
+    expect(morphSrc).toContain("export function drawDistinctBuildingMorphology");
+    expect(morphSrc).toContain("export function drawDistinctUnitBodyMorphology");
+    expect(morphSrc).toContain("export function drawDistinctUnitTurretMorphology");
+    expect(morphSrc).toContain("export function drawBuildingAnimationEffects");
+    expect(morphSrc).toContain("export function drawUnitAnimationEffects");
   });
 });

@@ -2,6 +2,16 @@
 
 All notable changes to **RTS-MK1** (`https://rts-mk1.orbital8.cloud`) follow strict non-reusable `v1.x.y` versioning.
 
+## [v1.16.0] — 2026-10-29
+
+### Added & Changed
+- **Radically Distinct Vector Variant Morphologies & Multi-Mode Vector Animations (`src/renderer/generator/leonardo-morphologies.ts`, `src/renderer/generator/leonardo-vector-art.ts`, `src/shared/schemas/vector-variants.ts`, `src/components/hud/leonardo-icons.tsx`, `src/server/db/index.ts`) — ORB-23**:
+  - Replaced thin decorative overlays with **6 complete, self-contained structural morphologies** (`CLASSIC_MK1`, `BASTION_CATAPHRACT`, `TOKAMAK_MAGLEV`, `STEALTH_DELTA_DRONE`, `MECH_CATAMARAN`, `ZIGGURAT_HEX_SWARM`) across all 41 game elements:
+    - **Buildings**: V2 Octagonal Fortress Citadel with 4 corner pillbox bastions; V3 Circular Tokamak Magnetic Ring Platform with 6 radial coils & spinning plasma core; V4 45°-rotated F-117 Stealth Diamond Complex with swept chevron wings; V5 Twin-Hull Catamaran Complex with central plasma canal & skybridge; V6+ 3-Pod Interlocking Hexagonal Triad.
+    - **Units**: Infantry squads evolve between V2 Exo-Juggernauts with riot shields, V3 Winged Jump-Jet Cyber-Troopers, V4 Spec-Ops with orbiting Tri-Rotor Drone, and V5+ 2 Heavy Bipedal Combat Exo-Mechs; Vehicles evolve between V2 Quad-Track Cataphract with front V-Dozer plow & hexagonal twin-cannon/rocket turret, V3 Trackless Mag-Lev Hover-Tank on 4 glowing ion thruster pods & split-rail railgun, V4 Arrowhead Delta 8×8 wheeled striker & unmanned diamond turret, and V5+ 4-Legged Articulated Spider/Siege Walker Mech.
+    - **Terrain Tiles & Trees**: Hexagonal basalt columns, Carrier helipad deck, Bioluminescent ley-line meadow, Mag-Lev induction pads, Open plasma geodes, Whirlpool vortices, Multi-trunk ancient groves, Crystalline prism spires with orbiting spores, and Weeping autumn bonsai.
+  - Added full **Multi-Mode Vector Animation (`IDLE`, `MOVE`, `ATTACK`, `SPECIAL`)** support (`VectorAnimationParams`) across buildings, units, turrets, terrain tiles, and trees.
+
 ## [v1.15.0] — 2026-10-29
 
 ### Added & Changed
