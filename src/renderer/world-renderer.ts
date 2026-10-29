@@ -811,12 +811,12 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
       } else if (isSelected) {
         drawHealthBar(ctx, px + 2, py - 8, bw - 4, 4, ent.hp, ent.maxHp);
         ctx.save();
-        ctx.font = "bold 9px monospace";
+        ctx.font = "bold 11px monospace";
         ctx.textAlign = "center";
-        ctx.fillStyle = "rgba(9, 13, 22, 0.88)";
-        ctx.fillRect(px - 4, py - 20, bw + 8, 11);
-        ctx.fillStyle = "#e2e8f0";
-        ctx.fillText(`${Math.ceil(ent.hp)}/${ent.maxHp}`, px + bw * 0.5, py - 12);
+        ctx.fillStyle = "rgba(9, 13, 22, 0.92)";
+        ctx.fillRect(px - 6, py - 23, bw + 12, 14);
+        ctx.fillStyle = "#f8fafc";
+        ctx.fillText(`${Math.ceil(ent.hp)}/${ent.maxHp}`, px + bw * 0.5, py - 13);
         ctx.restore();
       }
 
@@ -1080,20 +1080,20 @@ export function renderTacticalWorld(input: WorldRenderInput): void {
       : placementPreview.buildingKind === "SILVER_MINE"
         ? "REQUIS : ROCHER ARGENTÉ 2×2 INTÉGRAL"
         : "REQUIS : DALLE BÉTON LIBRE PRÈS DE LA BASE";
-    ctx.font = "bold 9px monospace";
+    ctx.font = "bold 11px monospace";
     ctx.textAlign = "center";
-    const boxW = Math.max(bw + 16, Math.max(labelText.length, subText.length) * 5.6 + 12);
+    const boxW = Math.max(bw + 20, Math.max(labelText.length, subText.length) * 6.8 + 16);
     const boxX = px + bw * 0.5 - boxW * 0.5;
-    const boxY = py - 26;
-    ctx.fillStyle = "rgba(9, 13, 22, 0.9)";
-    ctx.fillRect(boxX, boxY, boxW, 22);
+    const boxY = py - 32;
+    ctx.fillStyle = "rgba(9, 13, 22, 0.92)";
+    ctx.fillRect(boxX, boxY, boxW, 27);
     ctx.strokeStyle = placementPreview.valid ? "#22c55e" : "#ef4444";
-    ctx.lineWidth = 1.2;
-    ctx.strokeRect(boxX, boxY, boxW, 22);
+    ctx.lineWidth = 1.4;
+    ctx.strokeRect(boxX, boxY, boxW, 27);
     ctx.fillStyle = "#f8fafc";
-    ctx.fillText(labelText, px + bw * 0.5, boxY + 9);
+    ctx.fillText(labelText, px + bw * 0.5, boxY + 11);
     ctx.fillStyle = placementPreview.valid ? "#4ade80" : "#fca5a5";
-    ctx.fillText(subText, px + bw * 0.5, boxY + 19);
+    ctx.fillText(subText, px + bw * 0.5, boxY + 23);
     ctx.restore();
 
     if (spec.attackRange > 0) {
@@ -1139,7 +1139,8 @@ function renderSmoothFogAndShroud(
 
   const renderSmoothMaskPass = (
     isMasked: (tx: number, ty: number) => boolean,
-    fillStyle: string
+    fillStyle: string,
+    overfillPx = 0
   ): void => {
     ctx.fillStyle = fillStyle;
     for (let ty = bounds.minY; ty <= bounds.maxY; ty++) {
@@ -1158,7 +1159,12 @@ function renderSmoothFogAndShroud(
           const rBR = !mS && !mE ? r : 0;
           const rBL = !mS && !mW ? r : 0;
           if (rTL === 0 && rTR === 0 && rBR === 0 && rBL === 0) {
-            ctx.fillRect(px, py, s, s);
+            ctx.fillRect(
+              px - overfillPx,
+              py - overfillPx,
+              s + overfillPx * 2,
+              s + overfillPx * 2
+            );
           } else {
             traceRoundedTilePath(ctx, px, py, s, rTL, rTR, rBR, rBL);
             ctx.fill();
@@ -1206,16 +1212,24 @@ function renderSmoothFogAndShroud(
     tx >= 0 && ty >= 0 && tx < MAP_WIDTH_TILES && ty < MAP_HEIGHT_TILES;
 
   // Pass 1: Fog of War (explored but outside current sight)
-  renderSmoothMaskPass((tx, ty) => {
-    if (!inBounds(tx, ty)) return true;
-    return !visibleCells.has(ty * MAP_WIDTH_TILES + tx);
-  }, "rgba(7, 10, 18, 0.56)");
+  renderSmoothMaskPass(
+    (tx, ty) => {
+      if (!inBounds(tx, ty)) return true;
+      return !visibleCells.has(ty * MAP_WIDTH_TILES + tx);
+    },
+    "rgba(7, 10, 18, 0.56)",
+    0
+  );
 
   // Pass 2: Unexplored Shroud (completely undiscovered map area)
-  renderSmoothMaskPass((tx, ty) => {
-    if (!inBounds(tx, ty)) return true;
-    return !exploredCells.has(ty * MAP_WIDTH_TILES + tx);
-  }, "#040609");
+  renderSmoothMaskPass(
+    (tx, ty) => {
+      if (!inBounds(tx, ty)) return true;
+      return !exploredCells.has(ty * MAP_WIDTH_TILES + tx);
+    },
+    "#040609",
+    0.5
+  );
 }
 
 /**

@@ -299,13 +299,13 @@ export function renderMinimapRadar(input: MinimapRenderInput): void {
       ctx.stroke();
     }
 
-    ctx.fillStyle = lowPower ? "#ef4444" : "#94a3b8";
-    ctx.font = "bold 11px monospace";
+    ctx.fillStyle = lowPower ? "#ef4444" : "#cbd5e1";
+    ctx.font = "bold 14px monospace";
     ctx.textAlign = "center";
     ctx.fillText(
       lowPower ? "ÉNERGIE FAIBLE — RADAR COUPÉ" : "DÔME RADAR REQUIS",
       width * 0.5,
-      height * 0.5
+      height * 0.5 + 4
     );
     ctx.restore();
     return;

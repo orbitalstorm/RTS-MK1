@@ -9,7 +9,7 @@ export function cn(...inputs: ClassValue[]): string {
 }
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 rounded border text-xs font-semibold uppercase tracking-wider transition-colors focus-visible:outline-none disabled:pointer-events-none disabled:opacity-45",
+  "inline-flex items-center justify-center gap-2 rounded border text-xs sm:text-sm font-bold uppercase tracking-wider transition-colors focus-visible:outline-none disabled:pointer-events-none disabled:opacity-45",
   {
     variants: {
       variant: {
@@ -20,12 +20,12 @@ const buttonVariants = cva(
         danger:
           "border-red-500/60 bg-red-500/20 text-red-200 hover:bg-red-500/30",
         ghost:
-          "border-slate-700 bg-slate-900/80 text-slate-300 hover:bg-slate-800",
+          "border-slate-700 bg-slate-900/80 text-slate-200 hover:bg-slate-800",
       },
       size: {
-        default: "h-9 px-3.5 py-1.5",
-        sm: "h-7 px-2.5 py-1 text-[11px]",
-        lg: "h-10 px-5 py-2 text-sm",
+        default: "h-10 px-4 py-2 text-xs sm:text-sm",
+        sm: "h-8 px-3 py-1.5 text-xs",
+        lg: "h-12 px-6 py-2.5 text-sm sm:text-base",
       },
     },
     defaultVariants: {
@@ -77,7 +77,7 @@ export function Badge({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] font-mono uppercase tracking-wider",
+        "inline-flex items-center gap-1.5 rounded border px-2.5 py-0.5 text-xs font-mono font-bold uppercase tracking-wider",
         className
       )}
       {...props}
@@ -137,7 +137,7 @@ export function DiscretizedProgressBar({
   return (
     <div
       className={cn(
-        "h-2 w-full overflow-hidden rounded bg-slate-900 border border-slate-800",
+        "h-2.5 w-full overflow-hidden rounded bg-slate-900 border border-slate-800",
         className
       )}
     >

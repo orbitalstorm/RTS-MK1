@@ -154,7 +154,7 @@ export const FactionVectorEmblem = React.memo(function FactionVectorEmblem({
 export const ProductionItemVectorIcon = React.memo(function ProductionItemVectorIcon({
   itemKind,
   faction,
-  className = "w-12 h-12",
+  className = "h-full w-full",
 }: {
   itemKind: BuildingKind | UnitKind;
   faction: FactionId;
@@ -168,7 +168,8 @@ export const ProductionItemVectorIcon = React.memo(function ProductionItemVector
 
   return (
     <svg
-      viewBox="0 0 64 64"
+      viewBox="4 4 56 56"
+      preserveAspectRatio="xMidYMid meet"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       className={className}
@@ -187,18 +188,23 @@ export const ProductionItemVectorIcon = React.memo(function ProductionItemVector
 
       {/* LAYER 1: BASE SHADOW & TACTICAL PLATE */}
       <g data-layer="base-shadow">
-        <polygon
-          points="10,6 54,6 58,10 58,54 54,58 10,58 6,54 6,10"
+        <rect
+          x="4"
+          y="4"
+          width="56"
+          height="56"
+          rx="3"
           fill="#090d16"
           stroke="#1e293b"
-          strokeWidth="1.8"
+          strokeWidth="1.5"
         />
-        <polyline points="8,18 8,8 18,8" fill="none" stroke={pColor} strokeWidth="2" />
-        <polyline points="46,8 56,8 56,18" fill="none" stroke={pColor} strokeWidth="2" />
-        <polyline points="8,46 8,56 18,56" fill="none" stroke={pColor} strokeWidth="2" />
-        <polyline points="46,56 56,56 56,46" fill="none" stroke={pColor} strokeWidth="2" />
+        <polyline points="6,16 6,6 16,6" fill="none" stroke={pColor} strokeWidth="2.2" />
+        <polyline points="48,6 58,6 58,16" fill="none" stroke={pColor} strokeWidth="2.2" />
+        <polyline points="6,48 6,58 16,58" fill="none" stroke={pColor} strokeWidth="2.2" />
+        <polyline points="48,58 58,58 58,48" fill="none" stroke={pColor} strokeWidth="2.2" />
       </g>
 
+      <g transform="translate(32 29) scale(1.16) translate(-32 -32)">
       {/* LAYER 2: MAIN BODY & SILHOUETTE */}
       <g data-layer="main-body">
         {itemKind === "CONSTRUCTION_YARD" && (
@@ -619,6 +625,7 @@ export const ProductionItemVectorIcon = React.memo(function ProductionItemVector
           strokeWidth="1"
           opacity="0.35"
         />
+      </g>
       </g>
     </svg>
   );

@@ -206,13 +206,14 @@ export default function GameMatchPage() {
   const [atlasProgress, setAtlasProgress] = useState(0);
   const [atlasStage, setAtlasStage] = useState("Initialisation OffscreenCanvas...");
   const [chatInput, setChatInput] = useState("");
-  const [zoomLevel, setZoomLevel] = useState<number>(1);
+  const [zoomLevel, setZoomLevel] = useState<number>(1.5);
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(true);
   const [touchMode, setTouchMode] = useState<TouchInteractionMode>("AUTO");
 
   const worldCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const minimapCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const cameraRef = useRef<TacticalCamera>(new TacticalCamera());
+  const centeredSeedRef = useRef<number>(0);
   const vfxManagerRef = useRef<BattlefieldVfxManager>(new BattlefieldVfxManager());
   const lastFrameTimeRef = useRef<number>(performance.now());
   const lastProcessedProjectileTickRef = useRef<number>(-1);
@@ -278,18 +279,24 @@ export default function GameMatchPage() {
     }
   }, [lobby, playerId, sendMessage]);
 
-  // Center camera on the player's Construction Yard when the procedural map snapshot arrives
+  // Center camera on the player's Construction Yard when the procedural map snapshot and canvas are ready
   useEffect(() => {
     if (!mapSeed) return;
     const st = useRtsGameStore.getState();
     for (const ent of st.currEntities.values()) {
       if (ent.ownerId === playerId && ent.kind === "CONSTRUCTION_YARD") {
+        if (cameraRef.current.zoom === 1 && zoomLevel !== 1) {
+          cameraRef.current.setZoom(zoomLevel);
+        }
         cameraRef.current.centerOnTile(ent.x + 2, ent.y + 2);
         hoverTileRef.current = { tileX: ent.x + 2, tileY: ent.y + 2 };
+        if (atlas) {
+          centeredSeedRef.current = mapSeed;
+        }
         break;
       }
     }
-  }, [mapSeed, playerId]);
+  }, [mapSeed, playerId, atlas, zoomLevel]);
 
   // 2. Generate Hybrid Vector/Bitmap OffscreenCanvas -> ImageBitmap Sprite Atlas in async chunks
   useEffect(() => {
@@ -375,6 +382,17 @@ export default function GameMatchPage() {
         canvas.width = nextW;
         canvas.height = nextH;
         cameraRef.current.setViewport(nextW, nextH);
+        const st = useRtsGameStore.getState();
+        if (st.mapSeed > 0 && centeredSeedRef.current !== st.mapSeed) {
+          for (const ent of st.currEntities.values()) {
+            if (ent.ownerId === st.playerId && ent.kind === "CONSTRUCTION_YARD") {
+              cameraRef.current.centerOnTile(ent.x + 2, ent.y + 2);
+              hoverTileRef.current = { tileX: ent.x + 2, tileY: ent.y + 2 };
+              centeredSeedRef.current = st.mapSeed;
+              break;
+            }
+          }
+        }
       }
     };
 
@@ -1403,14 +1421,14 @@ export default function GameMatchPage() {
       <div className="flex min-h-screen items-center justify-center bg-obsidian p-6 font-mono text-slate-100">
         <Card className="w-full max-w-lg p-6 space-y-4">
           <div className="flex items-center gap-3 text-amber-400">
-            <Layers className="h-5 w-5" />
-            <h2 className="text-sm font-bold uppercase tracking-wider">
+            <Layers className="h-6 w-6 shrink-0" />
+            <h2 className="text-base sm:text-lg font-bold uppercase tracking-wider">
               Génération Procédurale OffscreenCanvas &rarr; ImageBitmap
             </h2>
           </div>
-          <p className="text-xs text-slate-400">{atlasStage}</p>
+          <p className="text-xs sm:text-sm text-slate-300">{atlasStage}</p>
           <DiscretizedProgressBar ratio={atlasProgress / 100} tone="amber" />
-          <div className="flex justify-between text-xs text-slate-400">
+          <div className="flex justify-between text-xs sm:text-sm text-slate-300">
             <span>Rastérisation Vectorielle / Bitmap 16-Angles</span>
             <span className="font-bold text-amber-300">{atlasProgress}%</span>
           </div>
@@ -1428,7 +1446,7 @@ export default function GameMatchPage() {
             <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
               <div>
                 <div className="flex items-center gap-2">
-                  <h1 className="text-lg font-bold text-amber-400">{lobby.name}</h1>
+                  <h1 className="text-lg sm:text-xl font-bold text-amber-400">{lobby.name}</h1>
                   <Badge
                     className={
                       lobby.status === "QUEUED"
@@ -1439,7 +1457,7 @@ export default function GameMatchPage() {
                     {lobby.status}
                   </Badge>
                 </div>
-                <p className="mt-1 text-xs text-slate-400">
+                <p className="mt-1 text-xs sm:text-sm text-slate-300">
                   Identifiant Salon : {lobby.lobbyId} • Atlas GPU ImageBitmap chargé (100%)
                 </p>
               </div>
@@ -1468,7 +1486,7 @@ export default function GameMatchPage() {
 
             {/* Mutex Queue Banner when QUEUED */}
             {lobby.status === "QUEUED" && (
-              <div className="flex items-center justify-between rounded border border-amber-500/50 bg-amber-950/50 p-4 text-xs text-amber-200">
+              <div className="flex items-center justify-between rounded border border-amber-500/50 bg-amber-950/50 p-4 text-xs sm:text-sm text-amber-200">
                 <div className="flex items-center gap-3">
                   <Lock className="h-5 w-5 text-amber-400" />
                   <div>
@@ -1489,17 +1507,17 @@ export default function GameMatchPage() {
 
             {/* Players Table & Faction Switcher */}
             <div className="space-y-2">
-              <h3 className="text-xs font-bold uppercase text-slate-400">
+              <h3 className="text-xs sm:text-sm font-bold uppercase text-slate-300">
                 Commandants Présents ({lobby.players.length}/{lobby.maxPlayers})
               </h3>
               <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
                 {lobby.players.map((p) => (
                   <div
                     key={p.playerId}
-                    className="flex items-center justify-between rounded border border-slate-800 bg-slate-900/70 p-3 text-xs"
+                    className="flex items-center justify-between rounded border border-slate-800 bg-slate-900/70 p-3 text-xs sm:text-sm"
                   >
                     <div className="flex items-center gap-2">
-                      <FactionVectorEmblem faction={p.faction} className="h-5 w-5 shrink-0" />
+                      <FactionVectorEmblem faction={p.faction} className="h-6 w-6 shrink-0" />
                       <ShieldCheck className="h-4 w-4 text-emerald-400" />
                       <span className="font-bold">{p.commanderName}</span>
                       {p.isAi && (
@@ -1524,8 +1542,8 @@ export default function GameMatchPage() {
                           }
                           className={
                             p.faction === fid
-                              ? `rounded border px-2 py-0.5 text-[10px] font-bold ${FACTIONS[fid].badgeClass}`
-                              : "rounded border border-slate-800 px-2 py-0.5 text-[10px] text-slate-500"
+                              ? `rounded border px-2.5 py-1 text-xs font-bold ${FACTIONS[fid].badgeClass}`
+                              : "rounded border border-slate-800 px-2.5 py-1 text-xs text-slate-400"
                           }
                         >
                           {fid}
@@ -1539,7 +1557,7 @@ export default function GameMatchPage() {
 
             {/* Lobby Chat */}
             <div className="space-y-2 border-t border-slate-800 pt-4">
-              <div className="h-40 overflow-y-auto rounded border border-slate-800 bg-slate-950 p-3 space-y-1.5 text-xs">
+              <div className="h-40 overflow-y-auto rounded border border-slate-800 bg-slate-950 p-3 space-y-1.5 text-xs sm:text-sm">
                 {lobby.chat.map((c) => (
                   <div key={c.id}>
                     <span className="font-bold text-amber-400">[{c.commanderName}]</span>{" "}
@@ -1553,7 +1571,7 @@ export default function GameMatchPage() {
                   value={chatInput}
                   onChange={(e) => setChatInput(e.target.value)}
                   placeholder="Transmettre un message tactique..."
-                  className="flex-1 rounded border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-slate-100 focus:border-amber-500 focus:outline-none"
+                  className="flex-1 rounded border border-slate-700 bg-slate-900 px-3 py-2 text-xs sm:text-sm text-slate-100 focus:border-amber-500 focus:outline-none"
                 />
                 <Button
                   size="sm"
@@ -1569,7 +1587,7 @@ export default function GameMatchPage() {
                     setChatInput("");
                   }}
                 >
-                  <Send className="h-3.5 w-3.5" />
+                  <Send className="h-4 w-4" />
                   Envoyer
                 </Button>
               </div>
@@ -1584,9 +1602,9 @@ export default function GameMatchPage() {
   return (
     <div className="flex h-dvh w-dvw flex-col overflow-hidden bg-obsidian font-mono text-slate-100 select-none">
       {/* Mobile Portrait Orientation Advisory Banner (automatically hidden in Landscape & Desktop) */}
-      <div className="flex sm:hidden portrait:flex landscape:hidden shrink-0 items-center justify-between border-b border-amber-500/40 bg-amber-950/90 px-3 py-1 text-[10px] text-amber-200">
-        <div className="flex items-center gap-1.5">
-          <Smartphone className="h-3.5 w-3.5 rotate-90 text-amber-400 shrink-0" />
+      <div className="flex sm:hidden portrait:flex landscape:hidden shrink-0 items-center justify-between border-b border-amber-500/40 bg-amber-950/90 px-3 py-1.5 text-xs text-amber-200">
+        <div className="flex items-center gap-2">
+          <Smartphone className="h-4 w-4 rotate-90 text-amber-400 shrink-0" />
           <span>Mode Paysage (Landscape) recommandé pour le commandement tactique mobile</span>
         </div>
       </div>
@@ -1594,27 +1612,27 @@ export default function GameMatchPage() {
       <div className="flex flex-1 overflow-hidden">
         {/* Main Tactical Viewport */}
         <div className="relative flex flex-1 flex-col overflow-hidden">
-          {/* Top EVA Tactical Status Strip (Compact in Mobile Landscape) */}
-          <div className="flex h-8 lg:h-10 shrink-0 items-center justify-between gap-2 border-b border-slate-800 bg-slate-950 px-2 lg:px-4 text-[11px] lg:text-xs">
-            <div className="flex min-w-0 items-center gap-1.5 text-amber-300">
-              <AlertTriangle className="h-3.5 w-3.5 lg:h-4 lg:w-4 shrink-0 text-amber-400" />
+          {/* Top EVA Tactical Status Strip */}
+          <div className="flex h-10 lg:h-12 shrink-0 items-center justify-between gap-2 border-b border-slate-800 bg-slate-950 px-3 lg:px-5 text-xs sm:text-sm lg:text-base">
+            <div className="flex min-w-0 items-center gap-2 text-amber-300">
+              <AlertTriangle className="h-4 w-4 lg:h-5 lg:w-5 shrink-0 text-amber-400" />
               <span className="truncate font-bold tracking-wider">{evaBannerText}</span>
             </div>
 
-            <div className="flex shrink-0 items-center gap-1.5">
-              <span className="hidden xl:inline text-[11px] text-slate-400">
+            <div className="flex shrink-0 items-center gap-2">
+              <span className="hidden xl:inline text-xs text-slate-300">
                 Gauche/Tap : Sélection/Poser • Droite/Tap : Ordre • Glisser/WASD : Caméra
               </span>
               <Button
                 variant="tactical"
                 size="sm"
                 onClick={handleCycleZoom}
-                className="px-2 py-0.5 text-[10px] lg:text-xs"
+                className="px-2.5 py-1 text-xs sm:text-sm"
               >
-                <ZoomIn className="h-3 w-3 lg:h-3.5 lg:w-3.5" />
+                <ZoomIn className="h-4 w-4" />
                 {zoomLevel}x
               </Button>
-              <div className="hidden sm:flex items-center gap-0.5 rounded border border-slate-800 bg-slate-900 p-0.5">
+              <div className="hidden sm:flex items-center gap-1 rounded border border-slate-800 bg-slate-900 p-1">
                 {ZOOM_LEVELS.map((z) => (
                   <button
                     key={z}
@@ -1622,8 +1640,8 @@ export default function GameMatchPage() {
                     onClick={() => handleSelectZoom(z)}
                     className={
                       Math.abs(zoomLevel - z) < 0.01
-                        ? "rounded border border-amber-400/60 bg-amber-500/25 px-1.5 py-0.5 text-[10px] font-bold text-amber-300"
-                        : "rounded px-1.5 py-0.5 text-[10px] text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+                        ? "rounded border border-amber-400/60 bg-amber-500/25 px-2 py-0.5 text-xs font-bold text-amber-300"
+                        : "rounded px-2 py-0.5 text-xs text-slate-300 hover:bg-slate-800 hover:text-slate-100"
                     }
                   >
                     {z}
@@ -1637,12 +1655,12 @@ export default function GameMatchPage() {
                   globalAudioMixer.playUiClick();
                   setSidebarOpen(!sidebarOpen);
                 }}
-                className="px-2 py-0.5 text-[10px] lg:text-xs"
+                className="px-2.5 py-1 text-xs sm:text-sm"
               >
                 {sidebarOpen ? (
-                  <PanelRightClose className="h-3.5 w-3.5" />
+                  <PanelRightClose className="h-4 w-4" />
                 ) : (
-                  <PanelRightOpen className="h-3.5 w-3.5" />
+                  <PanelRightOpen className="h-4 w-4" />
                 )}
                 <span>{sidebarOpen ? "Carte 100%" : "Menu C&C"}</span>
               </Button>
@@ -1666,8 +1684,8 @@ export default function GameMatchPage() {
             />
 
             {/* Bottom-Left Tactical Camera D-Pad & Base Centering (Mobile & Desktop) */}
-            <div className="absolute bottom-2 left-2 z-10 flex items-end gap-1.5 rounded border border-slate-800/90 bg-slate-950/85 p-1 backdrop-blur-sm">
-              <div className="grid grid-cols-3 gap-0.5">
+            <div className="absolute bottom-3 left-3 z-10 flex items-end gap-1.5 rounded border border-slate-800/90 bg-slate-950/90 p-1.5 backdrop-blur-sm">
+              <div className="grid grid-cols-3 gap-1">
                 <div />
                 <button
                   type="button"
@@ -1676,9 +1694,9 @@ export default function GameMatchPage() {
                   onPointerUp={() => stopHoldPanKey("arrowup")}
                   onPointerLeave={() => stopHoldPanKey("arrowup")}
                   onPointerCancel={() => stopHoldPanKey("arrowup")}
-                  className="flex h-7 w-7 items-center justify-center rounded border border-slate-700 bg-slate-900 text-slate-200 active:border-amber-400 active:bg-amber-500/20 active:text-amber-300"
+                  className="flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded border border-slate-700 bg-slate-900 text-slate-200 active:border-amber-400 active:bg-amber-500/20 active:text-amber-300"
                 >
-                  <ArrowUp className="h-3.5 w-3.5" />
+                  <ArrowUp className="h-4 w-4 sm:h-5 sm:w-5" />
                 </button>
                 <div />
                 <button
@@ -1688,18 +1706,18 @@ export default function GameMatchPage() {
                   onPointerUp={() => stopHoldPanKey("arrowleft")}
                   onPointerLeave={() => stopHoldPanKey("arrowleft")}
                   onPointerCancel={() => stopHoldPanKey("arrowleft")}
-                  className="flex h-7 w-7 items-center justify-center rounded border border-slate-700 bg-slate-900 text-slate-200 active:border-amber-400 active:bg-amber-500/20 active:text-amber-300"
+                  className="flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded border border-slate-700 bg-slate-900 text-slate-200 active:border-amber-400 active:bg-amber-500/20 active:text-amber-300"
                 >
-                  <ArrowLeft className="h-3.5 w-3.5" />
+                  <ArrowLeft className="h-4 w-4 sm:h-5 sm:w-5" />
                 </button>
                 <button
                   type="button"
                   aria-label="Centrer Base"
                   onClick={handleCenterOnBase}
-                  className="flex h-7 w-7 items-center justify-center rounded border border-amber-500/50 bg-amber-500/20 text-amber-300 active:bg-amber-500/40"
+                  className="flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded border border-amber-500/50 bg-amber-500/20 text-amber-300 active:bg-amber-500/40"
                   title="Centrer sur la Base"
                 >
-                  <Home className="h-3.5 w-3.5" />
+                  <Home className="h-4 w-4 sm:h-5 sm:w-5" />
                 </button>
                 <button
                   type="button"
@@ -1708,9 +1726,9 @@ export default function GameMatchPage() {
                   onPointerUp={() => stopHoldPanKey("arrowright")}
                   onPointerLeave={() => stopHoldPanKey("arrowright")}
                   onPointerCancel={() => stopHoldPanKey("arrowright")}
-                  className="flex h-7 w-7 items-center justify-center rounded border border-slate-700 bg-slate-900 text-slate-200 active:border-amber-400 active:bg-amber-500/20 active:text-amber-300"
+                  className="flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded border border-slate-700 bg-slate-900 text-slate-200 active:border-amber-400 active:bg-amber-500/20 active:text-amber-300"
                 >
-                  <ArrowRight className="h-3.5 w-3.5" />
+                  <ArrowRight className="h-4 w-4 sm:h-5 sm:w-5" />
                 </button>
                 <div />
                 <button
@@ -1720,16 +1738,16 @@ export default function GameMatchPage() {
                   onPointerUp={() => stopHoldPanKey("arrowdown")}
                   onPointerLeave={() => stopHoldPanKey("arrowdown")}
                   onPointerCancel={() => stopHoldPanKey("arrowdown")}
-                  className="flex h-7 w-7 items-center justify-center rounded border border-slate-700 bg-slate-900 text-slate-200 active:border-amber-400 active:bg-amber-500/20 active:text-amber-300"
+                  className="flex h-9 w-9 sm:h-10 sm:w-10 items-center justify-center rounded border border-slate-700 bg-slate-900 text-slate-200 active:border-amber-400 active:bg-amber-500/20 active:text-amber-300"
                 >
-                  <ArrowDown className="h-3.5 w-3.5" />
+                  <ArrowDown className="h-4 w-4 sm:h-5 sm:w-5" />
                 </button>
                 <div />
               </div>
             </div>
 
             {/* Bottom-Right Mobile Touch Command & Unit Selection Bar */}
-            <div className="absolute bottom-2 right-2 z-10 flex flex-wrap items-center gap-1 rounded border border-slate-800/90 bg-slate-950/90 p-1 backdrop-blur-sm">
+            <div className="absolute bottom-3 right-3 z-10 flex flex-wrap items-center gap-1.5 rounded border border-slate-800/90 bg-slate-950/90 p-1.5 backdrop-blur-sm">
               {(
                 [
                   { id: "AUTO", label: "Auto", icon: MousePointerClick },
@@ -1750,11 +1768,11 @@ export default function GameMatchPage() {
                     }}
                     className={
                       active
-                        ? "flex items-center gap-1 rounded border border-amber-400/70 bg-amber-500/25 px-2 py-1 text-[10px] font-bold text-amber-300"
-                        : "flex items-center gap-1 rounded border border-slate-800 bg-slate-900 px-2 py-1 text-[10px] text-slate-300 hover:bg-slate-800"
+                        ? "flex items-center gap-1.5 rounded border border-amber-400/70 bg-amber-500/25 px-3 py-1.5 text-xs sm:text-sm font-bold text-amber-300"
+                        : "flex items-center gap-1.5 rounded border border-slate-800 bg-slate-900 px-3 py-1.5 text-xs sm:text-sm text-slate-200 hover:bg-slate-800"
                     }
                   >
-                    <Icon className="h-3 w-3" />
+                    <Icon className="h-4 w-4" />
                     <span>{m.label}</span>
                   </button>
                 );
@@ -1763,13 +1781,13 @@ export default function GameMatchPage() {
               <button
                 type="button"
                 onClick={handleSelectAllCombatUnits}
-                className="flex items-center gap-1 rounded border border-emerald-500/50 bg-emerald-500/20 px-2 py-1 text-[10px] font-bold text-emerald-300 active:bg-emerald-500/35"
+                className="flex items-center gap-1.5 rounded border border-emerald-500/50 bg-emerald-500/20 px-3 py-1.5 text-xs sm:text-sm font-bold text-emerald-300 active:bg-emerald-500/35"
                 title="Sélectionner toutes les unités de combat"
               >
-                <Swords className="h-3 w-3" />
+                <Swords className="h-4 w-4" />
                 <span>Armée</span>
                 {selectedUnitCount > 0 && (
-                  <span className="rounded bg-emerald-400/30 px-1 text-[9px] text-emerald-100">
+                  <span className="rounded bg-emerald-400/30 px-1.5 py-0.5 text-xs font-extrabold text-emerald-100">
                     {selectedUnitCount}
                   </span>
                 )}
@@ -1782,10 +1800,10 @@ export default function GameMatchPage() {
                     globalAudioMixer.playUiClick();
                     setSelectedEntities(new Set());
                   }}
-                  className="flex items-center gap-0.5 rounded border border-slate-700 bg-slate-900 px-1.5 py-1 text-[10px] text-slate-300 hover:text-red-300"
+                  className="flex items-center gap-1 rounded border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-xs sm:text-sm text-slate-200 hover:text-red-300"
                   title="Désélectionner"
                 >
-                  <X className="h-3 w-3" />
+                  <X className="h-4 w-4" />
                 </button>
               )}
 
@@ -1796,9 +1814,9 @@ export default function GameMatchPage() {
                     globalAudioMixer.playUiClick();
                     setPlacementBuilding(null);
                   }}
-                  className="flex items-center gap-1 rounded border border-red-500/60 bg-red-500/20 px-2 py-1 text-[10px] font-bold text-red-300"
+                  className="flex items-center gap-1.5 rounded border border-red-500/60 bg-red-500/20 px-3 py-1.5 text-xs sm:text-sm font-bold text-red-300"
                 >
-                  <X className="h-3 w-3" />
+                  <X className="h-4 w-4" />
                   <span>Annuler Pose</span>
                 </button>
               )}
@@ -1808,11 +1826,11 @@ export default function GameMatchPage() {
             {winnerPlayerId && (
               <div className="absolute inset-0 z-20 flex items-center justify-center bg-slate-950/80 p-4 sm:p-6">
                 <Card className="max-w-md p-5 sm:p-6 text-center space-y-4">
-                  <Trophy className="mx-auto h-10 w-10 text-amber-400" />
-                  <h2 className="text-xl font-bold uppercase tracking-widest text-amber-400">
+                  <Trophy className="mx-auto h-12 w-12 text-amber-400" />
+                  <h2 className="text-xl sm:text-2xl font-bold uppercase tracking-widest text-amber-400">
                     {winnerPlayerId === playerId ? "VICTOIRE TOTALE !" : "FIN DE L'OPÉRATION"}
                   </h2>
-                  <p className="text-xs text-slate-300">
+                  <p className="text-sm text-slate-300">
                     Le verrou de salon unique a été libéré proprement et les statistiques du commandant ont été enregistrées.
                   </p>
                   <Button variant="tactical" onClick={handleLeave} className="w-full">

@@ -2,6 +2,20 @@
 
 All notable changes to **RTS-MK1** (`https://rts-mk1.orbital8.cloud`) follow strict non-reusable `v1.x.y` versioning.
 
+## [v1.11.0] — 2026-10-29
+
+### Added & Changed
+- **Screenshot UI Diagnosis & Global Legibility Overhaul (`src/components/hud/classic-sidebar-hud.tsx`, `src/components/hud/leonardo-icons.tsx`, `src/components/ui/primitives.tsx`, `src/app/game/[lobbyId]/page.tsx`, `src/components/lobby/portal-command-center.tsx`, `src/renderer/minimap-renderer.ts`, `src/renderer/world-renderer.ts`)**:
+  - **Full-Tile Construction Menu Icons (`100%` of Tile Area)**:
+    - Replaced the small `h-10 w-10 sm:h-11 sm:w-11` (`44×44 px`) centered icons in `data-testid="construction-grid"` with a full-bleed `data-testid="grid-icon-full-<KIND>"` container (`absolute inset-0`) and `ProductionItemVectorIcon` (`className="h-full w-full"`, tight `viewBox="4 4 56 56"`, `scale(1.16)` internal artwork) so every building, defense, infantry, and vehicle icon fills the entire `aspect-square` tile and is immediately recognizable at a glance.
+    - Positioned the cost badge (`text-xs sm:text-sm font-extrabold`), active state/hotkey badge, and bottom item name strip (`bg-slate-950/90 text-xs sm:text-sm font-bold`) as high-contrast tactical overlays along the top and bottom edges of each tile.
+  - **Global Typography Upscaling & Elimination of Tiny `8px–11px` Text Classes**:
+    - Removed all 49 occurrences of `text-[8px]`, `text-[9px]`, `text-[10px]`, and `text-[11px]` across `src/`, upgrading all HUD, battlefield, and portal texts to readable `text-xs`, `text-sm`, `text-base`, and `text-lg` scales (`CR` and `ARGENT` counters at `text-base sm:text-lg font-extrabold`, `ÉNERGIE` bar, radar header & `bold 14px monospace` canvas status text, category tabs `py-2 text-xs sm:text-sm`, subcategory filters, hover inspector `sm:w-80 lg:w-96`, top EVA status strip `h-10 lg:h-12 text-xs sm:text-sm lg:text-base`, camera D-Pad `h-9 w-9 sm:h-10 sm:w-10`, bottom-right tactical command bar `px-3 py-1.5 text-xs sm:text-sm font-bold`, and Canvas blueprint/HP labels `bold 11px monospace`).
+  - **Wider Tactical Sidebar & Improved Initial Battlefield View (`1.5×` Zoom + Base Auto-Centering + Seamless Shroud)**:
+    - Expanded `ClassicSidebarHud` width from `w-64 sm:w-72 lg:w-80` (`320 px`) to `w-80 sm:w-96 lg:w-[400px] xl:w-[432px]` and enlarged the Radar canvas (`h-36 sm:h-40 lg:h-44`).
+    - Set the default battlefield camera zoom in `GameMatchPage` to `1.5×` and ensured automatic camera centering on the player's `CONSTRUCTION_YARD` executes both after `atlas` loads and inside the `ResizeObserver` when the canvas acquires its real viewport dimensions.
+    - Eliminated 1px subpixel anti-aliasing grid seams in unexplored shroud (`renderSmoothFogAndShroud` Pass 2 with `overfillPx = 0.5`).
+
 ## [v1.10.0] — 2026-10-28
 
 ### Added & Changed

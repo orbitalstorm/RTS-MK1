@@ -115,14 +115,14 @@ export function PortalCommandCenter() {
   return (
     <div className="flex min-h-dvh flex-col bg-obsidian text-slate-100 font-mono">
       {/* Minimal Tactical Header */}
-      <header className="border-b border-slate-800 bg-tactical px-4 py-3">
+      <header className="border-b border-slate-800 bg-tactical px-4 py-3.5">
         <div className="mx-auto flex max-w-5xl items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded border border-amber-500/50 bg-amber-500/10 text-amber-400">
-              <Swords className="h-4 w-4" />
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded border border-amber-500/50 bg-amber-500/10 text-amber-400">
+              <Swords className="h-5 w-5" />
             </div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-sm sm:text-base font-bold tracking-widest text-amber-400">
+            <div className="flex items-center gap-2.5">
+              <h1 className="text-base sm:text-lg font-bold tracking-widest text-amber-400">
                 RTS-MK1
               </h1>
               <Badge className="border-emerald-500/40 bg-emerald-500/15 text-emerald-300">
@@ -138,7 +138,7 @@ export function PortalCommandCenter() {
                 : "border-amber-500/50 bg-amber-500/15 text-amber-300"
             }
           >
-            <Radio className="h-3 w-3" />
+            <Radio className="h-3.5 w-3.5" />
             {wsConnected ? "SERVEUR PRÊT" : "CONNEXION..."}
           </Badge>
         </div>
@@ -147,21 +147,21 @@ export function PortalCommandCenter() {
       {/* Centered Quick-Launch Clan Selection Screen */}
       <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col justify-center p-4 sm:p-6">
         <Card className="p-5 sm:p-8 space-y-6 border-slate-800 bg-slate-950/90">
-          <div className="text-center space-y-1.5">
-            <div className="inline-flex items-center gap-2 rounded-full border border-amber-500/40 bg-amber-500/10 px-3 py-1 text-[11px] font-bold uppercase tracking-widest text-amber-300">
-              <Shield className="h-3.5 w-3.5" />
+          <div className="text-center space-y-2">
+            <div className="inline-flex items-center gap-2 rounded-full border border-amber-500/40 bg-amber-500/10 px-3.5 py-1 text-xs font-bold uppercase tracking-widest text-amber-300">
+              <Shield className="h-4 w-4" />
               <span>Déploiement Tactique Immédiat</span>
             </div>
-            <h2 className="text-lg sm:text-2xl font-bold uppercase tracking-wider text-slate-100">
+            <h2 className="text-xl sm:text-3xl font-bold uppercase tracking-wider text-slate-100">
               Sélectionnez votre Clan
             </h2>
-            <p className="text-xs text-slate-400">
+            <p className="text-xs sm:text-sm text-slate-300">
               Choisissez votre faction d&apos;allégeance et lancez directement l&apos;opération sur le terrain.
             </p>
           </div>
 
           {lastError && (
-            <div className="rounded border border-red-500/50 bg-red-950/50 px-3 py-2 text-center text-xs text-red-200">
+            <div className="rounded border border-red-500/50 bg-red-950/50 px-3 py-2 text-center text-xs sm:text-sm text-red-200">
               {lastError}
             </div>
           )}
@@ -189,39 +189,39 @@ export function PortalCommandCenter() {
                   onClick={() => handleSelectClan(fid)}
                   className={
                     active
-                      ? `group relative flex flex-col items-center rounded-md border-2 p-5 text-center transition shadow-lg ${spec.badgeClass}`
-                      : "group relative flex flex-col items-center rounded-md border border-slate-800 bg-slate-900/70 p-5 text-center text-slate-300 transition hover:border-slate-600 hover:bg-slate-900"
+                      ? `group relative flex flex-col items-center rounded-md border-2 p-6 text-center transition shadow-lg ${spec.badgeClass}`
+                      : "group relative flex flex-col items-center rounded-md border border-slate-800 bg-slate-900/70 p-6 text-center text-slate-300 transition hover:border-slate-600 hover:bg-slate-900"
                   }
                 >
-                  <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-md border border-slate-800 bg-slate-950 p-2 shadow-inner">
+                  <div className="mb-3 flex h-20 w-20 items-center justify-center rounded-md border border-slate-800 bg-slate-950 p-2 shadow-inner">
                     <FactionVectorEmblem
                       faction={fid}
-                      className="h-12 w-12 transition-transform duration-150 group-hover:scale-110"
+                      className="h-16 w-16 transition-transform duration-150 group-hover:scale-110"
                     />
                   </div>
 
-                  <div className="text-sm font-bold uppercase tracking-wider text-slate-100">
+                  <div className="text-base sm:text-lg font-bold uppercase tracking-wider text-slate-100">
                     {spec.name}
                   </div>
 
-                  <p className="mt-1.5 text-xs text-slate-300 opacity-90">
+                  <p className="mt-1.5 text-xs sm:text-sm text-slate-200 opacity-95">
                     {spec.motto}
                   </p>
 
                   <div className="mt-4 w-full border-t border-slate-800/80 pt-3">
-                    <span className="inline-block rounded border border-slate-700/80 bg-slate-950/80 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-slate-200">
+                    <span className="inline-block rounded border border-slate-700/80 bg-slate-950/80 px-3 py-1 text-xs font-bold uppercase tracking-wider text-slate-100">
                       {bonusLabel}
                     </span>
                   </div>
 
-                  <div className="mt-3 flex items-center justify-center gap-1 text-[11px] font-bold uppercase">
+                  <div className="mt-3 flex items-center justify-center gap-1.5 text-xs sm:text-sm font-bold uppercase">
                     {active ? (
-                      <span className="inline-flex items-center gap-1 text-emerald-300">
-                        <CheckCircle2 className="h-3.5 w-3.5" />
+                      <span className="inline-flex items-center gap-1.5 text-emerald-300">
+                        <CheckCircle2 className="h-4 w-4" />
                         Clan Sélectionné
                       </span>
                     ) : (
-                      <span className="text-slate-500 group-hover:text-slate-300">
+                      <span className="text-slate-400 group-hover:text-slate-200">
                         Choisir {fid}
                       </span>
                     )}
@@ -236,7 +236,7 @@ export function PortalCommandCenter() {
             <div className="flex items-center gap-2.5 sm:max-w-xs w-full">
               <label
                 htmlFor="commander-callsign-input"
-                className="shrink-0 text-xs uppercase text-slate-400"
+                className="shrink-0 text-xs sm:text-sm font-bold uppercase text-slate-300"
               >
                 Commandant :
               </label>
@@ -247,7 +247,7 @@ export function PortalCommandCenter() {
                 onChange={(e) => setNameInput(e.target.value)}
                 maxLength={32}
                 placeholder="Indicatif..."
-                className="w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-xs text-slate-100 focus:border-amber-500 focus:outline-none"
+                className="w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-xs sm:text-sm text-slate-100 focus:border-amber-500 focus:outline-none"
               />
             </div>
 
@@ -257,9 +257,9 @@ export function PortalCommandCenter() {
               data-testid="quick-launch-button"
               disabled={isLaunching}
               onClick={handleLaunchMatch}
-              className="w-full sm:w-auto sm:min-w-64 text-sm font-bold"
+              className="w-full sm:w-auto sm:min-w-64 text-sm sm:text-base font-bold"
             >
-              <Play className="h-4 w-4" />
+              <Play className="h-5 w-5" />
               {isLaunching
                 ? "DÉPLOIEMENT EN COURS..."
                 : `Lancer la Partie (${selectedFaction})`}

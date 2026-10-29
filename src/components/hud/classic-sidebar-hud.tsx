@@ -250,49 +250,49 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
     : "";
 
   return (
-    <aside className="relative flex h-full w-64 sm:w-72 lg:w-80 shrink-0 flex-col border-l border-slate-800 bg-tactical text-slate-100 select-none font-mono">
+    <aside className="relative flex h-full w-80 sm:w-96 lg:w-[400px] xl:w-[432px] shrink-0 flex-col border-l border-slate-800 bg-tactical text-slate-100 select-none font-mono">
       {/* Floating Tactical Hover Menu (Appears when hovering any grid item or tool pictogram) */}
       {hoveredItem && (
         <div
           data-testid="construction-hover-menu"
-          className="pointer-events-none fixed bottom-3 left-3 right-3 z-40 rounded-md border border-amber-500/60 bg-slate-950/95 p-3 shadow-2xl backdrop-blur-md sm:absolute sm:bottom-auto sm:left-auto sm:right-full sm:top-24 sm:mr-2.5 sm:w-72"
+          className="pointer-events-none fixed bottom-3 left-3 right-3 z-40 rounded-md border border-amber-500/70 bg-slate-950/95 p-3.5 sm:p-4 shadow-2xl backdrop-blur-md sm:absolute sm:bottom-auto sm:left-auto sm:right-full sm:top-24 sm:mr-3 sm:w-80 lg:w-96"
         >
-          <div className="flex items-start gap-2.5 border-b border-slate-800 pb-2">
+          <div className="flex items-start gap-3 border-b border-slate-800 pb-2.5">
             <ProductionItemVectorIcon
               itemKind={hoveredItem.kind}
               faction={activeFaction}
-              className="h-11 w-11 shrink-0 rounded border border-slate-700 bg-slate-900 p-1"
+              className="h-16 w-16 shrink-0 rounded border border-slate-700 bg-slate-900 p-0.5"
             />
             <div className="min-w-0 flex-1">
-              <div className="flex items-center justify-between gap-1">
-                <span className="truncate text-xs font-bold text-amber-300">
+              <div className="flex items-center justify-between gap-1.5">
+                <span className="truncate text-sm sm:text-base font-bold text-amber-300">
                   {hoveredItem.name}
                 </span>
-                <Badge className="shrink-0 border-amber-500/50 bg-amber-500/15 text-amber-200">
+                <Badge className="shrink-0 border-amber-500/60 bg-amber-500/20 text-xs sm:text-sm text-amber-200">
                   ${hoveredItem.cost}
                 </Badge>
               </div>
-              <div className="mt-0.5 flex items-center justify-between text-[10px] text-slate-400">
+              <div className="mt-1 flex items-center justify-between text-xs font-medium text-slate-300">
                 <span className="truncate">{hoveredSubcategoryLabel}</span>
                 <span>{(hoveredItem.buildTimeTicks / 20).toFixed(1)}s</span>
               </div>
             </div>
           </div>
 
-          <p className="mt-2 text-[11px] leading-snug text-slate-200">
+          <p className="mt-2.5 text-xs sm:text-sm leading-relaxed text-slate-200">
             {hoveredItem.description}
           </p>
 
           {/* Tactical Stats Matrix */}
-          <div className="mt-2 grid grid-cols-2 gap-1 text-[10px]">
-            <div className="rounded border border-slate-800 bg-slate-900/90 px-2 py-1 text-slate-300">
+          <div className="mt-2.5 grid grid-cols-2 gap-1.5 text-xs">
+            <div className="rounded border border-slate-800 bg-slate-900/90 px-2.5 py-1.5 text-slate-300">
               Structure : <span className="font-bold text-slate-100">{hoveredItem.maxHp} PV</span>
             </div>
-            <div className="rounded border border-slate-800 bg-slate-900/90 px-2 py-1 text-slate-300">
+            <div className="rounded border border-slate-800 bg-slate-900/90 px-2.5 py-1.5 text-slate-300">
               Vision : <span className="font-bold text-slate-100">{hoveredItem.sightRadius}t</span>
             </div>
             {hoveredItem.itemType === "BUILDING" && (
-              <div className="rounded border border-slate-800 bg-slate-900/90 px-2 py-1 text-slate-300">
+              <div className="rounded border border-slate-800 bg-slate-900/90 px-2.5 py-1.5 text-slate-300">
                 Empreinte :{" "}
                 <span className="font-bold text-slate-100">
                   {hoveredItem.footprintW}×{hoveredItem.footprintH}
@@ -300,7 +300,7 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
               </div>
             )}
             {hoveredItem.powerDelta !== 0 && (
-              <div className="rounded border border-slate-800 bg-slate-900/90 px-2 py-1 text-slate-300">
+              <div className="rounded border border-slate-800 bg-slate-900/90 px-2.5 py-1.5 text-slate-300">
                 Énergie :{" "}
                 <span
                   className={
@@ -317,28 +317,28 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
               </div>
             )}
             {hoveredItem.attackRange > 0 && (
-              <div className="rounded border border-red-500/40 bg-red-950/40 px-2 py-1 text-red-200">
+              <div className="rounded border border-red-500/40 bg-red-950/40 px-2.5 py-1.5 text-red-200">
                 Tir : <span className="font-bold">{hoveredItem.attackRange}t</span> (
                 {hoveredItem.attackDamage} dmg)
               </div>
             )}
             {hoveredItem.detectionRange > hoveredItem.attackRange && (
-              <div className="rounded border border-cyan-500/40 bg-cyan-950/40 px-2 py-1 text-cyan-200">
+              <div className="rounded border border-cyan-500/40 bg-cyan-950/40 px-2.5 py-1.5 text-cyan-200">
                 Détection : <span className="font-bold">{hoveredItem.detectionRange}t</span>
               </div>
             )}
           </div>
 
           {/* Prerequisites & Action Footer */}
-          <div className="mt-2 border-t border-slate-800 pt-1.5 space-y-1 text-[10px]">
-            <div className={hoveredItemUnlocked ? "text-emerald-400" : "text-red-400 font-bold"}>
+          <div className="mt-2.5 border-t border-slate-800 pt-2 space-y-1 text-xs">
+            <div className={hoveredItemUnlocked ? "text-emerald-400 font-semibold" : "text-red-400 font-bold"}>
               {hoveredItemUnlocked
                 ? "✓ Prérequis technologiques validés"
                 : `🔒 Requis : ${hoveredItem.prerequisites
                     .map((req) => BUILDINGS[req].name)
                     .join(" + ")}`}
             </div>
-            <div className="text-amber-300/90">
+            <div className="text-amber-300 font-medium">
               {hoveredItem.isRepeatable
                 ? "Clic gauche : Activer la pose continue sur la carte"
                 : hoveredItem.isDirectBlueprint
@@ -352,37 +352,37 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
       {!hoveredItem && hoveredTool && (
         <div
           data-testid="tool-hover-menu"
-          className="pointer-events-none fixed bottom-3 left-3 right-3 z-40 rounded-md border border-amber-500/60 bg-slate-950/95 p-2.5 shadow-2xl backdrop-blur-md sm:absolute sm:bottom-auto sm:left-auto sm:right-full sm:top-44 sm:mr-2.5 sm:w-64"
+          className="pointer-events-none fixed bottom-3 left-3 right-3 z-40 rounded-md border border-amber-500/70 bg-slate-950/95 p-3.5 shadow-2xl backdrop-blur-md sm:absolute sm:bottom-auto sm:left-auto sm:right-full sm:top-44 sm:mr-3 sm:w-72 lg:w-80"
         >
           {hoveredTool === "REPAIR" && (
-            <div className="space-y-1">
-              <div className="flex items-center gap-1.5 text-xs font-bold text-emerald-300">
-                <Wrench className="h-3.5 w-3.5" />
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2 text-sm font-bold text-emerald-300">
+                <Wrench className="h-4 w-4" />
                 <span>Réparation Tactique</span>
               </div>
-              <p className="text-[11px] text-slate-300">
+              <p className="text-xs leading-relaxed text-slate-200">
                 Active le curseur clé à molette : cliquez sur un bâtiment allié endommagé pour le réparer (+10 PV / 2 cr par tick).
               </p>
             </div>
           )}
           {hoveredTool === "SELL" && (
-            <div className="space-y-1">
-              <div className="flex items-center gap-1.5 text-xs font-bold text-amber-300">
-                <DollarSign className="h-3.5 w-3.5" />
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2 text-sm font-bold text-amber-300">
+                <DollarSign className="h-4 w-4" />
                 <span>Vente de Structure (50%)</span>
               </div>
-              <p className="text-[11px] text-slate-300">
+              <p className="text-xs leading-relaxed text-slate-200">
                 Active le curseur dollar : cliquez sur une structure alliée pour la démanteler et récupérer 50% de son coût en crédits.
               </p>
             </div>
           )}
           {hoveredTool === "FORCE_ATTACK" && (
-            <div className="space-y-1">
-              <div className="flex items-center gap-1.5 text-xs font-bold text-red-300">
-                <Crosshair className="h-3.5 w-3.5" />
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2 text-sm font-bold text-red-300">
+                <Crosshair className="h-4 w-4" />
                 <span>Tir Forcé au Sol (Ctrl + Clic)</span>
               </div>
-              <p className="text-[11px] text-slate-300">
+              <p className="text-xs leading-relaxed text-slate-200">
                 Ordonne aux unités sélectionnées de pilonner une coordonnée au sol ou de détruire des arbres.
               </p>
             </div>
@@ -391,20 +391,20 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
       )}
 
       {/* Top Faction & Compact Resource Display */}
-      <div className="border-b border-slate-800 bg-slate-950/95 p-2 lg:p-2.5 space-y-1.5">
-        <div className="flex items-center justify-between gap-1">
-          <div className="flex items-center gap-1.5 min-w-0">
+      <div className="border-b border-slate-800 bg-slate-950/95 p-2.5 lg:p-3 space-y-2">
+        <div className="flex items-center justify-between gap-1.5">
+          <div className="flex items-center gap-2 min-w-0">
             <FactionVectorEmblem
               faction={activeFaction}
-              className="h-6 w-6 shrink-0"
+              className="h-7 w-7 sm:h-8 sm:w-8 shrink-0"
             />
-            <Badge className={`truncate ${FACTIONS[activeFaction].badgeClass}`}>
+            <Badge className={`truncate text-xs sm:text-sm ${FACTIONS[activeFaction].badgeClass}`}>
               {activeFaction} CMD
             </Badge>
           </div>
-          <div className="flex items-center gap-1 shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0">
             <Button variant="ghost" size="sm" onClick={handleToggleMute} title="Audio">
-              {audioMuted ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
+              {audioMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
             </Button>
             {onCloseMobile && (
               <Button
@@ -414,7 +414,7 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
                 className="lg:hidden"
                 title="Replier le menu C&C"
               >
-                <PanelRightClose className="h-3.5 w-3.5" />
+                <PanelRightClose className="h-4 w-4" />
               </Button>
             )}
             <Button variant="danger" size="sm" onClick={onLeaveMatch}>
@@ -423,81 +423,82 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
           </div>
         </div>
 
-        {/* Compact Credits & Silver Ore Row */}
-        <div className="grid grid-cols-2 gap-1.5">
-          <div className="flex items-center justify-between rounded border border-amber-500/40 bg-slate-900 px-2 py-1">
-            <div className="flex items-center gap-1 text-[10px] text-amber-300">
-              <Coins className="h-3 w-3 text-amber-400 shrink-0" />
+        {/* Credits & Silver Ore Row */}
+        <div className="grid grid-cols-2 gap-2">
+          <div className="flex items-center justify-between rounded border border-amber-500/40 bg-slate-900 px-2.5 py-1.5">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-amber-300">
+              <Coins className="h-4 w-4 text-amber-400 shrink-0" />
               <span>CR</span>
             </div>
-            <div className="text-xs font-bold tracking-tight text-amber-400">
+            <div className="text-sm sm:text-base font-extrabold tracking-tight text-amber-400">
               {credits.toLocaleString()}{" "}
-              <span className="text-[9px] font-normal text-slate-500">
+              <span className="text-xs font-semibold text-slate-400">
                 /{Math.round(maxStorage / 1000)}k
               </span>
             </div>
           </div>
 
-          <div className="flex items-center justify-between rounded border border-slate-500/40 bg-slate-900 px-2 py-1">
-            <div className="flex items-center gap-1 text-[10px] text-slate-300">
-              <Coins className="h-3 w-3 text-slate-300 shrink-0" />
+          <div className="flex items-center justify-between rounded border border-slate-500/40 bg-slate-900 px-2.5 py-1.5">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-200">
+              <Coins className="h-4 w-4 text-slate-300 shrink-0" />
               <span>ARGENT</span>
             </div>
-            <div className="text-xs font-bold tracking-tight text-slate-100">
+            <div className="text-sm sm:text-base font-extrabold tracking-tight text-slate-100">
               {silverOre.toLocaleString()}{" "}
-              <span className="text-[9px] font-normal text-slate-400">Ag</span>
+              <span className="text-xs font-semibold text-slate-400">Ag</span>
             </div>
           </div>
         </div>
 
         {/* Discretized Power Balance Gauge */}
-        <div className="space-y-1 pt-0.5">
-          <div className="flex items-center justify-between text-[10px]">
-            <span className="flex items-center gap-1 text-slate-300">
-              <Zap className="h-3 w-3 text-amber-400" />
+        <div className="space-y-1.5 pt-0.5">
+          <div className="flex items-center justify-between text-xs sm:text-sm font-bold">
+            <span className="flex items-center gap-1.5 text-slate-200">
+              <Zap className="h-4 w-4 text-amber-400" />
               ÉNERGIE
             </span>
-            <span className={lowPower ? "text-red-400 font-bold" : "text-emerald-300"}>
+            <span className={lowPower ? "text-red-400 font-extrabold" : "text-emerald-300 font-bold"}>
               {powerConsumed} / {powerProduced} MW
             </span>
           </div>
           <DiscretizedProgressBar
             ratio={powerLoadRatio}
             tone={lowPower ? "red" : powerLoadRatio > 0.8 ? "amber" : "emerald"}
+            className="h-3"
           />
         </div>
       </div>
 
       {/* Second Canvas Element: Tactical Radar Minimap */}
-      <div className="border-b border-slate-800 bg-slate-950 px-2.5 py-2">
-        <div className="flex items-center justify-between text-[10px] uppercase text-slate-400">
+      <div className="border-b border-slate-800 bg-slate-950 px-3 py-2">
+        <div className="flex items-center justify-between text-xs sm:text-sm uppercase text-slate-300">
           <button
             type="button"
             onClick={() => {
               globalAudioMixer.playUiClick();
               setRadarCollapsed(!radarCollapsed);
             }}
-            className="flex items-center gap-1 font-bold text-slate-300 hover:text-amber-300"
+            className="flex items-center gap-1.5 font-bold text-slate-200 hover:text-amber-300"
           >
-            <Radar className="h-3.5 w-3.5 text-amber-400" />
+            <Radar className="h-4 w-4 text-amber-400" />
             <span>Radar [{radarCollapsed ? "Afficher" : "Masquer"}]</span>
             {radarCollapsed ? (
-              <ChevronDown className="h-3.5 w-3.5" />
+              <ChevronDown className="h-4 w-4" />
             ) : (
-              <ChevronUp className="h-3.5 w-3.5" />
+              <ChevronUp className="h-4 w-4" />
             )}
           </button>
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-2">
             {mapSeed > 0 && (
               <span
                 data-testid="hud-map-seed"
-                className="rounded border border-slate-800 bg-slate-900 px-1.5 py-0.5 text-[9px] text-amber-300/90"
+                className="rounded border border-slate-700 bg-slate-900 px-2 py-0.5 text-xs font-bold text-amber-300"
                 title={`Carte procédurale ${MAP_WIDTH_TILES}×${MAP_HEIGHT_TILES} | Seed #${mapSeed}`}
               >
                 SEED #{mapSeed}
               </span>
             )}
-            <span className={lowPower ? "text-red-400 font-bold" : "text-emerald-400"}>
+            <span className={lowPower ? "text-red-400 font-extrabold text-xs" : "text-emerald-400 font-bold text-xs"}>
               {lowPower ? "SURCHARGE" : `${MAP_WIDTH_TILES}×${MAP_HEIGHT_TILES}`}
             </span>
           </div>
@@ -506,13 +507,13 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
           className={
             radarCollapsed
               ? "hidden"
-              : "mt-1.5 flex items-center justify-center rounded border border-slate-800 bg-obsidian p-1"
+              : "mt-2 flex items-center justify-center rounded border border-slate-800 bg-obsidian p-1"
           }
         >
           <canvas
             ref={minimapCanvasRef}
-            width={240}
-            height={180}
+            width={320}
+            height={220}
             onClick={handleMinimapPointer}
             onMouseDown={(e) => {
               minimapDraggingRef.current = true;
@@ -531,16 +532,16 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
             }}
             onTouchStart={handleMinimapTouch}
             onTouchMove={handleMinimapTouch}
-            className="h-28 sm:h-32 lg:h-36 w-full cursor-crosshair rounded touch-none"
+            className="h-36 sm:h-40 lg:h-44 w-full cursor-crosshair rounded touch-none"
           />
         </div>
       </div>
 
       {/* Tactical Pictogram Command Bar: Wrench (Repair), Dollar (Sell), Crosshair (Force Fire) & Zoom */}
-      <div className="border-b border-slate-800 bg-slate-950/85 px-2.5 py-2 space-y-1.5">
-        <div className="flex items-center justify-between gap-1.5">
+      <div className="border-b border-slate-800 bg-slate-950/85 px-3 py-2 space-y-2">
+        <div className="flex items-center justify-between gap-2">
           {/* Pictogram Action Buttons (Wrench / Dollar / Crosshair) */}
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1.5">
             <button
               type="button"
               aria-label="Réparer"
@@ -553,11 +554,11 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
               }}
               className={
                 repairMode
-                  ? "flex h-8 w-9 items-center justify-center rounded border border-emerald-400 bg-emerald-500/25 text-emerald-200 shadow-sm"
-                  : "flex h-8 w-9 items-center justify-center rounded border border-slate-700 bg-slate-900 text-slate-300 hover:border-emerald-500/60 hover:text-emerald-300"
+                  ? "flex h-9 w-11 items-center justify-center rounded border border-emerald-400 bg-emerald-500/25 text-emerald-200 shadow-sm"
+                  : "flex h-9 w-11 items-center justify-center rounded border border-slate-700 bg-slate-900 text-slate-200 hover:border-emerald-500/60 hover:text-emerald-300"
               }
             >
-              <Wrench className="h-4 w-4" />
+              <Wrench className="h-5 w-5" />
             </button>
 
             <button
@@ -572,11 +573,11 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
               }}
               className={
                 sellMode
-                  ? "flex h-8 w-9 items-center justify-center rounded border border-amber-400 bg-amber-500/25 text-amber-200 shadow-sm"
-                  : "flex h-8 w-9 items-center justify-center rounded border border-slate-700 bg-slate-900 text-slate-300 hover:border-amber-500/60 hover:text-amber-300"
+                  ? "flex h-9 w-11 items-center justify-center rounded border border-amber-400 bg-amber-500/25 text-amber-200 shadow-sm"
+                  : "flex h-9 w-11 items-center justify-center rounded border border-slate-700 bg-slate-900 text-slate-200 hover:border-amber-500/60 hover:text-amber-300"
               }
             >
-              <DollarSign className="h-4 w-4" />
+              <DollarSign className="h-5 w-5" />
             </button>
 
             <button
@@ -593,23 +594,23 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
               }}
               className={
                 forceAttackMode
-                  ? "flex h-8 w-9 items-center justify-center rounded border border-red-400 bg-red-500/25 text-red-200 shadow-sm"
-                  : "flex h-8 w-9 items-center justify-center rounded border border-slate-700 bg-slate-900 text-slate-300 hover:border-red-500/60 hover:text-red-300"
+                  ? "flex h-9 w-11 items-center justify-center rounded border border-red-400 bg-red-500/25 text-red-200 shadow-sm"
+                  : "flex h-9 w-11 items-center justify-center rounded border border-slate-700 bg-slate-900 text-slate-200 hover:border-red-500/60 hover:text-red-300"
               }
             >
-              <Crosshair className="h-4 w-4" />
+              <Crosshair className="h-5 w-5" />
             </button>
           </div>
 
           {/* Compact Zoom Selector */}
-          <div className="flex flex-1 items-center justify-end gap-1">
+          <div className="flex flex-1 items-center justify-end gap-1.5">
             <button
               type="button"
               onClick={onCycleZoom}
               title="Changer le zoom"
-              className="flex h-8 items-center gap-1 rounded border border-slate-700 bg-slate-900 px-2 text-[10px] font-bold text-amber-300 hover:border-amber-500/50"
+              className="flex h-9 items-center gap-1.5 rounded border border-slate-700 bg-slate-900 px-2.5 text-xs font-bold text-amber-300 hover:border-amber-500/50"
             >
-              <ZoomIn className="h-3.5 w-3.5" />
+              <ZoomIn className="h-4 w-4" />
               <span>{zoomLevel}x</span>
             </button>
             <div className="hidden sm:grid grid-cols-5 gap-0.5 rounded border border-slate-800 bg-slate-950 p-0.5">
@@ -620,8 +621,8 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
                   onClick={() => onSelectZoom(z)}
                   className={
                     Math.abs(zoomLevel - z) < 0.01
-                      ? "rounded border border-amber-400/60 bg-amber-500/25 px-1 py-1 text-[9px] font-bold text-amber-300"
-                      : "rounded px-1 py-1 text-[9px] text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+                      ? "rounded border border-amber-400/60 bg-amber-500/25 px-1.5 py-1 text-xs font-bold text-amber-300"
+                      : "rounded px-1.5 py-1 text-xs text-slate-300 hover:bg-slate-800 hover:text-slate-100"
                   }
                 >
                   {z}
@@ -633,7 +634,7 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
 
         {/* Active Tool Mode Indicator Strip */}
         {(repairMode || sellMode || forceAttackMode) && (
-          <div className="flex items-center justify-between rounded border border-amber-500/40 bg-slate-900/90 px-2 py-1 text-[10px]">
+          <div className="flex items-center justify-between rounded border border-amber-500/40 bg-slate-900/90 px-2.5 py-1.5 text-xs">
             <span className="font-bold text-amber-300">
               {repairMode
                 ? "OUTIL : RÉPARATION ACTIVE"
@@ -648,7 +649,7 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
                 setSellMode(false);
                 setForceAttackMode(false);
               }}
-              className="text-slate-400 underline hover:text-slate-200"
+              className="font-semibold text-slate-300 underline hover:text-slate-100"
             >
               Annuler
             </button>
@@ -670,18 +671,18 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
               onClick={() => handleSelectCategory(catId)}
               className={
                 isCurrent
-                  ? "flex flex-col items-center justify-center border-b-2 border-amber-400 bg-slate-900 py-1.5 text-[10px] font-bold text-amber-300"
-                  : "flex flex-col items-center justify-center py-1.5 text-[10px] text-slate-400 hover:bg-slate-900/50 hover:text-slate-200"
+                  ? "flex flex-col items-center justify-center border-b-2 border-amber-400 bg-slate-900 py-2 text-xs sm:text-sm font-bold text-amber-300"
+                  : "flex flex-col items-center justify-center py-2 text-xs sm:text-sm font-medium text-slate-300 hover:bg-slate-900/50 hover:text-slate-100"
               }
             >
-              <Icon className="h-3.5 w-3.5 mb-0.5" />
+              <Icon className="h-4 w-4 sm:h-5 sm:w-5 mb-1" />
               <span>{meta.label}</span>
               {qSlot?.readyToPlace ? (
-                <span className="mt-0.5 rounded bg-emerald-500/30 px-1 text-[8px] text-emerald-300">
+                <span className="mt-1 rounded bg-emerald-500/30 px-1.5 py-0.5 text-xs font-bold text-emerald-300">
                   PRÊT
                 </span>
               ) : qSlot?.activeItem ? (
-                <span className="mt-0.5 rounded bg-amber-500/30 px-1 text-[8px] text-amber-300">
+                <span className="mt-1 rounded bg-amber-500/30 px-1.5 py-0.5 text-xs font-bold text-amber-300">
                   {Math.round(qSlot.progressRatio * 100)}%
                 </span>
               ) : null}
@@ -691,29 +692,29 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
       </div>
 
       {/* Level 2 Hierarchy: Subcategory Filter & Breadcrumb Navigation */}
-      <div className="border-b border-slate-800 bg-slate-950/90 px-2.5 py-1.5 space-y-1.5">
-        <div className="flex items-center justify-between text-[10px] text-slate-400">
-          <div className="flex items-center gap-1 truncate">
-            <FolderTree className="h-3 w-3 text-amber-400 shrink-0" />
-            <span className="font-bold text-slate-200">{CATEGORY_META[activeTab].label}</span>
-            <ChevronRight className="h-3 w-3 text-slate-600 shrink-0" />
-            <span className="truncate text-amber-300">
+      <div className="border-b border-slate-800 bg-slate-950/90 px-3 py-2 space-y-2">
+        <div className="flex items-center justify-between text-xs sm:text-sm text-slate-300">
+          <div className="flex items-center gap-1.5 truncate">
+            <FolderTree className="h-4 w-4 text-amber-400 shrink-0" />
+            <span className="font-bold text-slate-100">{CATEGORY_META[activeTab].label}</span>
+            <ChevronRight className="h-4 w-4 text-slate-500 shrink-0" />
+            <span className="truncate font-semibold text-amber-300">
               {activeSubcategorySpec ? activeSubcategorySpec.label : "Tous les éléments"}
             </span>
           </div>
-          <span className="shrink-0 text-[9px] text-slate-500">
+          <span className="shrink-0 text-xs font-semibold text-slate-400">
             {catalogItems.length} élém.
           </span>
         </div>
 
-        <div className="flex flex-wrap gap-1">
+        <div className="flex flex-wrap gap-1.5">
           <button
             type="button"
             onClick={() => handleSelectSubcategory("ALL")}
             className={
               activeSubcategory === "ALL"
-                ? "rounded border border-amber-400/70 bg-amber-500/20 px-2 py-0.5 text-[10px] font-bold text-amber-200"
-                : "rounded border border-slate-800 bg-slate-900 px-2 py-0.5 text-[10px] text-slate-400 hover:border-slate-700 hover:text-slate-200"
+                ? "rounded border border-amber-400/70 bg-amber-500/20 px-2.5 py-1 text-xs font-bold text-amber-200"
+                : "rounded border border-slate-800 bg-slate-900 px-2.5 py-1 text-xs font-medium text-slate-300 hover:border-slate-700 hover:text-slate-100"
             }
           >
             Tous ({allCategoryItems.length})
@@ -728,8 +729,8 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
                 onClick={() => handleSelectSubcategory(sub.id)}
                 className={
                   isSelected
-                    ? "rounded border border-amber-400/70 bg-amber-500/20 px-2 py-0.5 text-[10px] font-bold text-amber-200"
-                    : "rounded border border-slate-800 bg-slate-900 px-2 py-0.5 text-[10px] text-slate-400 hover:border-slate-700 hover:text-slate-200"
+                    ? "rounded border border-amber-400/70 bg-amber-500/20 px-2.5 py-1 text-xs font-bold text-amber-200"
+                    : "rounded border border-slate-800 bg-slate-900 px-2.5 py-1 text-xs font-medium text-slate-300 hover:border-slate-700 hover:text-slate-100"
                 }
               >
                 {sub.shortLabel} ({count})
@@ -741,27 +742,28 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
 
       {/* Active Queue Status Strip (when producing a unit or legacy queued item) */}
       {activeSlot.activeItem && (
-        <div className="border-b border-slate-800 bg-slate-900/90 px-2.5 py-1.5 space-y-1">
-          <div className="flex items-center justify-between text-[10px]">
+        <div className="border-b border-slate-800 bg-slate-900/90 px-3 py-2 space-y-1.5">
+          <div className="flex items-center justify-between text-xs sm:text-sm">
             <span className="font-bold text-amber-300 truncate">
               EN COURS : {activeSlot.activeItem}
             </span>
-            <span className="text-emerald-300 font-bold">
+            <span className="text-emerald-300 font-extrabold">
               {Math.round(activeSlot.progressRatio * 100)}%
             </span>
           </div>
           <DiscretizedProgressBar
             ratio={activeSlot.progressRatio}
             tone={activeSlot.readyToPlace ? "emerald" : "amber"}
+            className="h-2.5"
           />
         </div>
       )}
 
-      {/* Balanced 3-Column Construction Image Grid */}
-      <div className="flex-1 overflow-y-auto overscroll-contain touch-pan-y p-2.5">
+      {/* Balanced 3-Column Construction Image Grid (Full-Tile Icons) */}
+      <div className="flex-1 overflow-y-auto overscroll-contain touch-pan-y p-2.5 sm:p-3">
         <div
           data-testid="construction-grid"
-          className="grid grid-cols-3 gap-2"
+          className="grid grid-cols-3 gap-2 sm:gap-2.5"
         >
           {catalogItems.map((item) => {
             const unlocked = item.prerequisites.every((req) => ownedBuildingKinds.has(req));
@@ -770,11 +772,11 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
             const canAfford = credits >= item.cost;
 
             const tileBorderClass = isActiveBlueprint
-              ? "border-emerald-400 bg-emerald-950/50 ring-1 ring-emerald-400/60"
+              ? "border-emerald-400 bg-emerald-950/60 ring-2 ring-emerald-400/70"
               : isBuildingThis
-                ? "border-amber-400 bg-amber-950/40"
+                ? "border-amber-400 bg-amber-950/50 ring-1 ring-amber-400/50"
                 : unlocked
-                  ? "border-slate-700/90 bg-slate-900/90 hover:border-amber-400/80 hover:bg-slate-800/90"
+                  ? "border-slate-700/90 bg-slate-900/95 hover:border-amber-400 hover:bg-slate-800/95"
                   : "border-slate-900 bg-slate-950/60 opacity-45 hover:opacity-75 hover:border-slate-700";
 
             return (
@@ -792,20 +794,32 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
                   setHoveredItem((prev) => (prev?.kind === item.kind ? null : prev))
                 }
                 onClick={() => handleGridItemClick(item, unlocked, canAfford)}
-                className={`group relative flex aspect-square flex-col items-center justify-between overflow-hidden rounded border p-1.5 text-left transition ${tileBorderClass}`}
+                className={`group relative flex aspect-square flex-col justify-between overflow-hidden rounded-md border text-left transition ${tileBorderClass}`}
               >
-                {/* Top Row: Status Badge / Lock on Left + Cost on Right */}
-                <div className="flex w-full items-center justify-between gap-0.5 z-10">
+                {/* Full-Tile Vector Artwork (Takes 100% of the construction tile size) */}
+                <div
+                  data-testid={`grid-icon-full-${item.kind}`}
+                  className="pointer-events-none absolute inset-0 flex items-center justify-center"
+                >
+                  <ProductionItemVectorIcon
+                    itemKind={item.kind}
+                    faction={activeFaction}
+                    className="h-full w-full transition-transform duration-150 group-hover:scale-105"
+                  />
+                </div>
+
+                {/* Top Overlay Row: Status Badge / Lock on Left + Cost on Right */}
+                <div className="relative z-10 flex w-full items-start justify-between gap-1 p-1 sm:p-1.5">
                   {!unlocked ? (
-                    <span className="flex h-4 w-4 items-center justify-center rounded bg-slate-950/90 text-red-400">
-                      <Lock className="h-2.5 w-2.5" />
+                    <span className="flex h-6 w-6 items-center justify-center rounded border border-red-500/40 bg-slate-950/90 text-red-400 shadow">
+                      <Lock className="h-3.5 w-3.5" />
                     </span>
                   ) : isActiveBlueprint ? (
-                    <span className="rounded bg-emerald-500/30 px-1 py-0.2 text-[8px] font-bold uppercase text-emerald-200">
+                    <span className="rounded border border-emerald-400/60 bg-slate-950/90 px-1.5 py-0.5 text-xs font-bold uppercase text-emerald-300 shadow">
                       {item.isRepeatable ? "Cont." : "Patron"}
                     </span>
                   ) : isBuildingThis ? (
-                    <span className="rounded bg-amber-500/30 px-1 py-0.2 text-[8px] font-bold text-amber-200">
+                    <span className="rounded border border-amber-400/60 bg-slate-950/90 px-1.5 py-0.5 text-xs font-bold text-amber-300 shadow">
                       {Math.round(activeSlot.progressRatio * 100)}%
                     </span>
                   ) : (
@@ -815,33 +829,24 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
                   <span
                     className={
                       canAfford
-                        ? "rounded bg-slate-950/90 px-1 py-0.2 text-[9px] font-bold text-amber-300"
-                        : "rounded bg-slate-950/90 px-1 py-0.2 text-[9px] font-bold text-red-400"
+                        ? "rounded border border-slate-700/80 bg-slate-950/90 px-1.5 py-0.5 text-xs sm:text-sm font-extrabold text-amber-300 shadow"
+                        : "rounded border border-red-500/50 bg-slate-950/90 px-1.5 py-0.5 text-xs sm:text-sm font-extrabold text-red-400 shadow"
                     }
                   >
                     ${item.cost}
                   </span>
                 </div>
 
-                {/* Center: High-Precision Vector Artwork */}
-                <div className="my-auto flex items-center justify-center">
-                  <ProductionItemVectorIcon
-                    itemKind={item.kind}
-                    faction={activeFaction}
-                    className="h-10 w-10 sm:h-11 sm:w-11 transition-transform duration-150 group-hover:scale-110"
-                  />
-                </div>
-
-                {/* Bottom: Short Name & Optional Active Build Progress Bar */}
-                <div className="w-full space-y-0.5 z-10">
-                  <div className="w-full truncate text-center text-[9px] font-bold leading-tight text-slate-100 group-hover:text-amber-200">
+                {/* Bottom Overlay Banner: Readable Name & Optional Active Build Progress Bar */}
+                <div className="relative z-10 w-full border-t border-slate-800/80 bg-slate-950/90 px-1.5 py-1 space-y-1">
+                  <div className="w-full truncate text-center text-xs sm:text-sm font-bold leading-tight text-slate-100 group-hover:text-amber-200">
                     {item.shortName}
                   </div>
                   {isBuildingThis && (
                     <DiscretizedProgressBar
                       ratio={activeSlot.progressRatio}
                       tone={activeSlot.readyToPlace ? "emerald" : "amber"}
-                      className="h-1"
+                      className="h-1.5"
                     />
                   )}
                 </div>
@@ -854,20 +859,20 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
             <div
               key={`empty-slot-${idx}`}
               aria-hidden="true"
-              className="flex aspect-square flex-col items-center justify-center rounded border border-dashed border-slate-800/60 bg-slate-950/30 p-1.5"
+              className="flex aspect-square flex-col items-center justify-center rounded-md border border-dashed border-slate-800/60 bg-slate-950/30 p-2"
             >
-              <div className="h-2 w-2 rounded-full bg-slate-800/60" />
+              <div className="h-2.5 w-2.5 rounded-full bg-slate-800/60" />
             </div>
           ))}
         </div>
       </div>
 
-      {/* Bottom Compact Status Footer */}
-      <div className="border-t border-slate-800 bg-slate-950 px-2.5 py-1.5 text-[10px] text-slate-400">
+      {/* Bottom Status Footer */}
+      <div className="border-t border-slate-800 bg-slate-950 px-3 py-2 text-xs sm:text-sm text-slate-300">
         {hoveredItem ? (
           <div className="flex items-center justify-between gap-2 truncate">
             <span className="truncate font-bold text-amber-300">{hoveredItem.name}</span>
-            <span className="shrink-0 text-slate-300">${hoveredItem.cost} cr</span>
+            <span className="shrink-0 font-bold text-slate-200">${hoveredItem.cost} cr</span>
           </div>
         ) : placementBuilding ? (
           <div className="flex items-center justify-between gap-2 text-emerald-300">
@@ -877,13 +882,13 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
             <button
               type="button"
               onClick={() => setPlacementBuilding(null)}
-              className="shrink-0 text-red-300 underline"
+              className="shrink-0 font-semibold text-red-300 underline"
             >
               Annuler
             </button>
           </div>
         ) : (
-          <div className="truncate text-slate-500">
+          <div className="truncate text-slate-400">
             Survolez une case pour les détails • Cliquez pour construire
           </div>
         )}

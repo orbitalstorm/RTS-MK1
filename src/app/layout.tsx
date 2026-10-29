@@ -13,7 +13,7 @@ export const viewport: Viewport = {
 export const metadata: Metadata = {
   title: "RTS-MK1 — Classic Multiplayer RTS (rts-mk1.orbital8.cloud)",
   description:
-    "RTS-MK1 v1.3.0 — Classic Command & Conquer / Dune 2000 RTS with Hybrid OffscreenCanvas 16-angle procedural graphics, 20 Hz deterministic simulation, Single Active Match Mutex, and Mobile Landscape Touch Controls.",
+    "RTS-MK1 v1.11.0 — Classic Command & Conquer / Dune 2000 RTS with Hybrid OffscreenCanvas 16-angle procedural graphics, 20 Hz deterministic simulation, Single Active Match Mutex, and Mobile Landscape Touch Controls.",
 };
 
 export default function RootLayout({

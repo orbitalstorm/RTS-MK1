@@ -311,7 +311,7 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
   });
 
   it("v1.2.0 — supports Game Juice camera shake, shortest-arc 16-angle interpolation, and 2x Hi-DPI sprite scale", () => {
-    expect(APP_VERSION).toBe("1.10.0");
+    expect(APP_VERSION).toBe("1.11.0");
     expect(SPRITE_ATLAS_SCALE).toBe(2);
 
     // Zero trauma produces zero offset
@@ -1525,5 +1525,52 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
     expect(
       lobby.chat.some((c) => c.message.includes(`#${customSeed}`))
     ).toBe(true);
+  });
+
+  it("v1.11.0 — enlarges global UI typography (zero text-[8px..11px] classes) and makes construction grid icons fill 100% of each tile", () => {
+    expect(APP_VERSION).toBe("1.11.0");
+
+    const srcRoot = path.join(process.cwd(), "src");
+    const collectSourceFiles = (dir: string): string[] => {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      const files: string[] = [];
+      for (const entry of entries) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          files.push(...collectSourceFiles(full));
+        } else if (entry.isFile() && /\.(ts|tsx)$/.test(entry.name)) {
+          files.push(full);
+        }
+      }
+      return files;
+    };
+
+    const allFiles = collectSourceFiles(srcRoot);
+    const tinyTextMatches: string[] = [];
+    for (const file of allFiles) {
+      const content = fs.readFileSync(file, "utf8");
+      if (/text-\[(8|9|10|11)px\]/.test(content)) {
+        tinyTextMatches.push(path.relative(process.cwd(), file));
+      }
+    }
+    expect(tinyTextMatches).toEqual([]);
+
+    // Verify ClassicSidebarHud expands sidebar width and renders full-tile construction icons
+    const hudContent = fs.readFileSync(
+      path.join(srcRoot, "components/hud/classic-sidebar-hud.tsx"),
+      "utf8"
+    );
+    expect(hudContent).toContain("lg:w-[400px]");
+    expect(hudContent).toContain('data-testid={`grid-icon-full-${item.kind}`}');
+    expect(hudContent).toContain("pointer-events-none absolute inset-0 flex items-center justify-center");
+    expect(hudContent).toContain('className="h-full w-full transition-transform duration-150 group-hover:scale-105"');
+
+    // Verify ProductionItemVectorIcon uses full-bleed viewBox and h-full w-full default sizing
+    const iconsContent = fs.readFileSync(
+      path.join(srcRoot, "components/hud/leonardo-icons.tsx"),
+      "utf8"
+    );
+    expect(iconsContent).toContain('className = "h-full w-full"');
+    expect(iconsContent).toContain('viewBox="4 4 56 56"');
   });
 });
