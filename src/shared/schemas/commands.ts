@@ -45,8 +45,8 @@ export const IssueMoveCommandSchema = z.object({
   lobbyId: z.string().min(1),
   playerId: z.string().min(1),
   entityIds: z.array(z.string().min(1)).min(1).max(64),
-  targetTileX: z.number().int().min(0).max(127),
-  targetTileY: z.number().int().min(0).max(127),
+  targetTileX: z.number().int().min(0).max(511),
+  targetTileY: z.number().int().min(0).max(511),
 });
 
 export const IssueAttackCommandSchema = z.object({
@@ -62,8 +62,8 @@ export const IssueAttackGroundCommandSchema = z.object({
   lobbyId: z.string().min(1),
   playerId: z.string().min(1),
   entityIds: z.array(z.string().min(1)).min(1).max(64),
-  targetTileX: z.number().int().min(0).max(127),
-  targetTileY: z.number().int().min(0).max(127),
+  targetTileX: z.number().int().min(0).max(511),
+  targetTileY: z.number().int().min(0).max(511),
 });
 
 export const IssueStartProductionCommandSchema = z.object({
@@ -80,8 +80,8 @@ export const IssuePlaceBuildingCommandSchema = z.object({
   playerId: z.string().min(1),
   category: z.enum(["BUILDING", "DEFENSE"]),
   buildingKind: BuildingKindSchema,
-  tileX: z.number().int().min(0).max(127),
-  tileY: z.number().int().min(0).max(127),
+  tileX: z.number().int().min(0).max(511),
+  tileY: z.number().int().min(0).max(511),
 });
 
 export const IssueSellBuildingCommandSchema = z.object({
@@ -114,6 +114,7 @@ export const ClientLobbyActionSchema = z.discriminatedUnion("type", [
     lobbyName: z.string().min(1).max(40),
     withAiBot: z.boolean().default(true),
     autoStart: z.boolean().optional().default(false),
+    mapSeed: z.number().int().positive().optional(),
   }),
   z.object({
     type: z.literal("LOBBY_JOIN"),

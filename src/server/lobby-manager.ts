@@ -1,5 +1,7 @@
 import { RtsSimulation } from "../engine/simulation";
 import {
+  generateRandomMapSeed,
+  normalizeMapSeed,
   WATCHDOG_DISCONNECT_TIMEOUT_MS,
   type FactionId,
 } from "../shared/constants";
@@ -12,12 +14,13 @@ import {
   type ServerMutexOverview,
 } from "../shared/schemas/lobby";
 import type { FullSnapshot, TickDelta } from "../shared/schemas/deltas";
-import { recordMatchOutcome } from "./db";
+import { recordMatchOutcome, recordMatchSeedLog } from "./db";
 
 export interface ManagedLobby {
   lobbyId: string;
   name: string;
   hostPlayerId: string;
+  mapSeed: number;
   status: LobbyStatus;
   players: LobbyPlayer[];
   maxPlayers: number;
@@ -60,10 +63,15 @@ export class LobbyManager {
     faction: FactionId;
     lobbyName: string;
     withAiBot: boolean;
+    mapSeed?: number;
     nowMs?: number;
   }): ManagedLobby {
     const now = params.nowMs ?? Date.now();
     const lobbyId = `sector_${this.nextLobbySeq++}_${now.toString(36).slice(-4)}`;
+    const mapSeed =
+      params.mapSeed !== undefined
+        ? normalizeMapSeed(params.mapSeed)
+        : generateRandomMapSeed(now + this.nextLobbySeq * 7919);
 
     const players: LobbyPlayer[] = [
       {
@@ -91,6 +99,7 @@ export class LobbyManager {
       lobbyId,
       name: params.lobbyName.trim() || `Opération ${lobbyId.toUpperCase()}`,
       hostPlayerId: params.playerId,
+      mapSeed,
       status: "WAITING",
       players,
       maxPlayers: 4,
@@ -101,7 +110,7 @@ export class LobbyManager {
         {
           id: `msg_${now}`,
           commanderName: "EVA CENTRAL",
-          message: `Salon "${params.lobbyName}" initialisé. Verrou serveur prêt.`,
+          message: `Salon "${params.lobbyName}" initialisé (Seed carte #${mapSeed}). Verrou serveur prêt.`,
           timestamp: now,
         },
       ],
@@ -268,13 +277,24 @@ export class LobbyManager {
         commanderName: p.commanderName,
         faction: p.faction,
         isAi: p.isAi,
-      }))
+      })),
+      { seed: lobby.mapSeed }
     );
+    console.info(
+      `[RTS-MK1][MAP_SEED] Partie démarrée | lobbyId=${lobby.lobbyId} | lobbyName="${lobby.name}" | seed=${lobby.mapSeed} | taille=${lobby.simulation.width}x${lobby.simulation.height}`
+    );
+    recordMatchSeedLog({
+      lobbyId: lobby.lobbyId,
+      lobbyName: lobby.name,
+      mapSeed: lobby.mapSeed,
+      mapWidth: lobby.simulation.width,
+      mapHeight: lobby.simulation.height,
+    });
     lobby.status = "IN_PROGRESS";
     lobby.chat.push({
       id: `start_${nowMs}`,
       commanderName: "EVA CENTRAL",
-      message: "Verrou de salon unique acquis. Simulation déterministe 20 Hz démarrée.",
+      message: `Verrou de salon unique acquis. Simulation déterministe 20 Hz démarrée (Seed carte #${lobby.mapSeed}, ${lobby.simulation.width}×${lobby.simulation.height}).`,
       timestamp: nowMs,
     });
   }
@@ -469,6 +489,7 @@ export class LobbyManager {
           lobbyId: l.lobbyId,
           name: l.name,
           hostPlayerId: l.hostPlayerId,
+          mapSeed: l.mapSeed,
           status: l.status,
           queuePosition: l.status === "QUEUED" && qIdx !== -1 ? qIdx + 1 : null,
           players: l.players,

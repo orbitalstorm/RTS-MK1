@@ -8,6 +8,7 @@ import {
   canPlaceBuildingOnTerrainTile,
   degradeTerrainLayer,
   FACTIONS,
+  generateProceduralMap,
   getTerrainLayerThickness,
   getTimedConstructionTicks,
   HARVESTER_LOAD_PER_TICK,
@@ -17,6 +18,7 @@ import {
   isRepeatableBuildingKind,
   MAP_HEIGHT_TILES,
   MAP_WIDTH_TILES,
+  normalizeMapSeed,
   requiresStoneOrConcreteFoundation,
   SILVER_MINE_CYCLE_TICKS,
   SILVER_MINE_YIELD_PER_CYCLE,
@@ -28,6 +30,10 @@ import {
   UNITS,
   type BuildingKind,
   type FactionId,
+  type MapCoord,
+  type ProceduralOrePatchSpec,
+  type ProceduralSilverDepositSpec,
+  type ProceduralTreePlacement,
   type ProductionCategory,
   type TreeKind,
   type UnitKind,
@@ -101,18 +107,37 @@ function createEmptyQueues(): Record<ProductionCategory, ProductionSlotState> {
   };
 }
 
+export interface SimulationSeedLogEntry {
+  lobbyId: string;
+  mapSeed: number;
+  width: number;
+  height: number;
+  timestamp: string;
+}
+
 export class RtsSimulation {
+  private static readonly seedLogs: SimulationSeedLogEntry[] = [];
+
+  public static getSeedLogs(): ReadonlyArray<SimulationSeedLogEntry> {
+    return RtsSimulation.seedLogs;
+  }
+
   public readonly lobbyId: string;
+  public readonly mapSeed: number;
   public readonly width: number = MAP_WIDTH_TILES;
   public readonly height: number = MAP_HEIGHT_TILES;
   public readonly terrainGrid: number[];
   public readonly terrainDamageGrid: number[];
   public readonly oreGrid: number[];
+  public readonly spawnPads: ReadonlyArray<MapCoord>;
+  public readonly orePatches: ReadonlyArray<ProceduralOrePatchSpec>;
+  public readonly silverDeposits: ReadonlyArray<ProceduralSilverDepositSpec>;
 
   private tickCounter = 0;
   private nextEntitySeq = 1;
   private readonly entities: Map<string, EcsEntity> = new Map();
   private readonly players: Map<string, PlayerSimState> = new Map();
+  private readonly playerSpawnPads: Map<string, MapCoord> = new Map();
   private readonly reservationGrid: SpatialReservationGrid;
   private readonly pathfinder: AStarPathfinder;
   private readonly fogManager: FogOfWarManager;
@@ -126,12 +151,42 @@ export class RtsSimulation {
   private acousticEventsThisTick: AcousticEvent[] = [];
   private winnerPlayerId: string | null = null;
 
-  constructor(lobbyId: string, participants: readonly MatchParticipantInit[]) {
+  constructor(
+    lobbyId: string,
+    participants: readonly MatchParticipantInit[],
+    options?: { seed?: number | string }
+  ) {
     this.lobbyId = lobbyId;
-    const { terrainGrid, oreGrid } = this.generateDeterministicTerrain();
-    this.terrainGrid = terrainGrid;
+    this.mapSeed =
+      options?.seed !== undefined ? normalizeMapSeed(options.seed) : normalizeMapSeed(lobbyId);
+
+    const generated = generateProceduralMap({
+      seed: this.mapSeed,
+      width: this.width,
+      height: this.height,
+    });
+    this.terrainGrid = generated.terrainGrid;
     this.terrainDamageGrid = new Array<number>(this.width * this.height).fill(0);
-    this.oreGrid = oreGrid;
+    this.oreGrid = generated.oreGrid;
+    this.spawnPads = generated.spawnPads;
+    this.orePatches = generated.orePatches;
+    this.silverDeposits = generated.silverDeposits;
+
+    const logEntry: SimulationSeedLogEntry = {
+      lobbyId: this.lobbyId,
+      mapSeed: this.mapSeed,
+      width: this.width,
+      height: this.height,
+      timestamp: new Date().toISOString(),
+    };
+    RtsSimulation.seedLogs.push(logEntry);
+    if (RtsSimulation.seedLogs.length > 200) {
+      RtsSimulation.seedLogs.shift();
+    }
+    console.info(
+      `[RTS-MK1][MAP_SEED] Simulation initialisée | lobbyId=${this.lobbyId} | mapSeed=${this.mapSeed} | mapSize=${this.width}x${this.height}`
+    );
+
     this.reservationGrid = new SpatialReservationGrid(this.width, this.height, this.terrainGrid);
     this.pathfinder = new AStarPathfinder(this.width, this.height);
     this.fogManager = new FogOfWarManager(
@@ -139,13 +194,6 @@ export class RtsSimulation {
       this.height,
       participants.map((p) => p.playerId)
     );
-
-    const spawnCorners = [
-      { x: 5, y: 5 },
-      { x: this.width - 13, y: this.height - 13 },
-      { x: this.width - 13, y: 5 },
-      { x: 5, y: this.height - 13 },
-    ];
 
     participants.forEach((p, idx) => {
       this.players.set(p.playerId, {
@@ -169,11 +217,12 @@ export class RtsSimulation {
         queues: createEmptyQueues(),
       });
 
-      const corner = spawnCorners[idx % spawnCorners.length]!;
+      const corner = this.spawnPads[idx % this.spawnPads.length]!;
+      this.playerSpawnPads.set(p.playerId, corner);
       this.spawnInitialBase(p.playerId, p.faction, corner.x, corner.y);
     });
 
-    this.spawnDeterministicTrees();
+    this.spawnProceduralTrees(generated.trees);
     this.rebuildSpatialReservations();
     this.recomputeAllPlayerEconomies();
     this.fogManager.recomputeTickVisibility(
@@ -204,205 +253,16 @@ export class RtsSimulation {
     return this.players.get(playerId);
   }
 
-  private generateDeterministicTerrain(): { terrainGrid: number[]; oreGrid: number[] } {
-    const total = this.width * this.height;
-    // Start with lush natural grassland (HERBE = 4) across the battlefield
-    const terrainGrid = new Array<number>(total).fill(TERRAIN_KIND.GRASS);
-    const oreGrid = new Array<number>(total).fill(0);
-
-    const midX = this.width * 0.5 - 0.5;
-    const midY = this.height * 0.5 - 0.5;
-    const ridgeLeft = Math.floor(this.width * 0.5) - 2;
-    const ridgeRight = Math.floor(this.width * 0.5) + 1;
-    const ridgeTopStart = Math.floor(this.height * 0.34);
-    const ridgeTopEnd = Math.floor(this.height * 0.42);
-    const ridgeBotStart = Math.floor(this.height * 0.58);
-    const ridgeBotEnd = Math.floor(this.height * 0.66);
-
-    const spawnPads = [
-      { x: 5, y: 5 },
-      { x: this.width - 13, y: this.height - 13 },
-      { x: this.width - 13, y: 5 },
-      { x: 5, y: this.height - 13 },
-    ];
-
-    // Organic Earth/Soil (TERRE = 0), Stone/Bedrock (PIERRE = 1) halos, and 8x8 Concrete Slab spawn pads
-    for (let y = 0; y < this.height; y++) {
-      for (let x = 0; x < this.width; x++) {
-        const idx = y * this.width + x;
-
-        // Organic earth transition corridor along the diagonal tactical valley & central basin
-        const distCenter = Math.hypot(x - midX, y - midY);
-        const wave = Math.sin(x * 0.24) * 2.2 + Math.cos(y * 0.24) * 2.2;
-        if (distCenter + wave <= 15.5 || Math.abs(x - y) <= 3.8) {
-          terrainGrid[idx] = TERRAIN_KIND.DIRT;
-        }
-
-        // Surrounding stone/dirt transition around the 4 corner bases
-        let minCornerDist = Infinity;
-        let onSpawnPad = false;
-        for (const pad of spawnPads) {
-          if (
-            x >= pad.x &&
-            x < pad.x + SPAWN_CONCRETE_PAD_SIZE &&
-            y >= pad.y &&
-            y < pad.y + SPAWN_CONCRETE_PAD_SIZE
-          ) {
-            onSpawnPad = true;
-          }
-          const padCenterX = pad.x + (SPAWN_CONCRETE_PAD_SIZE - 1) * 0.5;
-          const padCenterY = pad.y + (SPAWN_CONCRETE_PAD_SIZE - 1) * 0.5;
-          const d = Math.hypot(x - padCenterX, y - padCenterY);
-          if (d < minCornerDist) minCornerDist = d;
-        }
-
-        if (onSpawnPad) {
-          terrainGrid[idx] = TERRAIN_KIND.CONCRETE_SLAB;
-        } else if (minCornerDist <= 7.8) {
-          terrainGrid[idx] = TERRAIN_KIND.STONE;
-        } else if (minCornerDist <= 10.6) {
-          terrainGrid[idx] = TERRAIN_KIND.DIRT;
-        }
-
-        // Central canyon ridges (leaving wide tactical passes)
-        if (
-          (x === ridgeLeft || x === ridgeRight) &&
-          ((y >= ridgeTopStart && y <= ridgeTopEnd) || (y >= ridgeBotStart && y <= ridgeBotEnd))
-        ) {
-          terrainGrid[idx] = TERRAIN_KIND.CLIFF; // impassable ridge
-        }
-      }
-    }
-
-    // Irregular, organic ore deposits of varied sizes (small pockets, medium veins, large basins)
-    const centerTileX = Math.floor(this.width * 0.5);
-    const centerTileY = Math.floor(this.height * 0.5);
-    const oreDeposits = [
-      // Medium asymmetrical expansion veins
-      { cx: 22, cy: 10, rx: 3.5, ry: 2.1, angle: 0.42, lobeDx: 2, lobeDy: 1, lobeR: 2.1, amount: 720 },
-      { cx: 10, cy: 22, rx: 2.1, ry: 3.4, angle: -0.36, lobeDx: 1, lobeDy: 2, lobeR: 1.9, amount: 680 },
-      { cx: this.width - 23, cy: this.height - 11, rx: 3.5, ry: 2.1, angle: 0.42, lobeDx: -2, lobeDy: -1, lobeR: 2.1, amount: 720 },
-      { cx: this.width - 11, cy: this.height - 23, rx: 2.1, ry: 3.4, angle: -0.36, lobeDx: -1, lobeDy: -2, lobeR: 1.9, amount: 680 },
-      // Small scattered ore pockets
-      { cx: 28, cy: 15, rx: 1.7, ry: 1.2, angle: 0.85, lobeDx: 1, lobeDy: 0, lobeR: 1.2, amount: 520 },
-      { cx: this.width - 29, cy: this.height - 16, rx: 1.7, ry: 1.2, angle: 0.85, lobeDx: -1, lobeDy: 0, lobeR: 1.2, amount: 520 },
-      { cx: 15, cy: 29, rx: 1.4, ry: 1.9, angle: -0.6, lobeDx: 0, lobeDy: 1, lobeR: 1.1, amount: 500 },
-      { cx: this.width - 16, cy: this.height - 30, rx: 1.4, ry: 1.9, angle: -0.6, lobeDx: 0, lobeDy: -1, lobeR: 1.1, amount: 500 },
-      // Large multi-lobed contested central & flank basins
-      { cx: centerTileX, cy: centerTileY, rx: 4.7, ry: 3.1, angle: 0.62, lobeDx: -2, lobeDy: 2, lobeR: 2.9, amount: 980 },
-      { cx: 22, cy: this.height - 22, rx: 3.9, ry: 2.3, angle: -0.52, lobeDx: 2, lobeDy: -1, lobeR: 2.4, amount: 820 },
-      { cx: this.width - 22, cy: 22, rx: 3.9, ry: 2.3, angle: -0.52, lobeDx: -2, lobeDy: 1, lobeR: 2.4, amount: 820 },
-      { cx: centerTileX, cy: 18, rx: 2.9, ry: 1.9, angle: 0.25, lobeDx: 2, lobeDy: 1, lobeR: 1.8, amount: 750 },
-      { cx: centerTileX, cy: this.height - 18, rx: 2.9, ry: 1.9, angle: 0.25, lobeDx: -2, lobeDy: -1, lobeR: 1.8, amount: 750 },
-    ];
-
-    for (const patch of oreDeposits) {
-      const bound = Math.ceil(Math.max(patch.rx, patch.ry, patch.lobeR + 2)) + 2;
-      const cosA = Math.cos(patch.angle);
-      const sinA = Math.sin(patch.angle);
-      for (let dy = -bound; dy <= bound; dy++) {
-        for (let dx = -bound; dx <= bound; dx++) {
-          const tx = patch.cx + dx;
-          const ty = patch.cy + dy;
-          if (tx < 1 || ty < 1 || tx >= this.width - 1 || ty >= this.height - 1) continue;
-          const idx = ty * this.width + tx;
-          if (
-            terrainGrid[idx] === TERRAIN_KIND.CLIFF ||
-            terrainGrid[idx] === TERRAIN_KIND.CONCRETE_SLAB
-          ) {
-            continue;
-          }
-
-          let minBaseDist = Infinity;
-          for (const pad of spawnPads) {
-            const padCenterX = pad.x + (SPAWN_CONCRETE_PAD_SIZE - 1) * 0.5;
-            const padCenterY = pad.y + (SPAWN_CONCRETE_PAD_SIZE - 1) * 0.5;
-            const d = Math.hypot(tx - padCenterX, ty - padCenterY);
-            if (d < minBaseDist) minBaseDist = d;
-          }
-          if (minBaseDist <= 10.2) continue;
-
-          const rotX = dx * cosA - dy * sinA;
-          const rotY = dx * sinA + dy * cosA;
-          const eDist = Math.hypot(rotX / patch.rx, rotY / patch.ry);
-          const lobeDist =
-            Math.hypot(dx - patch.lobeDx, dy - patch.lobeDy) / Math.max(0.8, patch.lobeR);
-          const jitter =
-            (Math.sin(tx * 1.73 + ty * 2.31) + Math.cos(tx * 2.87 - ty * 1.41)) * 0.12;
-          const shapeMetric = Math.min(eDist, lobeDist) + jitter;
-
-          if (shapeMetric <= 1.0) {
-            terrainGrid[idx] = TERRAIN_KIND.ORE;
-            const richness = Math.max(0.55, 1.15 - shapeMetric * 0.5);
-            oreGrid[idx] = Math.round((patch.amount * richness) / 25) * 25;
-          } else if (shapeMetric <= 1.42 && terrainGrid[idx] === TERRAIN_KIND.GRASS) {
-            terrainGrid[idx] = TERRAIN_KIND.DIRT;
-          }
-        }
-      }
-    }
-
-    // Rare 2x2 Silver Ore boulders (TERRAIN_KIND.SILVER_ORE = 6) on which a 2x2 SILVER_MINE can be built
-    const silverDeposits2x2 = [
-      { x: 15, y: 7 },
-      { x: this.width - 17, y: this.height - 9 },
-      { x: this.width - 17, y: 7 },
-      { x: 15, y: this.height - 9 },
-    ];
-    for (const sDep of silverDeposits2x2) {
-      for (let dy = -1; dy <= 2; dy++) {
-        for (let dx = -1; dx <= 2; dx++) {
-          const tx = sDep.x + dx;
-          const ty = sDep.y + dy;
-          if (tx < 1 || ty < 1 || tx >= this.width - 1 || ty >= this.height - 1) continue;
-          const idx = ty * this.width + tx;
-          if (dx >= 0 && dx <= 1 && dy >= 0 && dy <= 1) {
-            terrainGrid[idx] = TERRAIN_KIND.SILVER_ORE;
-            oreGrid[idx] = 0;
-          } else if (terrainGrid[idx] === TERRAIN_KIND.GRASS) {
-            terrainGrid[idx] = TERRAIN_KIND.STONE;
-          }
-        }
-      }
-    }
-
-    return { terrainGrid, oreGrid };
+  public getPlayerSpawnPad(playerId: string): MapCoord | undefined {
+    return this.playerSpawnPads.get(playerId);
   }
 
-  private spawnDeterministicTrees(): void {
-    const treePlacements: Array<{ x: number; y: number; kind: TreeKind; scale: number }> = [
-      { x: 17, y: 3, kind: "TREE_PINE", scale: 1.25 },
-      { x: 18, y: 4, kind: "TREE_OAK", scale: 0.92 },
-      { x: 3, y: 17, kind: "TREE_PINE", scale: 1.1 },
-      { x: 4, y: 19, kind: "TREE_OAK", scale: 1.32 },
-      { x: 31, y: 8, kind: "TREE_OAK", scale: 1.28 },
-      { x: 33, y: 9, kind: "TREE_PINE", scale: 0.82 },
-      { x: 8, y: 32, kind: "TREE_PALM", scale: 1.18 },
-      { x: 9, y: 34, kind: "TREE_PALM", scale: 0.85 },
-      { x: 26, y: 26, kind: "TREE_PALM", scale: 1.22 },
-      { x: 45, y: 45, kind: "TREE_PALM", scale: 1.15 },
-      { x: 16, y: 44, kind: "TREE_OAK", scale: 1.3 },
-      { x: 17, y: 46, kind: "TREE_PINE", scale: 0.9 },
-      { x: 44, y: 16, kind: "TREE_OAK", scale: 1.24 },
-      { x: 46, y: 17, kind: "TREE_PINE", scale: 0.86 },
-      { x: this.width - 18, y: this.height - 4, kind: "TREE_PINE", scale: 1.25 },
-      { x: this.width - 19, y: this.height - 5, kind: "TREE_OAK", scale: 0.95 },
-      { x: this.width - 4, y: this.height - 18, kind: "TREE_PINE", scale: 1.12 },
-      { x: this.width - 5, y: this.height - 20, kind: "TREE_OAK", scale: 1.3 },
-      { x: this.width - 32, y: this.height - 9, kind: "TREE_OAK", scale: 1.2 },
-      { x: this.width - 9, y: this.height - 33, kind: "TREE_PALM", scale: 1.15 },
-      { x: 12, y: this.height - 18, kind: "TREE_PINE", scale: 1.05 },
-      { x: this.width - 13, y: 18, kind: "TREE_PINE", scale: 1.08 },
-    ];
-
+  private spawnProceduralTrees(treePlacements: ReadonlyArray<ProceduralTreePlacement>): void {
     for (const t of treePlacements) {
       if (t.x < 1 || t.y < 1 || t.x >= this.width - 1 || t.y >= this.height - 1) continue;
       const idx = t.y * this.width + t.x;
       const tk = this.terrainGrid[idx] ?? TERRAIN_KIND.DIRT;
-      if (
-        tk !== TERRAIN_KIND.GRASS &&
-        tk !== TERRAIN_KIND.DIRT
-      ) {
+      if (tk !== TERRAIN_KIND.GRASS && tk !== TERRAIN_KIND.DIRT) {
         continue;
       }
       if (!this.reservationGrid.isTilePassable(t.x, t.y, undefined, false)) continue;
@@ -772,7 +632,12 @@ export class RtsSimulation {
 
     this.rebuildSpatialReservations();
 
-    if (!this.isWithinBaseBuildRadius(playerId, tileX, tileY, spec.footprintW, spec.footprintH)) {
+    // Silver Mines are deployed directly on 2x2 Silver Ore deposits across the battlefield (outside the immediate base radius),
+    // and assembled on-site by a dispatched Constructor Bot.
+    if (
+      buildingKind !== "SILVER_MINE" &&
+      !this.isWithinBaseBuildRadius(playerId, tileX, tileY, spec.footprintW, spec.footprintH)
+    ) {
       return false;
     }
 
@@ -1119,6 +984,7 @@ export class RtsSimulation {
       type: "SIM_SNAPSHOT",
       lobbyId: this.lobbyId,
       tickId: this.tickCounter,
+      mapSeed: this.mapSeed,
       mapWidth: this.width,
       mapHeight: this.height,
       terrainGrid: [...this.terrainGrid],

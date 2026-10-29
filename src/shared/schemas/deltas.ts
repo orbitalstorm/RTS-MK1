@@ -157,6 +157,7 @@ export const TickDeltaSchema = z.object({
 export const FullSnapshotSchema = z.object({
   type: z.literal("SIM_SNAPSHOT"),
   lobbyId: z.string().min(1),
+  mapSeed: z.number().int().positive(),
   tickId: z.number().int().min(0),
   mapWidth: z.number().int().positive(),
   mapHeight: z.number().int().positive(),

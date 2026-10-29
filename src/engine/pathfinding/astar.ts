@@ -258,7 +258,7 @@ export class AStarPathfinder {
     grid: SpatialReservationGrid,
     entityId: string,
     avoidDynamicUnits = true,
-    maxIterations = 900
+    maxIterations = 4096
   ): GridPoint[] {
     const sx = Math.round(startX);
     const sy = Math.round(startY);

@@ -56,7 +56,7 @@ export class FogOfWarManager {
         ent.entityType === "BUILDING" && ent.building
           ? Math.round((ent.transform.y + (ent.building.footprintH - 1) * 0.5) * 2)
           : Math.round(ent.transform.y) * 2;
-      const packed = ((qx & 0xff) << 16) | ((qy & 0xff) << 8) | (ent.sightRadius & 0xff);
+      const packed = ((qx & 0x7ff) << 17) | ((qy & 0x7ff) << 6) | (ent.sightRadius & 0x3f);
       const nextHash = Math.imul(prevHash ^ packed, 16777619) | 0;
       sigByPlayer.set(ent.ownerId, nextHash);
       countByPlayer.set(ent.ownerId, (countByPlayer.get(ent.ownerId) ?? 0) + 1);

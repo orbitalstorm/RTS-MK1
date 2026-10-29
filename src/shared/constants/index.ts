@@ -193,15 +193,17 @@ export interface UnitSpec {
   description: string;
 }
 
-export const APP_VERSION = "1.9.0";
+export const APP_VERSION = "1.10.0";
 export const SIM_TICK_RATE_HZ = 20;
 export const SIM_TICK_MS = 50;
-export const MAP_WIDTH_TILES = 72;
-export const MAP_HEIGHT_TILES = 72;
+export const MAP_WIDTH_TILES = 160;
+export const MAP_HEIGHT_TILES = 160;
 export const TILE_PIXEL_SIZE = 32;
 export const SPRITE_ATLAS_SCALE = 2; // 64px per tile internal vector rasterization for crisp 2x zoom
-export const BASE_BUILD_RADIUS_TILES = 18;
+export const BASE_BUILD_RADIUS_TILES = 24;
 export const SPAWN_CONCRETE_PAD_SIZE = 8; // 8x8 concrete slab pad at each spawn
+
+export * from "../map-generator";
 export const SILVER_MINE_YIELD_PER_CYCLE = 5;
 export const SILVER_MINE_CYCLE_TICKS = 20; // 1.0s at 20 Hz
 export const AI_ATTACK_GRACE_PERIOD_SECONDS = 120; // 2 minutes opening grace period before any enemy AI attack

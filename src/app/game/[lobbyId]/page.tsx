@@ -122,7 +122,7 @@ function canPlaceBuildingOnGrid(
 
   const cx = tileX + spec.footprintW * 0.5;
   const cy = tileY + spec.footprintH * 0.5;
-  let withinBaseRadius = false;
+  let withinBaseRadius = buildingKind === "SILVER_MINE";
 
   for (const ent of st.currEntities.values()) {
     if (ent.entityType === "BUILDING") {
@@ -189,6 +189,7 @@ export default function GameMatchPage() {
   const playerId = useRtsGameStore((s) => s.playerId);
   const commanderName = useRtsGameStore((s) => s.commanderName);
   const faction = useRtsGameStore((s) => s.faction);
+  const mapSeed = useRtsGameStore((s) => s.mapSeed);
   const overview = useRtsGameStore((s) => s.overview);
   const evaBannerText = useRtsGameStore((s) => s.evaBannerText);
   const winnerPlayerId = useRtsGameStore((s) => s.winnerPlayerId);
@@ -276,6 +277,19 @@ export default function GameMatchPage() {
       });
     }
   }, [lobby, playerId, sendMessage]);
+
+  // Center camera on the player's Construction Yard when the procedural map snapshot arrives
+  useEffect(() => {
+    if (!mapSeed) return;
+    const st = useRtsGameStore.getState();
+    for (const ent of st.currEntities.values()) {
+      if (ent.ownerId === playerId && ent.kind === "CONSTRUCTION_YARD") {
+        cameraRef.current.centerOnTile(ent.x + 2, ent.y + 2);
+        hoverTileRef.current = { tileX: ent.x + 2, tileY: ent.y + 2 };
+        break;
+      }
+    }
+  }, [mapSeed, playerId]);
 
   // 2. Generate Hybrid Vector/Bitmap OffscreenCanvas -> ImageBitmap Sprite Atlas in async chunks
   useEffect(() => {

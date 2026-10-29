@@ -40,6 +40,15 @@ function getDb(): DatabaseSync {
       duration_ticks INTEGER NOT NULL,
       completed_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS match_seed_logs (
+      lobby_id TEXT NOT NULL,
+      lobby_name TEXT NOT NULL,
+      map_seed INTEGER NOT NULL,
+      map_width INTEGER NOT NULL,
+      map_height INTEGER NOT NULL,
+      started_at TEXT NOT NULL
+    );
   `);
 
   const countRow = db
@@ -225,4 +234,64 @@ export function listRecentMatches(limit = 8): MatchRecord[] {
       completedAt: r.completed_at,
     })
   );
+}
+
+export interface MatchSeedLogRecord {
+  lobbyId: string;
+  lobbyName: string;
+  mapSeed: number;
+  mapWidth: number;
+  mapHeight: number;
+  startedAt: string;
+}
+
+export function recordMatchSeedLog(params: {
+  lobbyId: string;
+  lobbyName: string;
+  mapSeed: number;
+  mapWidth: number;
+  mapHeight: number;
+}): void {
+  const db = getDb();
+  const startedAt = new Date().toISOString();
+  db.prepare(`
+    INSERT INTO match_seed_logs
+    (lobby_id, lobby_name, map_seed, map_width, map_height, started_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(
+    params.lobbyId,
+    params.lobbyName,
+    params.mapSeed,
+    params.mapWidth,
+    params.mapHeight,
+    startedAt
+  );
+}
+
+export function listRecentMatchSeedLogs(limit = 20): MatchSeedLogRecord[] {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT lobby_id, lobby_name, map_seed, map_width, map_height, started_at
+       FROM match_seed_logs
+       ORDER BY rowid DESC
+       LIMIT ?`
+    )
+    .all(limit) as Array<{
+    lobby_id: string;
+    lobby_name: string;
+    map_seed: number;
+    map_width: number;
+    map_height: number;
+    started_at: string;
+  }>;
+
+  return rows.map((r) => ({
+    lobbyId: r.lobby_id,
+    lobbyName: r.lobby_name,
+    mapSeed: r.map_seed,
+    mapWidth: r.map_width,
+    mapHeight: r.map_height,
+    startedAt: r.started_at,
+  }));
 }

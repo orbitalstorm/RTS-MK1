@@ -2,6 +2,27 @@
 
 All notable changes to **RTS-MK1** (`https://rts-mk1.orbital8.cloud`) follow strict non-reusable `v1.x.y` versioning.
 
+## [v1.10.0] — 2026-10-28
+
+### Added & Changed
+- **Procedural Map Generation by Seed & Dedicated Placement Rules Section (`src/shared/map-generator.ts`, `src/shared/constants/index.ts`, `src/shared/types/index.ts`, `src/engine/simulation.ts`)**:
+  - Created a deterministic procedural battlefield generator (`generateProceduralMap`, Mulberry32 PRNG `createSeededRng`, 2D value & FBM noise `seededValueNoise2D` / `seededFbm2D`, `normalizeMapSeed`, `generateRandomMapSeed`) driven by a 32-bit `mapSeed` so any match can be generated randomly or reproduced identically from its seed.
+  - Added a dedicated, structured section (`MAP_GENERATION_RULES` & `validateGeneratedMapAgainstRules`) centralizing all placement and safety constraints so they can be studied and refined in future iterations:
+    - **Enemy Base Separation (`spawnRules`)**: Enemy bases are never generated closer than `minEnemyBaseDistanceTiles: 96` blocks (`~118–136` blocks on `160×160`), with `minBorderMarginTiles: 8`, `maxSpawnAnchorJitterTiles: 10`, an `8×8` `CONCRETE_SLAB` pad surrounded by `STONE` (`9.2` blocks) and `DIRT` (`13.5` blocks) halos, and a `15`-block obstacle-free safety perimeter.
+    - **Ore Vein Placement (`oreRules`)**: Ore tiles (`TERRAIN_KIND.ORE`) are strictly forbidden within `minDistanceFromSpawnTiles: 20` blocks of any spawn center while guaranteeing a natural expansion vein within `maxNaturalOreDistanceFromSpawnTiles: 34` blocks of each base, plus regional expansion veins and `5` high-yield contested central/flank basins (`minDistanceBetweenOrePatchesTiles: 16`).
+    - **Silver Mine Boulders (`silverMineRules`)**: `2×2` Silver Ore boulders (`TERRAIN_KIND.SILVER_ORE`) are forbidden within `minDistanceFromSpawnTiles: 28` blocks of any spawn center, with `1` regional deposit per quadrant (`<= 52` blocks from spawn) and `2` contested central deposits separated by at least `minDistanceBetweenSilverDepositsTiles: 24` blocks and `minClearanceFromCliffsTiles: 3` blocks for Constructor Bot docking. Exempted `SILVER_MINE` from `BASE_BUILD_RADIUS_TILES` so players can deploy Silver Mine blueprints directly on distant `2×2` Silver Ore boulders.
+    - **Terrain, Cliffs & Destructible Trees (`terrainAndCoverRules`)**: Procedural canyon ridges (`CLIFF`, `>= 28` blocks from spawns, `>= 8`-block tactical pass widths) and `14` multi-species tree groves (`>= 15` blocks from spawns).
+- **Enlarged Battlefield Sizes (`>= 4×` Larger, `160×160` Active Default = `4.94×` Area) & Engine Scaling (`src/shared/map-generator.ts`, `src/shared/constants/index.ts`, `src/shared/schemas/commands.ts`, `src/engine/fog/fog-of-war.ts`, `src/engine/pathfinding/astar.ts`, `src/app/game/[lobbyId]/page.tsx`)**:
+  - Defined `MAP_SIZE_PRESETS` identifying the optimal sizes above the `4×` threshold (`LEGACY_1X` `72×72` = `5,184` tiles; `SKIRMISH_4X` `144×144` = `20,736` tiles [`4.0×`]; `TACTICAL_5X` `160×160` = `25,600` tiles [`4.94×` — active default]; `STRATEGIC_7X` `192×192` = `36,864` tiles [`7.11×`]; `COLOSSAL_9X` `216×216` = `46,656` tiles [`9.0×`]).
+  - Updated active `MAP_WIDTH_TILES = 160` and `MAP_HEIGHT_TILES = 160` (`4.94×` larger than `72×72`) and `BASE_BUILD_RADIUS_TILES = 24`.
+  - Scaled coordinate bounds in `src/shared/schemas/commands.ts` (`.max(511)`), fixed 11-bit sight-signature coordinate packing in `FogOfWarManager` (`src/engine/fog/fog-of-war.ts`), increased `AStarPathfinder` default `maxIterations` to `4096` (`src/engine/pathfinding/astar.ts`), and auto-centered the tactical camera on the player's Construction Yard on snapshot load (`src/app/game/[lobbyId]/page.tsx`).
+- **Per-Match Seed Logging (`src/engine/simulation.ts`, `src/server/lobby-manager.ts`, `src/server/db/index.ts`, `src/shared/schemas/deltas.ts`, `src/shared/schemas/lobby.ts`, `src/store/game-store.ts`, `src/components/hud/classic-sidebar-hud.tsx`)**:
+  - Every match now generates or normalizes a `mapSeed` and records it at launch in:
+    1. Server stdout logs (`[RTS-MK1][MAP_SEED] Simulation initialisée` & `Partie démarrée | lobbyId=... | seed=... | taille=160x160`).
+    2. Persistent SQLite table `match_seed_logs` (`recordMatchSeedLog`, `listRecentMatchSeedLogs`).
+    3. In-memory simulation audit buffer (`RtsSimulation.getSeedLogs()`).
+    4. `EVA CENTRAL` lobby chat log, `FullSnapshot.mapSeed`, and the tactical HUD radar header (`SEED #<mapSeed>`).
+
 ## [v1.9.0] — 2026-10-28
 
 ### Added & Changed

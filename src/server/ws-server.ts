@@ -165,6 +165,7 @@ export function createRtsRealtimeServer(customPort?: number) {
           faction: msg.faction,
           lobbyName: msg.lobbyName,
           withAiBot: msg.withAiBot,
+          mapSeed: msg.mapSeed,
         });
         session.lobbyId = lobby.lobbyId;
         if (msg.autoStart) {

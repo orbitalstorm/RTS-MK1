@@ -38,6 +38,7 @@ export interface RtsGameStoreState {
 
   // Simulation state (synchronized via FullSnapshot + 20Hz TickDeltas)
   tickId: number;
+  mapSeed: number;
   lastTickReceivedAt: number;
   tickDurationMs: number;
   terrainGrid: number[];
@@ -157,6 +158,7 @@ export const useRtsGameStore = create<RtsGameStoreState>((set, get) => ({
   currentLobbyId: null,
 
   tickId: 0,
+  mapSeed: 0,
   lastTickReceivedAt: 0,
   tickDurationMs: 50,
   terrainGrid: new Array<number>(MAP_WIDTH_TILES * MAP_HEIGHT_TILES).fill(0),
@@ -369,6 +371,7 @@ function applySnapshot(
   set({
     currentLobbyId: snap.lobbyId,
     tickId: snap.tickId,
+    mapSeed: snap.mapSeed,
     lastTickReceivedAt: performance.now(),
     tickDurationMs: 50,
     terrainGrid: [...snap.terrainGrid],
@@ -384,7 +387,7 @@ function applySnapshot(
     hudRevision: st.hudRevision + 1,
     ownedBuildingsKey,
     lastHudEconomySig,
-    evaBannerText: "SYNCHRONISATION SNAPSHOT COMPLÈTE",
+    evaBannerText: `SYNCHRONISATION SNAPSHOT COMPLÈTE — SEED CARTE #${snap.mapSeed} (${snap.mapWidth}×${snap.mapHeight})`,
   });
 }
 

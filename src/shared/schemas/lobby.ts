@@ -29,6 +29,7 @@ export const LobbySummarySchema = z.object({
   lobbyId: z.string().min(1),
   name: z.string().min(1),
   hostPlayerId: z.string().min(1),
+  mapSeed: z.number().int().positive().optional(),
   status: LobbyStatusSchema,
   queuePosition: z.number().int().nullable(), // 1-based rank when status === "QUEUED"
   players: z.array(LobbyPlayerSchema),

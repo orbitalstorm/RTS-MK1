@@ -9,6 +9,7 @@ import {
   vectorToAngleIndex16,
 } from "../src/engine/pathfinding/astar";
 import { RtsSimulation } from "../src/engine/simulation";
+import { listRecentMatchSeedLogs } from "../src/server/db";
 import { LobbyManager } from "../src/server/lobby-manager";
 import { TacticalCamera } from "../src/renderer/camera";
 import {
@@ -31,9 +32,12 @@ import {
   computeTerrainNeighborMask,
   CONSTRUCTION_GRID_COLUMNS,
   CONSTRUCTION_SUBCATEGORIES,
+  DEFAULT_MAP_SIZE_PRESET,
   degradeTerrainLayer,
   EDGE_SCROLL_MARGIN_PX,
   EDGE_SCROLL_MAX_SPEED_PX,
+  generateProceduralMap,
+  generateRandomMapSeed,
   getBalancedGridSlotCount,
   getConstructionCatalogItems,
   getSubcategoriesForCategory,
@@ -43,8 +47,11 @@ import {
   interpolateAngleIndex16,
   interpolateEntityPose,
   isFoundationTerrainKind,
+  MAP_GENERATION_RULES,
   MAP_HEIGHT_TILES,
+  MAP_SIZE_PRESETS,
   MAP_WIDTH_TILES,
+  normalizeMapSeed,
   requiresStoneOrConcreteFoundation,
   resolveTouchTapAction,
   SILVER_MINE_CYCLE_TICKS,
@@ -57,6 +64,7 @@ import {
   UNIT_LIST,
   UNITS,
   UNIT_SPAWN_PROTECTION_TICKS,
+  validateGeneratedMapAgainstRules,
   WATCHDOG_DISCONNECT_TIMEOUT_MS,
   ZOOM_LEVELS,
 } from "../src/shared/constants";
@@ -125,7 +133,8 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
     expect(p1State.queues.BUILDING.readyToPlace).toBe(true);
 
     // Deploy building between ticks and verify it appears in the very next TickDelta.created
-    const placed = sim.issuePlaceBuilding("p1", "BUILDING", "BARRACKS", 11, 5);
+    const p1Pad = sim.getPlayerSpawnPad("p1")!;
+    const placed = sim.issuePlaceBuilding("p1", "BUILDING", "BARRACKS", p1Pad.x + 6, p1Pad.y);
     expect(placed).toBe(true);
     const postPlaceDelta = sim.stepTick();
     expect(
@@ -134,8 +143,8 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
           e.ownerId === "p1" &&
           e.entityType === "BUILDING" &&
           e.kind === "BARRACKS" &&
-          e.x === 11 &&
-          e.y === 5
+          e.x === p1Pad.x + 6 &&
+          e.y === p1Pad.y
       )
     ).toBe(true);
   });
@@ -302,7 +311,7 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
   });
 
   it("v1.2.0 — supports Game Juice camera shake, shortest-arc 16-angle interpolation, and 2x Hi-DPI sprite scale", () => {
-    expect(APP_VERSION).toBe("1.9.0");
+    expect(APP_VERSION).toBe("1.10.0");
     expect(SPRITE_ATLAS_SCALE).toBe(2);
 
     // Zero trauma produces zero offset
@@ -557,7 +566,8 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
 
     // 4. Unit Spawn Protection Cooldown (1.0s = 20 ticks target-acquisition immunity)
     expect(UNIT_SPAWN_PROTECTION_TICKS).toBe(20);
-    const freshUnit = sim.createUnitEntity("p1", "GDI", "RIFLE_INFANTRY", 12, 8);
+    const p1Pad = sim.getPlayerSpawnPad("p1")!;
+    const freshUnit = sim.createUnitEntity("p1", "GDI", "RIFLE_INFANTRY", p1Pad.x + 7, p1Pad.y + 3);
     expect(freshUnit.spawnProtectionTicks).toBe(UNIT_SPAWN_PROTECTION_TICKS);
 
     const enemyTank = sim
@@ -587,11 +597,11 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
       sim.stepTick();
     }
     expect(sim.getPlayerState("p1")?.queues.BUILDING.readyToPlace).toBe(true);
-    expect(sim.issuePlaceBuilding("p1", "BUILDING", "CONCRETE_SLAB", 13, 5)).toBe(true);
+    expect(sim.issuePlaceBuilding("p1", "BUILDING", "CONCRETE_SLAB", p1Pad.x + 8, p1Pad.y)).toBe(true);
     for (let t = 0; t < 50; t++) {
       sim.stepTick();
     }
-    expect(sim.terrainGrid[5 * sim.width + 13]).toBe(TERRAIN_KIND.CONCRETE_SLAB);
+    expect(sim.terrainGrid[p1Pad.y * sim.width + (p1Pad.x + 8)]).toBe(TERRAIN_KIND.CONCRETE_SLAB);
 
     // 6. 2-Minute AI Attack Grace Period (2400 ticks = 120s)
     expect(AI_ATTACK_GRACE_PERIOD_TICKS).toBe(2400);
@@ -720,6 +730,7 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
     ).toBe(true);
     // Grass tile blasted by ground fire degrades to Dirt
     expect(sim.terrainGrid[targetGroundY * sim.width + targetGroundX]).toBe(TERRAIN_KIND.DIRT);
+    sim.getEntity(p1Tank.id)!.combat!.groundTarget = null;
 
     // 3. Building repair (COMMAND_REPAIR_BUILDING & stepBuildingRepairs)
     const p1Yard = sim
@@ -744,28 +755,30 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
     expect(BUILDINGS.CONCRETE_WALL.category).toBe("DEFENSE");
 
     // Continuous placement of CONCRETE_SLAB without having to re-queue each tile in the menu
-    expect(sim.issuePlaceBuilding("p1", "BUILDING", "CONCRETE_SLAB", 8, 13)).toBe(true);
-    expect(sim.issuePlaceBuilding("p1", "BUILDING", "CONCRETE_SLAB", 9, 13)).toBe(true);
-    expect(sim.issuePlaceBuilding("p1", "BUILDING", "CONCRETE_SLAB", 10, 13)).toBe(true);
+    const p1Pad = sim.getPlayerSpawnPad("p1")!;
+    const slabRowY = p1Pad.y + 8;
+    expect(sim.issuePlaceBuilding("p1", "BUILDING", "CONCRETE_SLAB", p1Pad.x + 3, slabRowY)).toBe(true);
+    expect(sim.issuePlaceBuilding("p1", "BUILDING", "CONCRETE_SLAB", p1Pad.x + 4, slabRowY)).toBe(true);
+    expect(sim.issuePlaceBuilding("p1", "BUILDING", "CONCRETE_SLAB", p1Pad.x + 5, slabRowY)).toBe(true);
     for (let t = 0; t < 110; t++) {
       sim.stepTick();
     }
-    expect(sim.terrainGrid[13 * sim.width + 8]).toBe(TERRAIN_KIND.CONCRETE_SLAB);
-    expect(sim.terrainGrid[13 * sim.width + 9]).toBe(TERRAIN_KIND.CONCRETE_SLAB);
-    expect(sim.terrainGrid[13 * sim.width + 10]).toBe(TERRAIN_KIND.CONCRETE_SLAB);
+    expect(sim.terrainGrid[slabRowY * sim.width + (p1Pad.x + 3)]).toBe(TERRAIN_KIND.CONCRETE_SLAB);
+    expect(sim.terrainGrid[slabRowY * sim.width + (p1Pad.x + 4)]).toBe(TERRAIN_KIND.CONCRETE_SLAB);
+    expect(sim.terrainGrid[slabRowY * sim.width + (p1Pad.x + 5)]).toBe(TERRAIN_KIND.CONCRETE_SLAB);
 
     // Continuous placement of SANDBAG_WALL & CONCRETE_WALL
-    expect(sim.issuePlaceBuilding("p1", "DEFENSE", "SANDBAG_WALL", 11, 6)).toBe(true);
-    expect(sim.issuePlaceBuilding("p1", "DEFENSE", "CONCRETE_WALL", 12, 6)).toBe(true);
+    expect(sim.issuePlaceBuilding("p1", "DEFENSE", "SANDBAG_WALL", p1Pad.x + 6, p1Pad.y + 1)).toBe(true);
+    expect(sim.issuePlaceBuilding("p1", "DEFENSE", "CONCRETE_WALL", p1Pad.x + 7, p1Pad.y + 1)).toBe(true);
     expect(
       sim
         .getAllEntities()
-        .some((e) => e.ownerId === "p1" && e.kind === "SANDBAG_WALL" && e.transform.x === 11)
+        .some((e) => e.ownerId === "p1" && e.kind === "SANDBAG_WALL" && e.transform.x === p1Pad.x + 6)
     ).toBe(true);
     expect(
       sim
         .getAllEntities()
-        .some((e) => e.ownerId === "p1" && e.kind === "CONCRETE_WALL" && e.transform.x === 12)
+        .some((e) => e.ownerId === "p1" && e.kind === "CONCRETE_WALL" && e.transform.x === p1Pad.x + 7)
     ).toBe(true);
 
     // Touch tap resolution for REPAIR_BUILDING and ATTACK_GROUND
@@ -804,20 +817,27 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
 
     // 1. Uninterrupted consecutive placement of CONCRETE_WALL, SANDBAG_WALL, and CONCRETE_SLAB across multiple ticks
     const initialCredits = sim.getPlayerState("p1")!.credits;
+    const p1Pad = sim.getPlayerSpawnPad("p1")!;
 
     // Place 4 CONCRETE_WALL segments in a row across ticks
     for (let dx = 0; dx < 4; dx++) {
-      expect(sim.issuePlaceBuilding("p1", "DEFENSE", "CONCRETE_WALL", 8 + dx, 11)).toBe(true);
+      expect(
+        sim.issuePlaceBuilding("p1", "DEFENSE", "CONCRETE_WALL", p1Pad.x + 3 + dx, p1Pad.y + 6)
+      ).toBe(true);
       sim.stepTick();
     }
     // Place 4 SANDBAG_WALL segments in a row across ticks
     for (let dx = 0; dx < 4; dx++) {
-      expect(sim.issuePlaceBuilding("p1", "DEFENSE", "SANDBAG_WALL", 8 + dx, 12)).toBe(true);
+      expect(
+        sim.issuePlaceBuilding("p1", "DEFENSE", "SANDBAG_WALL", p1Pad.x + 3 + dx, p1Pad.y + 7)
+      ).toBe(true);
       sim.stepTick();
     }
     // Place 4 CONCRETE_SLAB tiles in a row across ticks
     for (let dx = 0; dx < 4; dx++) {
-      expect(sim.issuePlaceBuilding("p1", "BUILDING", "CONCRETE_SLAB", 8 + dx, 13)).toBe(true);
+      expect(
+        sim.issuePlaceBuilding("p1", "BUILDING", "CONCRETE_SLAB", p1Pad.x + 3 + dx, p1Pad.y + 8)
+      ).toBe(true);
       sim.stepTick();
     }
 
@@ -833,7 +853,9 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
     }
 
     for (let dx = 0; dx < 4; dx++) {
-      expect(sim.terrainGrid[13 * sim.width + (8 + dx)]).toBe(TERRAIN_KIND.CONCRETE_SLAB);
+      expect(sim.terrainGrid[(p1Pad.y + 8) * sim.width + (p1Pad.x + 3 + dx)]).toBe(
+        TERRAIN_KIND.CONCRETE_SLAB
+      );
     }
 
     // 2. Progressive fade-out and disappearance of black ground impact stains (craters)
@@ -891,18 +913,23 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
     expect(getTimedConstructionTicks("SANDBAG_WALL")).toBeGreaterThan(0);
     expect(getTimedConstructionTicks("CONCRETE_WALL")).toBeGreaterThan(0);
 
-    // Place a Concrete Wall at (10, 8) and a Concrete Slab at (10, 9): they are NOT built instantaneously
-    const slabIdx = 9 * sim.width + 10;
+    // Place a Concrete Wall at (p1Pad.x + 5, p1Pad.y + 3) and a Concrete Slab at (p1Pad.x + 5, p1Pad.y + 4): they are NOT built instantaneously
+    const p1Pad = sim.getPlayerSpawnPad("p1")!;
+    const wallX = p1Pad.x + 5;
+    const wallY = p1Pad.y + 3;
+    const slabX = p1Pad.x + 5;
+    const slabY = p1Pad.y + 4;
+    const slabIdx = slabY * sim.width + slabX;
     sim.terrainGrid[slabIdx] = TERRAIN_KIND.DIRT;
-    expect(sim.issuePlaceBuilding("p1", "DEFENSE", "CONCRETE_WALL", 10, 8)).toBe(true);
-    expect(sim.issuePlaceBuilding("p1", "BUILDING", "CONCRETE_SLAB", 10, 9)).toBe(true);
+    expect(sim.issuePlaceBuilding("p1", "DEFENSE", "CONCRETE_WALL", wallX, wallY)).toBe(true);
+    expect(sim.issuePlaceBuilding("p1", "BUILDING", "CONCRETE_SLAB", slabX, slabY)).toBe(true);
 
     const wallSite = sim
       .getAllEntities()
-      .find((e) => e.ownerId === "p1" && e.kind === "CONCRETE_WALL" && e.transform.x === 10 && e.transform.y === 8)!;
+      .find((e) => e.ownerId === "p1" && e.kind === "CONCRETE_WALL" && e.transform.x === wallX && e.transform.y === wallY)!;
     const slabSite = sim
       .getAllEntities()
-      .find((e) => e.ownerId === "p1" && e.kind === "CONCRETE_SLAB" && e.transform.x === 10 && e.transform.y === 9)!;
+      .find((e) => e.ownerId === "p1" && e.kind === "CONCRETE_SLAB" && e.transform.x === slabX && e.transform.y === slabY)!;
     expect(wallSite).toBeDefined();
     expect(slabSite).toBeDefined();
     expect(wallSite.building!.buildProgress).toBeLessThan(1);
@@ -936,18 +963,20 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
     }
     expect(sim.getPlayerState("p1")?.queues.BUILDING.readyToPlace).toBe(true);
 
-    // Set footprint (11..12, 10..11) to GRASS / DIRT -> placement MUST be rejected
+    const ppX = p1Pad.x + 6;
+    const ppY = p1Pad.y + 5;
+    // Set footprint (ppX..ppX+1, ppY..ppY+1) to GRASS / DIRT -> placement MUST be rejected
     for (let dy = 0; dy < 2; dy++) {
       for (let dx = 0; dx < 2; dx++) {
-        sim.terrainGrid[(10 + dy) * sim.width + (11 + dx)] = dy === 0 ? TERRAIN_KIND.GRASS : TERRAIN_KIND.DIRT;
+        sim.terrainGrid[(ppY + dy) * sim.width + (ppX + dx)] = dy === 0 ? TERRAIN_KIND.GRASS : TERRAIN_KIND.DIRT;
       }
     }
-    expect(sim.issuePlaceBuilding("p1", "BUILDING", "POWER_PLANT", 11, 10)).toBe(false);
+    expect(sim.issuePlaceBuilding("p1", "BUILDING", "POWER_PLANT", ppX, ppY)).toBe(false);
 
-    // Pave (11..12, 10..11) with Concrete Slabs and let Constructor Bots complete them
+    // Pave (ppX..ppX+1, ppY..ppY+1) with Concrete Slabs and let Constructor Bots complete them
     for (let dy = 0; dy < 2; dy++) {
       for (let dx = 0; dx < 2; dx++) {
-        expect(sim.issuePlaceBuilding("p1", "BUILDING", "CONCRETE_SLAB", 11 + dx, 10 + dy)).toBe(true);
+        expect(sim.issuePlaceBuilding("p1", "BUILDING", "CONCRETE_SLAB", ppX + dx, ppY + dy)).toBe(true);
       }
     }
     for (let t = 0; t < 80; t++) {
@@ -955,17 +984,17 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
     }
     // Place the ready Power Plant on the newly paved Concrete Slab foundation -> MUST succeed
     expect(sim.getPlayerState("p1")?.queues.BUILDING.readyToPlace).toBe(true);
-    expect(sim.issuePlaceBuilding("p1", "BUILDING", "POWER_PLANT", 11, 10)).toBe(true);
+    expect(sim.issuePlaceBuilding("p1", "BUILDING", "POWER_PLANT", ppX, ppY)).toBe(true);
 
     // 4. Without a living Constructor Bot, Concrete Slabs and Walls cannot be placed
-    const p2Tank = sim.createUnitEntity("p2", "NOD", "MAMMOTH_TANK", 8, 7);
+    const p2Tank = sim.createUnitEntity("p2", "NOD", "MAMMOTH_TANK", p1Pad.x + 3, p1Pad.y + 2);
     p2Tank.spawnProtectionTicks = 0;
     for (const bot of sim
       .getAllEntities()
       .filter((e) => e.ownerId === "p1" && e.kind === "CONSTRUCTOR_BOT")) {
       bot.spawnProtectionTicks = 0;
-      bot.transform.x = 8;
-      bot.transform.y = 8;
+      bot.transform.x = p1Pad.x + 3;
+      bot.transform.y = p1Pad.y + 3;
       bot.health.hp = 1;
       if (p2Tank.combat) {
         p2Tank.combat.cooldownRemaining = 0;
@@ -977,8 +1006,8 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
     expect(
       sim.getAllEntities().filter((e) => e.ownerId === "p1" && e.kind === "CONSTRUCTOR_BOT").length
     ).toBe(0);
-    expect(sim.issuePlaceBuilding("p1", "DEFENSE", "CONCRETE_WALL", 10, 12)).toBe(false);
-    expect(sim.issuePlaceBuilding("p1", "BUILDING", "CONCRETE_SLAB", 10, 13)).toBe(false);
+    expect(sim.issuePlaceBuilding("p1", "DEFENSE", "CONCRETE_WALL", p1Pad.x + 5, p1Pad.y + 7)).toBe(false);
+    expect(sim.issuePlaceBuilding("p1", "BUILDING", "CONCRETE_SLAB", p1Pad.x + 5, p1Pad.y + 8)).toBe(false);
 
     // 5. Harvester glowing ore nugget trail spawns and disappears over time
     const vfx = new BattlefieldVfxManager();
@@ -995,26 +1024,29 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
       { playerId: "p2", commanderName: "Beta", faction: "NOD", isAi: false },
     ]);
 
-    // 1. Enlarged map dimensions (72x72 = 5,184 tiles)
-    expect(MAP_WIDTH_TILES).toBe(72);
-    expect(MAP_HEIGHT_TILES).toBe(72);
-    expect(sim.width).toBe(72);
-    expect(sim.height).toBe(72);
-    expect(sim.terrainGrid.length).toBe(72 * 72);
+    // 1. Enlarged map dimensions (160x160 = 25,600 tiles, 4.94x larger than 72x72)
+    expect(MAP_WIDTH_TILES).toBe(160);
+    expect(MAP_HEIGHT_TILES).toBe(160);
+    expect(sim.width).toBe(160);
+    expect(sim.height).toBe(160);
+    expect(sim.terrainGrid.length).toBe(160 * 160);
 
-    // 2. Ore patches are positioned further away from the base spawn (5, 5) to require early field expeditions
+    // 2. Ore patches are positioned further away from the base spawn to require early field expeditions
+    const p1Pad = sim.getPlayerSpawnPad("p1")!;
+    const p1CenterX = p1Pad.x + (SPAWN_CONCRETE_PAD_SIZE - 1) * 0.5;
+    const p1CenterY = p1Pad.y + (SPAWN_CONCRETE_PAD_SIZE - 1) * 0.5;
     let minOreDistFromSpawn = Infinity;
     for (let y = 0; y < sim.height; y++) {
       for (let x = 0; x < sim.width; x++) {
         if ((sim.oreGrid[y * sim.width + x] ?? 0) > 0) {
-          const dist = Math.hypot(x - 6, y - 6);
+          const dist = Math.hypot(x - p1CenterX, y - p1CenterY);
           if (dist < minOreDistFromSpawn) {
             minOreDistFromSpawn = dist;
           }
         }
       }
     }
-    expect(minOreDistFromSpawn).toBeGreaterThanOrEqual(11);
+    expect(minOreDistFromSpawn).toBeGreaterThanOrEqual(20);
 
     // 3. Timed ore unloading at the Refinery (UNLOADING state over multiple ticks instead of instant 1-tick dump)
     expect(HARVESTER_UNLOAD_PER_TICK).toBe(25);
@@ -1074,46 +1106,52 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
       { playerId: "p2", commanderName: "Beta", faction: "NOD", isAi: false },
     ]);
 
-    // 1. 8x8 Concrete Slab spawn pad at (5..12, 5..12) and Concrete-only foundation rule (Stone is rejected)
+    // 1. 8x8 Concrete Slab spawn pad and Concrete-only foundation rule (Stone is rejected)
+    const p1Pad = sim.getPlayerSpawnPad("p1")!;
     expect(SPAWN_CONCRETE_PAD_SIZE).toBe(8);
     for (let dy = 0; dy < SPAWN_CONCRETE_PAD_SIZE; dy++) {
       for (let dx = 0; dx < SPAWN_CONCRETE_PAD_SIZE; dx++) {
-        expect(sim.terrainGrid[(5 + dy) * sim.width + (5 + dx)]).toBe(TERRAIN_KIND.CONCRETE_SLAB);
+        expect(sim.terrainGrid[(p1Pad.y + dy) * sim.width + (p1Pad.x + dx)]).toBe(
+          TERRAIN_KIND.CONCRETE_SLAB
+        );
       }
     }
     expect(canPlaceBuildingOnTerrainTile("POWER_PLANT", TERRAIN_KIND.CONCRETE_SLAB)).toBe(true);
     expect(canPlaceBuildingOnTerrainTile("POWER_PLANT", TERRAIN_KIND.STONE)).toBe(false);
 
     // Verify placing a building on STONE (outside the 8x8 concrete pad) is rejected
-    sim.terrainGrid[5 * sim.width + 13] = TERRAIN_KIND.STONE;
-    sim.terrainGrid[5 * sim.width + 14] = TERRAIN_KIND.STONE;
-    sim.terrainGrid[6 * sim.width + 13] = TERRAIN_KIND.STONE;
-    sim.terrainGrid[6 * sim.width + 14] = TERRAIN_KIND.STONE;
-    expect(sim.issuePlaceBuilding("p1", "BUILDING", "POWER_PLANT", 13, 5)).toBe(false);
+    sim.terrainGrid[p1Pad.y * sim.width + (p1Pad.x + 8)] = TERRAIN_KIND.STONE;
+    sim.terrainGrid[p1Pad.y * sim.width + (p1Pad.x + 9)] = TERRAIN_KIND.STONE;
+    sim.terrainGrid[(p1Pad.y + 1) * sim.width + (p1Pad.x + 8)] = TERRAIN_KIND.STONE;
+    sim.terrainGrid[(p1Pad.y + 1) * sim.width + (p1Pad.x + 9)] = TERRAIN_KIND.STONE;
+    expect(sim.issuePlaceBuilding("p1", "BUILDING", "POWER_PLANT", p1Pad.x + 8, p1Pad.y)).toBe(false);
 
     // 2. Immediate blueprint placement on the 8x8 Concrete pad, simultaneous multi-bot construction, and cancel construction
     // Spawn a 2nd Constructor Bot so 2 bots can build 2 blueprints simultaneously
-    const bot2 = sim.createUnitEntity("p1", "GDI", "CONSTRUCTOR_BOT", 9, 9);
+    const bot2 = sim.createUnitEntity("p1", "GDI", "CONSTRUCTOR_BOT", p1Pad.x + 4, p1Pad.y + 4);
     bot2.spawnProtectionTicks = 0;
 
     const creditsBeforeBlueprints = sim.getPlayerState("p1")!.credits;
     // Place three blueprints immediately on the 8x8 Concrete Slab pad without pre-waiting in the HUD queue:
-    // Blueprint A: BARRACKS at (8, 11)
-    // Blueprint B: POWER_PLANT at (11, 7)
-    // Blueprint C: POWER_PLANT at (11, 10) (to test right-click cancellation)
-    expect(sim.issuePlaceBuilding("p1", "BUILDING", "BARRACKS", 8, 11)).toBe(true);
-    expect(sim.issuePlaceBuilding("p1", "BUILDING", "POWER_PLANT", 11, 7)).toBe(true);
-    expect(sim.issuePlaceBuilding("p1", "BUILDING", "POWER_PLANT", 11, 10)).toBe(true);
+    const bpAx = p1Pad.x + 3;
+    const bpAy = p1Pad.y + 6;
+    const bpBx = p1Pad.x + 6;
+    const bpBy = p1Pad.y + 2;
+    const bpCx = p1Pad.x + 6;
+    const bpCy = p1Pad.y + 5;
+    expect(sim.issuePlaceBuilding("p1", "BUILDING", "BARRACKS", bpAx, bpAy)).toBe(true);
+    expect(sim.issuePlaceBuilding("p1", "BUILDING", "POWER_PLANT", bpBx, bpBy)).toBe(true);
+    expect(sim.issuePlaceBuilding("p1", "BUILDING", "POWER_PLANT", bpCx, bpCy)).toBe(true);
 
     const barracksBp = sim
       .getAllEntities()
-      .find((e) => e.ownerId === "p1" && e.kind === "BARRACKS" && e.transform.x === 8 && e.transform.y === 11)!;
+      .find((e) => e.ownerId === "p1" && e.kind === "BARRACKS" && e.transform.x === bpAx && e.transform.y === bpAy)!;
     const powerBp = sim
       .getAllEntities()
-      .find((e) => e.ownerId === "p1" && e.kind === "POWER_PLANT" && e.transform.x === 11 && e.transform.y === 7)!;
+      .find((e) => e.ownerId === "p1" && e.kind === "POWER_PLANT" && e.transform.x === bpBx && e.transform.y === bpBy)!;
     const towerBp = sim
       .getAllEntities()
-      .find((e) => e.ownerId === "p1" && e.kind === "POWER_PLANT" && e.transform.x === 11 && e.transform.y === 10)!;
+      .find((e) => e.ownerId === "p1" && e.kind === "POWER_PLANT" && e.transform.x === bpCx && e.transform.y === bpCy)!;
 
     expect(barracksBp).toBeDefined();
     expect(powerBp).toBeDefined();
@@ -1149,26 +1187,28 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
     expect(BUILDINGS.SILVER_MINE).toBeDefined();
     expect(BUILDINGS.SILVER_MINE.footprintW).toBe(2);
     expect(BUILDINGS.SILVER_MINE.footprintH).toBe(2);
-    expect(sim.terrainGrid[7 * sim.width + 15]).toBe(TERRAIN_KIND.SILVER_ORE);
-    expect(sim.terrainGrid[7 * sim.width + 16]).toBe(TERRAIN_KIND.SILVER_ORE);
-    expect(sim.terrainGrid[8 * sim.width + 15]).toBe(TERRAIN_KIND.SILVER_ORE);
-    expect(sim.terrainGrid[8 * sim.width + 16]).toBe(TERRAIN_KIND.SILVER_ORE);
+    const sDep = sim.silverDeposits[0]!;
+    expect(sDep).toBeDefined();
+    expect(sim.terrainGrid[sDep.y * sim.width + sDep.x]).toBe(TERRAIN_KIND.SILVER_ORE);
+    expect(sim.terrainGrid[sDep.y * sim.width + (sDep.x + 1)]).toBe(TERRAIN_KIND.SILVER_ORE);
+    expect(sim.terrainGrid[(sDep.y + 1) * sim.width + sDep.x]).toBe(TERRAIN_KIND.SILVER_ORE);
+    expect(sim.terrainGrid[(sDep.y + 1) * sim.width + (sDep.x + 1)]).toBe(TERRAIN_KIND.SILVER_ORE);
 
-    // Partial overlap with the 2x2 Silver Ore rock (e.g. (14, 7)) MUST be rejected
-    expect(sim.issuePlaceBuilding("p1", "BUILDING", "SILVER_MINE", 14, 7)).toBe(false);
+    // Partial overlap with the 2x2 Silver Ore rock MUST be rejected
+    expect(sim.issuePlaceBuilding("p1", "BUILDING", "SILVER_MINE", sDep.x - 1, sDep.y)).toBe(false);
     // Placing SILVER_MINE on Concrete MUST be rejected
-    expect(sim.issuePlaceBuilding("p1", "BUILDING", "SILVER_MINE", 8, 8)).toBe(false);
-    // Exact 2x2 integral coverage on (15, 7) MUST succeed
-    expect(sim.issuePlaceBuilding("p1", "BUILDING", "SILVER_MINE", 15, 7)).toBe(true);
+    expect(sim.issuePlaceBuilding("p1", "BUILDING", "SILVER_MINE", p1Pad.x + 3, p1Pad.y + 3)).toBe(false);
+    // Exact 2x2 integral coverage on (sDep.x, sDep.y) MUST succeed
+    expect(sim.issuePlaceBuilding("p1", "BUILDING", "SILVER_MINE", sDep.x, sDep.y)).toBe(true);
 
     const silverMine = sim
       .getAllEntities()
-      .find((e) => e.ownerId === "p1" && e.kind === "SILVER_MINE" && e.transform.x === 15 && e.transform.y === 7)!;
+      .find((e) => e.ownerId === "p1" && e.kind === "SILVER_MINE" && e.transform.x === sDep.x && e.transform.y === sDep.y)!;
     expect(silverMine).toBeDefined();
     expect(silverMine.building!.buildProgress).toBeLessThan(1);
 
-    // Step until Constructor Bot completes the Silver Mine and it passively extracts Silver Ore
-    for (let t = 0; t < 130; t++) {
+    // Step until Constructor Bot travels to the regional Silver Mine deposit, completes it, and extracts Silver Ore
+    for (let t = 0; t < 340; t++) {
       sim.stepTick();
     }
     expect(sim.getEntity(silverMine.id)!.building!.buildProgress).toBe(1);
@@ -1279,9 +1319,10 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
       }
     }
 
-    // Place the selected blueprint onto the 8x8 Concrete Slab pad at (11, 5)
+    // Place the selected blueprint onto the 8x8 Concrete Slab pad
+    const p1Pad = sim.getPlayerSpawnPad("p1")!;
     useRtsGameStore.getState().setPlacementBuilding({ category: "BUILDING", kind: "POWER_PLANT" });
-    expect(sim.issuePlaceBuilding("p1", "BUILDING", "POWER_PLANT", 11, 5)).toBe(true);
+    expect(sim.issuePlaceBuilding("p1", "BUILDING", "POWER_PLANT", p1Pad.x + 6, p1Pad.y)).toBe(true);
     useRtsGameStore.getState().setPlacementBuilding(null);
     expect(useRtsGameStore.getState().placementBuilding).toBeNull();
   });
@@ -1360,5 +1401,129 @@ describe("RTS-MK1 v1.0.0 — Engineering & Architecture Verification", () => {
     expect(portalSource).not.toContain("Classement des Commandants");
     expect(portalSource).not.toContain("Journal des Opérations Récentes");
     expect(portalSource).not.toContain("Navigateur de Salons");
+  });
+
+  it("v1.10.0 — provides procedural map generation by seed, >=4x larger map presets (160x160 = 4.94x default), dedicated MAP_GENERATION_RULES validation (enemy bases, ore, silver mines, trees), and match seed logging", () => {
+    // 1. Verify map size presets (>= 4x legacy 72x72 = 5,184 tiles) & active 160x160 default (4.94x)
+    const legacyArea = 72 * 72;
+    expect(DEFAULT_MAP_SIZE_PRESET).toBe("TACTICAL_5X");
+    expect(MAP_WIDTH_TILES).toBe(160);
+    expect(MAP_HEIGHT_TILES).toBe(160);
+    expect((MAP_WIDTH_TILES * MAP_HEIGHT_TILES) / legacyArea).toBeGreaterThanOrEqual(4.0);
+
+    for (const preset of Object.values(MAP_SIZE_PRESETS)) {
+      expect(preset.totalTiles).toBe(preset.widthTiles * preset.heightTiles);
+      if (preset.id !== "LEGACY_1X") {
+        expect(preset.totalTiles).toBeGreaterThanOrEqual(legacyArea * 4);
+        expect(preset.areaMultiplierVsLegacy).toBeGreaterThanOrEqual(4.0);
+      }
+    }
+
+    // 2. Verify dedicated MAP_GENERATION_RULES section constraints
+    expect(MAP_GENERATION_RULES.spawnRules.minEnemyBaseDistanceTiles).toBeGreaterThanOrEqual(96);
+    expect(MAP_GENERATION_RULES.oreRules.minDistanceFromSpawnTiles).toBeGreaterThanOrEqual(20);
+    expect(MAP_GENERATION_RULES.oreRules.maxNaturalOreDistanceFromSpawnTiles).toBeGreaterThan(
+      MAP_GENERATION_RULES.oreRules.minDistanceFromSpawnTiles
+    );
+    expect(MAP_GENERATION_RULES.silverMineRules.minDistanceFromSpawnTiles).toBeGreaterThanOrEqual(28);
+    expect(MAP_GENERATION_RULES.silverMineRules.minDistanceBetweenSilverDepositsTiles).toBeGreaterThanOrEqual(24);
+    expect(MAP_GENERATION_RULES.terrainAndCoverRules.minTreeDistanceFromSpawnTiles).toBeGreaterThanOrEqual(15);
+
+    // 3. Deterministic seed reproducibility & seed diversity
+    const seedA = normalizeMapSeed(777_888_999);
+    const seedB = normalizeMapSeed(111_222_333);
+    expect(seedA).not.toBe(seedB);
+    expect(generateRandomMapSeed(123456789)).toBeGreaterThan(0);
+
+    const mapA1 = generateProceduralMap({ seed: seedA });
+    const mapA2 = generateProceduralMap({ seed: seedA });
+    const mapB = generateProceduralMap({ seed: seedB });
+
+    expect(mapA1.seed).toBe(seedA);
+    expect(mapA1.terrainGrid).toEqual(mapA2.terrainGrid);
+    expect(mapA1.oreGrid).toEqual(mapA2.oreGrid);
+    expect(mapA1.spawnPads).toEqual(mapA2.spawnPads);
+    expect(mapA1.orePatches).toEqual(mapA2.orePatches);
+    expect(mapA1.silverDeposits).toEqual(mapA2.silverDeposits);
+    expect(mapA1.trees).toEqual(mapA2.trees);
+
+    // Different seeds produce distinct procedural maps (different spawn pads, ore patch layouts, silver deposits, and terrain)
+    expect(mapA1.orePatches).not.toEqual(mapB.orePatches);
+    expect(mapA1.silverDeposits).not.toEqual(mapB.silverDeposits);
+
+    // 4. Validate 20 diverse seeds against all placement rules in MAP_GENERATION_RULES
+    for (let i = 1; i <= 20; i++) {
+      const testSeed = normalizeMapSeed(`orbital_sector_seed_${i * 1337}`);
+      const gen = generateProceduralMap({ seed: testSeed });
+      const report = validateGeneratedMapAgainstRules(gen, MAP_GENERATION_RULES);
+      expect(report.valid).toBe(true);
+      expect(report.violations).toEqual([]);
+      expect(report.minObservedEnemyBaseDistance).toBeGreaterThanOrEqual(
+        MAP_GENERATION_RULES.spawnRules.minEnemyBaseDistanceTiles
+      );
+      expect(report.minObservedOreDistanceFromSpawn).toBeGreaterThanOrEqual(
+        MAP_GENERATION_RULES.oreRules.minDistanceFromSpawnTiles
+      );
+      expect(report.maxObservedNaturalOreDistanceFromSpawn).toBeLessThanOrEqual(
+        MAP_GENERATION_RULES.oreRules.maxNaturalOreDistanceFromSpawnTiles
+      );
+      expect(report.minObservedSilverDistanceFromSpawn).toBeGreaterThanOrEqual(
+        MAP_GENERATION_RULES.silverMineRules.minDistanceFromSpawnTiles
+      );
+      expect(report.minObservedBetweenSilverDistance).toBeGreaterThanOrEqual(
+        MAP_GENERATION_RULES.silverMineRules.minDistanceBetweenSilverDepositsTiles
+      );
+      expect(report.treeCount).toBeGreaterThanOrEqual(24);
+    }
+
+    // 5. Verify every match records its mapSeed in simulation logs, SQLite match_seed_logs, EVA chat, and FullSnapshot
+    const lobbyMgr = new LobbyManager();
+    const customSeed = 908_172_635;
+    const lobby = lobbyMgr.createLobby({
+      playerId: "cmd_seed_tester",
+      commanderName: "Seed Commander",
+      faction: "ORDOS",
+      lobbyName: "Opération Seed Procédural",
+      withAiBot: true,
+      mapSeed: customSeed,
+      nowMs: 1_760_000_000_000,
+    });
+    expect(lobby.mapSeed).toBe(customSeed);
+
+    const startRes = lobbyMgr.requestStartMatch(
+      lobby.lobbyId,
+      "cmd_seed_tester",
+      1_760_000_000_100
+    );
+    expect(startRes.startedImmediately).toBe(true);
+
+    const snap = lobbyMgr.getActiveSnapshot(lobby.lobbyId);
+    expect(snap).not.toBeNull();
+    expect(snap!.mapSeed).toBe(customSeed);
+    expect(snap!.mapWidth).toBe(160);
+    expect(snap!.mapHeight).toBe(160);
+
+    // Check in-memory simulation seed log ring buffer
+    const simLogs = RtsSimulation.getSeedLogs();
+    expect(simLogs.some((entry) => entry.lobbyId === lobby.lobbyId && entry.mapSeed === customSeed)).toBe(
+      true
+    );
+
+    // Check persistent SQLite match_seed_logs table
+    const dbSeedLogs = listRecentMatchSeedLogs(10);
+    expect(
+      dbSeedLogs.some(
+        (entry) =>
+          entry.lobbyId === lobby.lobbyId &&
+          entry.mapSeed === customSeed &&
+          entry.mapWidth === 160 &&
+          entry.mapHeight === 160
+      )
+    ).toBe(true);
+
+    // Check EVA CENTRAL chat log entry
+    expect(
+      lobby.chat.some((c) => c.message.includes(`#${customSeed}`))
+    ).toBe(true);
   });
 });

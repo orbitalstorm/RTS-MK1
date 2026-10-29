@@ -75,6 +75,7 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
 }: ClassicSidebarHudProps) {
   const playerId = useRtsGameStore((s) => s.playerId);
   const faction = useRtsGameStore((s) => s.faction);
+  const mapSeed = useRtsGameStore((s) => s.mapSeed);
   const hudRevision = useRtsGameStore((s) => s.hudRevision);
   const ownedBuildingsKey = useRtsGameStore((s) => s.ownedBuildingsKey);
   const placementBuilding = useRtsGameStore((s) => s.placementBuilding);
@@ -486,9 +487,20 @@ export const ClassicSidebarHud = React.memo(function ClassicSidebarHud({
               <ChevronUp className="h-3.5 w-3.5" />
             )}
           </button>
-          <span className={lowPower ? "text-red-400 font-bold" : "text-emerald-400"}>
-            {lowPower ? "SURCHARGE" : "ACTIF"}
-          </span>
+          <div className="flex items-center gap-1.5">
+            {mapSeed > 0 && (
+              <span
+                data-testid="hud-map-seed"
+                className="rounded border border-slate-800 bg-slate-900 px-1.5 py-0.5 text-[9px] text-amber-300/90"
+                title={`Carte procédurale ${MAP_WIDTH_TILES}×${MAP_HEIGHT_TILES} | Seed #${mapSeed}`}
+              >
+                SEED #{mapSeed}
+              </span>
+            )}
+            <span className={lowPower ? "text-red-400 font-bold" : "text-emerald-400"}>
+              {lowPower ? "SURCHARGE" : `${MAP_WIDTH_TILES}×${MAP_HEIGHT_TILES}`}
+            </span>
+          </div>
         </div>
         <div
           className={
